@@ -5,13 +5,13 @@
 //
 //   node web/test/screenshots/run.mjs --ios [--sim "LostCity Test (iPhone 13 mini)"]   # the iOS Simulator
 //   node web/test/screenshots/run.mjs --android [--serial emulator-5554]               # the emulator (its data cleared)
-//   options: --no-build (reuse the last test build), --release (the iOS app's Release configuration, as
+//   options: --only pk (only the Edgeville PK shots), --no-build (reuse the last test build), --release (the iOS app's Release configuration, as
 //            scripts/release.sh builds it; the page needs no debug hooks)
 //
 // The run installs a Debug (or Release) build with the staged bundle (with the simulator's or the emulator's app data wiped first),
 // and afterwards builds the normal web bundle again (build/Game or android/build/web/Game; the staged one is marked as a
 // test build, so ios/scripts/deploy.sh and android/scripts/deploy.sh rebuild it anyway). Raw shots go to
-// build/tmp/screenshots/<ios|android>-<time>/ (world-*, panel-*, bots-*); pick, scale and compress them into docs/images.
+// build/tmp/screenshots/<ios|android>-<time>/ (world-*, panel-*, bots-*, pk-*); pick, scale and compress them into docs/images.
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,6 +29,7 @@ if (ANDROID === flag('--ios')) {
 }
 const BUILD = !flag('--no-build');
 const CONFIG = flag('--release') ? 'Release' : 'Debug';
+const ONLY = option('--only', null);
 const SIM_NAME = option('--sim', 'LostCity Test (iPhone 13 mini)');
 const SERIAL = option('--serial', process.env.ANDROID_SERIAL ?? 'emulator-5554');
 const ANDROID_HOME = process.env.ANDROID_HOME ?? path.join(process.env.HOME, 'Library', 'Android', 'sdk');
@@ -57,7 +58,8 @@ function buildWeb(staged) {
     if (!html.includes(tag)) {
         throw new Error(`${tag} not found in ${index}`);
     }
-    fs.writeFileSync(index, html.replace(tag, `${tag}\n    <script src="lcshots.js"></script>`));
+    const only = ONLY ? `<script>window.LCSHOTS_ONLY = ${JSON.stringify(ONLY)};</script>\n    ` : '';
+    fs.writeFileSync(index, html.replace(tag, `${tag}\n    ${only}<script src="lcshots.js"></script>`));
     // (a test build: the deploy scripts rebuild a bundle that says so rather than install it)
     const infoFile = path.join(GAME, 'build-info.json');
     fs.writeFileSync(infoFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(infoFile, 'utf8')), autotest: true }, null, 2));

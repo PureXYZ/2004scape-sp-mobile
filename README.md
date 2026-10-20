@@ -25,7 +25,7 @@ did in 2004. Their replies to you can be written by a small chat model that runs
 | | |
 |---|---|
 | ![A tab panel open](docs/images/panel.png) | ![A crowd of bots chatting](docs/images/bots.png) |
-| ![The Android app](docs/images/android.png) | |
+| ![The Android app](docs/images/android.png) | ![Bots PKing north of the Edgeville ditch](docs/images/pk.png) |
 
 - [Install on Android](#install-on-android)
 - [Install on iPhone](#install-on-iphone)
