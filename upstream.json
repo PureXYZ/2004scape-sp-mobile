@@ -1,0 +1,18 @@
+{
+    "revision": 274,
+    "engine": {
+        "repository": "https://github.com/LostCityRS/Engine-TS",
+        "branch": "274",
+        "commit": "1d25566cb53e7af1b1cb18ade8af996316c19614"
+    },
+    "content": {
+        "repository": "https://github.com/LostCityRS/Content",
+        "branch": "274",
+        "commit": "65b754f768b79b941b21b2a1eb3b0d1ecae3cdfe"
+    },
+    "webclient": {
+        "repository": "https://github.com/LostCityRS/Client-TS",
+        "branch": "274",
+        "commit": "7d6ca61abda277cfed87d542e9e4aa3fe383b38d"
+    }
+}

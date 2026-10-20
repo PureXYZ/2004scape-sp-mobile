@@ -1,0 +1,37 @@
+MIT License
+
+Copyright (c) 2026 2004SP Progressive contributors (attackishere, _mrsam, K-andy, Callum)
+Copyright (c) 2026 PureXYZ (the port to revision 274: its changes, marked `port:`, and its additions)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---------------------------------------------------------------------------------------------------------------------
+
+Where this licence comes from. The code in src/ and the phrase files data/chat_responses.json and
+data/bot_phrases.json are vendored from 2004SP Progressive (https://github.com/2004sp/2004sp-progressive, commit
+aeadbc43114d70805dd16a98bf327439732d535a; see UPSTREAM). Upstream has no LICENSE file. Its authors put the code under
+Lost City's licence, which is MIT (Copyright (c) 2023-2026 Lost City), in these two statements:
+
+  README.md (https://github.com/2004sp/2004sp-progressive):
+    "This project is fully open source and available under the same license as Lost City (see LICENSE file)."
+
+  Credits (https://www.2004sp.cc/content/credits.md):
+    "All code in this project is open source under the same licence as Lost City."
+
+test/ref/Inventory254.ts is Lost City Engine-TS's revision-254 Inventory.ts: MIT, Copyright (c) 2023-2026 Lost City.

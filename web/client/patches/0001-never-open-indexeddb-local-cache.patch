@@ -1,0 +1,40 @@
+ios: never open IndexedDB (local cache)
+
+The client cached jag archives and OnDemand files in IndexedDB. In the iOS app every file is
+already local (jag archives in the bundle, OnDemand files from the bundled main_file_cache via the
+LocalOnDemand override), and in WKWebView the IndexedDB path made startup ~10x slower (29.5 s vs
+2.85 s to "Preparing game engine"). db = null also skips the map/model prefetch passes.
+Low detail now unloads unused models after a map build even without a db, because LocalOnDemand
+can always re-read them (upstream only did so when a db could restore them).
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index a03be90..f736a55 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -833,12 +833,10 @@ export class Client extends GameShell {
+             this.errorHost = true;
+         }
+ 
+-        try {
+-            this.db = new Database(await Database.openDatabase());
+-        } catch (_e) {
+-            // possibly incognito mode
+-            this.db = null;
+-        }
++        // custom (ios): never open IndexedDB. Every file is already on the device (jag archives in the app bundle,
++        // OnDemand files from the bundled cache via the LocalOnDemand override), and in WKWebView the IndexedDB
++        // cache path made startup ~10x slower. Without a db the client also skips its map/model prefetching.
++        this.db = null;
+ 
+         try {
+             await this.getJagChecksums();
+@@ -5233,7 +5231,8 @@ export class Client extends GameShell {
+ 
+         LocType.mc1?.clear();
+ 
+-        if (Client.lowMem && this.db) {
++        // custom (ios): low detail unloads unused models even without a db: LocalOnDemand can always re-read them
++        if (Client.lowMem) {
+             const modelCount = this.onDemand?.getFileCount(0) ?? 0;
+ 
+             for (let i = 0; i < modelCount; i++) {

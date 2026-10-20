@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The instrumented tests' APK (:llm's androidTest): an activity for the key's box to show over, and cleartext to the
+     Messages API mock on the Mac (adb reverse tcp:47591 tcp:47591; never the real API). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:usesCleartextTraffic="true">
+        <activity
+            android:name="io.github.purexyz.scape2004.llm.TestActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+    </application>
+</manifest>

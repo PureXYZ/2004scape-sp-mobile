@@ -1,0 +1,136 @@
+ios: tap to drop deposits all in the bank
+
+With tap-to-drop on (patch 0019), a tap on an item in the bank's side inventory deposits all of it (the inventory's
+"Deposit All" op) instead of one ("Deposit 1", its first op). tapDropOption picks that entry of the same slot and
+component when the top entry is one of the side inventory's own ops; the inventories of other side modals (shop,
+trade: no "Deposit All" op) are unchanged, as are a long-press (the menu) and a drag. hudState() reports tapDeposit:
+the side modal holds such an inventory (looked up once per side modal), for the HUD's red frame.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 8f31463..0c476cc 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -156,6 +156,7 @@ export interface HudState {
+     cameraZoom: number; // see setCameraZoom
+     minimapZoom: number; // see setMinimapZoom
+     tapToDrop: boolean; // see setTapToDrop
++    tapDeposit: boolean; // the side modal is a bank: there tap-to-drop deposits all (see setTapToDrop)
+     longPressable: boolean; // a long-press at the pointer would open a menu: something besides "Cancel" is under it
+     chatContinue: boolean; // a dialogue waits for its "Click here to continue", its only button (see hudContinue)
+     tutorialKey: string; // the current Tutorial Island instruction (its texts joined), '' when none
+@@ -12146,6 +12147,8 @@ export class Client extends GameShell {
+     private cameraZoom: number = 1; // custom (ios): see setCameraZoom
+     private minimapZoom: number = 1; // custom (ios): see setMinimapZoom
+     private tapToDrop: boolean = false; // custom (ios): see setTapToDrop
++    private depositModalId: number = -1; // custom (ios): see sideModalDeposits
++    private depositModal: boolean = false;
+     private surfaceLayout: SurfaceLayout | null = null;
+     private reconnecting: boolean = false; // custom (ios): lostCon is logging in again
+ 
+@@ -12284,6 +12287,7 @@ export class Client extends GameShell {
+             cameraZoom: this.cameraZoom,
+             minimapZoom: this.minimapZoom,
+             tapToDrop: this.tapToDrop,
++            tapDeposit: this.sideModalDeposits(),
+             longPressable: !this.isMenuOpen && this.menuNumEntries >= 2, // custom (ios): see fireLongPress
+             chatContinue: this.chatContinueComId() !== -1,
+             tutorialKey: this.tutComId !== -1 ? this.interfaceText(IfType.list[this.tutComId]) : '',
+@@ -12515,7 +12519,8 @@ export class Client extends GameShell {
+     // custom (ios): host API. Tap-to-drop (the HUD's drop button, as on OSRS mobile): while on, a tap on an item in the
+     // inventory tab drops it (its fifth op: "Drop", or what the item calls it) instead of doing its first op. A
+     // long-press still opens the item's menu and a drag still moves it; a use or target mode ("Use Tinderbox with...",
+-    // a spell on an item) and the inventories of side modals (bank, shop, trade) are unchanged. Returns the mode now on.
++    // a spell on an item) and the inventories of the other side modals (shop, trade) are unchanged. In the bank, a tap on
++    // an item in the inventory beside it deposits all of it ("Deposit All") instead of one. Returns the mode now on.
+     public setTapToDrop(on: boolean): boolean {
+         this.tapToDrop = on === true;
+         return this.tapToDrop;
+@@ -12524,14 +12529,18 @@ export class Client extends GameShell {
+     // custom (ios): with tap-to-drop on, the menu entry that drops the item a tap in the side panel acts on (the top
+     // entry's slot: upstream does the top entry), else -1. Only when the top entry is one of the item's own ops in the
+     // tab panel, not a side modal's (bank, shop, trade: their items have other ops), so a use or target mode, whose
+-    // entries are "Use X with Y" or the spell, is unchanged.
++    // entries are "Use X with Y" or the spell, is unchanged. In a bank's inventory it is the slot's "Deposit All".
+     private tapDropOption(dragArea: number): number {
+-        if (!this.tapToDrop || dragArea !== 2 || this.sideModalId !== -1 || this.menuNumEntries < 2) {
++        if (!this.tapToDrop || dragArea !== 2 || this.menuNumEntries < 2) {
+             return -1;
+         }
+ 
+         const top: number = this.menuNumEntries - 1;
+         const action: number = this.menuAction[top];
++        if (this.sideModalId !== -1) {
++            return this.tapDepositOption(top);
++        }
++
+         if (
+             action !== MiniMenuAction.OP_HELD1 && action !== MiniMenuAction.OP_HELD2 && action !== MiniMenuAction.OP_HELD3 && action !== MiniMenuAction.OP_HELD4 && action !== MiniMenuAction.OP_HELD5 &&
+             action !== MiniMenuAction.USEHELD_START
+@@ -12548,6 +12557,67 @@ export class Client extends GameShell {
+         return -1;
+     }
+ 
++    // custom (ios): tapDropOption in a side modal: the "Deposit All" entry of the slot the top entry acts on, when that
++    // is one of the side inventory's own ops (a bank's "Deposit 1"), else -1
++    private tapDepositOption(top: number): number {
++        const action: number = this.menuAction[top];
++        if (
++            action !== MiniMenuAction.INV_BUTTON1 && action !== MiniMenuAction.INV_BUTTON2 && action !== MiniMenuAction.INV_BUTTON3 && action !== MiniMenuAction.INV_BUTTON4 && action !== MiniMenuAction.INV_BUTTON5
++        ) {
++            return -1;
++        }
++
++        const op: number = this.depositAllOp(IfType.list[this.menuParamC[top]]);
++        if (op === -1) {
++            return -1;
++        }
++
++        const deposit: number = [MiniMenuAction.INV_BUTTON1, MiniMenuAction.INV_BUTTON2, MiniMenuAction.INV_BUTTON3, MiniMenuAction.INV_BUTTON4, MiniMenuAction.INV_BUTTON5][op];
++        for (let i: number = top; i > 0; i--) {
++            if (this.menuAction[i] === deposit && this.menuParamB[i] === this.menuParamB[top] && this.menuParamC[i] === this.menuParamC[top]) {
++                return i;
++            }
++        }
++
++        return -1;
++    }
++
++    // custom (ios): the index of an inventory component's "Deposit All" op (a bank's inventory), else -1
++    private depositAllOp(com: IfType | undefined): number {
++        if (!com || com.type !== ComponentType.TYPE_INV || !com.iop) {
++            return -1;
++        }
++
++        for (let op: number = 0; op < 5; op++) {
++            if (com.iop[op]?.toLowerCase() === 'deposit all') {
++                return op;
++            }
++        }
++
++        return -1;
++    }
++
++    // custom (ios): the side modal holds an inventory with a "Deposit All" op (the bank), where tap-to-drop deposits
++    // all (hudState().tapDeposit); looked up once per side modal
++    private sideModalDeposits(): boolean {
++        if (this.sideModalId !== this.depositModalId) {
++            this.depositModalId = this.sideModalId;
++            this.depositModal = false;
++
++            const stack: number[] = this.sideModalId !== -1 ? [this.sideModalId] : [];
++            while (stack.length > 0 && !this.depositModal) {
++                const com: IfType | undefined = IfType.list[stack.pop()!];
++                if (this.depositAllOp(com) !== -1) {
++                    this.depositModal = true;
++                } else if (com?.children) {
++                    stack.push(...com.children);
++                }
++            }
++        }
++
++        return this.depositModal;
++    }
++
+     // custom (ios): the scale the minimap is drawn at (upstream macroMinimapZoom + 256, the anti-macro wobble; larger
+     // shows more), with the player's zoom.
+     private minimapScale(): number {

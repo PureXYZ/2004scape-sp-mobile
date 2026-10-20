@@ -1,0 +1,167 @@
+ios: drag-to-scroll lists and the chat history
+
+A drag that starts vertically on the content of a scrollable interface layer (side panel lists such
+as quests/friends/ignore, main modals such as the bank, chat modals) or on the chat history scrolls
+it, the content following the finger, instead of emulating a held left button (upstream only scrolled
+through the 16 px scrollbars, about 12 pt wide on an iPhone, and a drag on the chat text clicked at
+the release point). Horizontal-first drags keep the left-button emulation (moving items, dragging a
+scrollbar), as does a drag that starts on a layer's scrollbar column. Releasing never clicks.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index da914c1..9d18c1f 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -11678,6 +11678,11 @@ export class Client extends GameShell {
+     // custom (ios): taps wait for a frame drawn at the finger's position (see tapClick)
+     private touchDownDrawCycle: number = 0;
+     private pendingTap: { x: number; y: number; button: number } | null = null;
++    // custom (ios): drag-to-scroll (see beginTouchScroll): the scrolled layer or the chat history
++    private touchScroll: IfType | 'chat' | null = null;
++    private touchScrollY: number = 0;
++    private touchStartX: number = 0;
++    private touchStartY: number = 0;
+ 
+     override pointerDown(x: number, y: number, e: PointerEvent) {
+         if (MobileKeyboard.isWithinCanvasKeyboard(x, y) && !this.exceedsGrabThreshold(20)) {
+@@ -11711,6 +11716,10 @@ export class Client extends GameShell {
+ 
+             this.touchDownDrawCycle = Client.drawCycle;
+             this.pendingTap = null;
++
++            this.touchScroll = null;
++            this.touchStartX = x;
++            this.touchStartY = y;
+         }
+     }
+ 
+@@ -11749,6 +11758,9 @@ export class Client extends GameShell {
+                 if (this.isMenuOpen && this.menuOptionAt(x, y) !== -1) {
+                     this.touchClick(x, y, 1);
+                 }
++            } else if (this.touchScroll !== null) {
++                // custom (ios): end of a drag-to-scroll; no click
++                this.touchScroll = null;
+             } else if (this.dragging) {
+                 this.dragging = false;
+ 
+@@ -11909,6 +11921,92 @@ export class Client extends GameShell {
+         this.sendCamera = true; // EVENT_CAMERA_POSITION, rate-limited by sendCameraDelay
+     }
+ 
++    // custom (ios): drag-to-scroll. A drag that starts VERTICALLY on the content of a scrollable layer (side panel,
++    // main or chat modal, e.g. quest/friend lists or the bank) or on the chat history scrolls it, the content
++    // following the finger, instead of emulating a held left button. Horizontal-first drags keep the emulation
++    // (moving items, dragging scrollbars), and so does a drag on a layer's scrollbar column.
++    private beginTouchScroll(y: number): boolean {
++        if (!this.ingame || Math.abs(this.ny - this.sy) <= Math.abs(this.nx - this.sx)) {
++            return false;
++        }
++
++        const x0: number = this.touchStartX;
++        const y0: number = this.touchStartY;
++        let target: IfType | 'chat' | null = null;
++
++        if (x0 > 4 && y0 > 4 && x0 < 516 && y0 < 338) {
++            if (this.mainModalId !== -1) {
++                target = this.scrollLayerAt(IfType.list[this.mainModalId], x0, y0, 4, 4, 0);
++            }
++        } else if (x0 > 553 && y0 > 205 && x0 < 743 && y0 < 466) {
++            const id: number = this.sideModalId !== -1 ? this.sideModalId : this.sideIcon[this.activeIcon];
++            if (id !== -1) {
++                target = this.scrollLayerAt(IfType.list[id], x0, y0, 553, 205, 0);
++            }
++        } else if (x0 > 17 && y0 > 357 && x0 < 496 && y0 < 453) {
++            if (this.chatModalId !== -1) {
++                target = this.scrollLayerAt(IfType.list[this.chatModalId], x0, y0, 17, 357, 0);
++            } else if (!this.dialogInputOpen && !this.socialInputOpen && x0 < 480 && y0 < 434) {
++                target = 'chat'; // the history above the input line, left of its scrollbar
++            }
++        }
++
++        if (target === null) {
++            return false;
++        }
++
++        this.touchScroll = target;
++        this.touchScrollY = y;
++        this.cancelLongPress();
++        return true;
++    }
++
++    // custom (ios): the innermost scrollable layer whose content area (not its scrollbar) contains (px, py),
++    // walking the tree like addComponentOptions()
++    private scrollLayerAt(com: IfType | undefined, px: number, py: number, x: number, y: number, scrollPosition: number): IfType | null {
++        if (!com || com.type !== 0 || !com.children || com.hide || px < x || py < y || px > x + com.width || py > y + com.height || !com.childX || !com.childY) {
++            return null;
++        }
++
++        let found: IfType | null = null;
++        for (let i: number = 0; i < com.children.length; i++) {
++            const child: IfType = IfType.list[com.children[i]];
++            if (child.type !== 0 || child.hide) {
++                continue;
++            }
++
++            const childX: number = com.childX[i] + x + child.x;
++            const childY: number = com.childY[i] + y - scrollPosition + child.y;
++            const inner: IfType | null = this.scrollLayerAt(child, px, py, childX, childY, child.scrollPos);
++            if (inner) {
++                found = inner;
++            } else if (child.scrollHeight > child.height && px >= childX && py >= childY && px < childX + child.width && py < childY + child.height) {
++                found = child;
++            }
++        }
++
++        return found;
++    }
++
++    private scrollByTouch(y: number): void {
++        const dy: number = y - this.touchScrollY;
++        this.touchScrollY = y;
++        if (dy === 0) {
++            return;
++        }
++
++        if (this.touchScroll === 'chat') {
++            // chatScrollPos counts up from the newest line, so dragging down reveals older lines
++            this.chatScrollPos = Math.max(0, Math.min(this.chatScrollHeight - 77, this.chatScrollPos + dy));
++            this.redrawChat = true;
++        } else if (this.touchScroll) {
++            const com: IfType = this.touchScroll;
++            com.scrollPos = Math.max(0, Math.min(com.scrollHeight - com.height, com.scrollPos - dy));
++            this.redrawSide = true;
++            this.redrawChat = true;
++        }
++    }
++
+     override pointerEnter(x: number, y: number, e: PointerEvent) {
+         if (e.pointerType === 'mouse') {
+             this.mouseX = x;
+@@ -11961,6 +12059,7 @@ export class Client extends GameShell {
+         this.cancelLongPress();
+         this.longPressFired = false;
+         this.pendingTap = null;
++        this.touchScroll = null;
+         this.dragging = false;
+         this.panning = false;
+ 
+@@ -12002,7 +12101,9 @@ export class Client extends GameShell {
+                 this.cancelLongPress();
+             }
+ 
+-            if (this.dragging) {
++            if (this.touchScroll !== null) {
++                this.scrollByTouch(y);
++            } else if (this.dragging) {
+                 // no-op
+             } else if (MobileKeyboard.isWithinCanvasKeyboard(x, y) && this.exceedsGrabThreshold(20)) {
+                 MobileKeyboard.notifyTouchMove(x, y);
+@@ -12012,6 +12113,8 @@ export class Client extends GameShell {
+                 // arrow keys like a joystick, so the camera kept turning while the finger rested)
+                 this.panning = true;
+                 this.dragCamera(this.nx - this.mx, this.ny - this.my);
++            } else if (!this.panning && this.exceedsGrabThreshold(TOUCH_SLOP) && this.beginTouchScroll(y)) {
++                // custom (ios): drag-to-scroll started (vertical drag on a scrollable list or the chat history)
+             } else if (!this.panning && (this.startedInSide || this.startedInChat || this.isGameObscured())) {
+                 // custom (ios): TOUCH_SLOP instead of 5 px, so a slightly wobbly long-press is not taken for a drag
+                 if (!this.dragging && this.exceedsGrabThreshold(TOUCH_SLOP)) {

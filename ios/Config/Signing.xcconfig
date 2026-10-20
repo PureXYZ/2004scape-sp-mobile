@@ -1,0 +1,23 @@
+// The LostCity target's base configuration (Debug and Release; the target's own build settings come on top): the
+// bundle id, the signing team and the version.
+//
+// - Bundle id: io.github.purexyz.scape2004, plus BUNDLE_ID_SUFFIX when a builder sets one in Local.xcconfig (an Apple
+//   ID's team can register only an id no other team has: see Local.xcconfig.example).
+// - Team: none here. A simulator build and an unsigned build (CODE_SIGNING_ALLOWED=NO) need none; a device build takes
+//   DEVELOPMENT_TEAM from Local.xcconfig, or TEAM=<team id> ios/scripts/deploy.sh.
+// - Version: MARKETING_VERSION and CURRENT_PROJECT_VERSION from the repo's VERSION file, through build/Version.xcconfig,
+//   which scripts/build-web.mjs writes (every build runs it first); 0.0.0 before the first web build.
+// - Release strips the app binary (a plain `xcodebuild build` does no deployment postprocessing, so it kept the debug
+//   map with the builder's source and DerivedData paths); the dSYM is still written beside the app. Debug is unchanged.
+
+BUNDLE_ID_SUFFIX =
+PRODUCT_BUNDLE_IDENTIFIER = io.github.purexyz.scape2004$(BUNDLE_ID_SUFFIX)
+DEVELOPMENT_TEAM =
+MARKETING_VERSION = 0.0.0
+CURRENT_PROJECT_VERSION = 0
+DEPLOYMENT_POSTPROCESSING[config=Release] = YES
+STRIP_INSTALLED_PRODUCT[config=Release] = YES
+
+#include? "../../build/Version.xcconfig"
+// a builder's own settings, git-ignored (Local.xcconfig.example)
+#include? "Local.xcconfig"

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  View ids the tests find native views by (adb shell uiautomator dump: resource-id io.github.purexyz.scape2004:id/…): the cover and its button. The keyboard track adds kbd_bar, kbd_text, kbd_submit, …
+-->
+<resources>
+    <item name="cover" type="id" />
+    <item name="cover_retry" type="id" />
+    <!-- the keyboard (KeyboardBridgeView, KeyboardAccessoryBar) -->
+    <item name="kbd_input" type="id" />
+    <item name="kbd_bar" type="id" />
+    <item name="kbd_prompt" type="id" />
+    <item name="kbd_field" type="id" />
+    <item name="kbd_text" type="id" />
+    <item name="kbd_chips" type="id" />
+    <item name="kbd_cancel" type="id" />
+    <item name="kbd_submit" type="id" />
+    <item name="kbd_hide" type="id" />
+</resources>

@@ -1,0 +1,14 @@
+# Generated: the web bundle, llama.cpp's framework, the model folder, Xcode's DerivedData, test output (build/), and
+# the pinned upstream sources (upstream/, scripts/fetch-upstream.mjs)
+build/
+/upstream/
+DerivedData/
+node_modules/
+.cache/
+.DS_Store
+xcuserdata/
+*.xcuserstate
+# a builder's own signing settings (ios/Config/Local.xcconfig.example says what goes in it)
+ios/Config/Local.xcconfig
+# Release output (scripts/release.sh): the APKs, IPAs, the model, checksums and notes
+dist/

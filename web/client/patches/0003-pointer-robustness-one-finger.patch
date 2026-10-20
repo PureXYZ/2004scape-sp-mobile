@@ -1,0 +1,201 @@
+ios: pointer robustness (one finger, pointercancel, canvas focus)
+
+- Only one touch/pen pointer drives the canvas at a time: a second finger can no longer produce
+  extra clicks, drags or camera moves (its events are ignored until it lifts). The filter tracks
+  pointer ids instead of relying on e.isPrimary alone, because a finger resting on a host overlay
+  button would make every later canvas touch non-primary; a primary pointerdown resets the tracking
+  (self-heals after a lost pointerup).
+- pointercancel (iOS takes the gesture over: Control Center, system gestures, ...) now releases
+  everything: no click, drag emulation ended (an item drag is aborted, not dropped), camera pan
+  ended, arrow keys released. Upstream had no pointercancel handler at all.
+- pointerdown focuses the canvas (preventScroll) unless a text field has focus, so a hardware
+  keyboard types into the game after a tap.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index f736a55..3c53267 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -11779,6 +11779,28 @@ export class Client extends GameShell {
+         }
+     }
+ 
++    override pointerCancel(e: PointerEvent) {
++        // custom (ios): a cancelled touch never clicks and leaves nothing held: end the drag emulation (an item
++        // drag is aborted rather than dropped where the finger happened to be) and the camera pan
++        super.pointerCancel(e);
++        this.idleTimer = performance.now();
++
++        this.dragging = false;
++        this.panning = false;
++
++        if (this.objDragArea !== 0) {
++            this.objDragArea = 0;
++            this.redrawSide = true;
++            this.redrawChat = true;
++        }
++
++        // release all arrow keys
++        this.keyHeld[1] = 0;
++        this.keyHeld[2] = 0;
++        this.keyHeld[3] = 0;
++        this.keyHeld[4] = 0;
++    }
++
+     override pointerMove(x: number, y: number, e: PointerEvent) {
+         if (e.pointerType === 'mouse') {
+             this.idleTimer = performance.now();
+diff --git a/src/client/GameShell.ts b/src/client/GameShell.ts
+index cb56cce..880f18c 100644
+--- a/src/client/GameShell.ts
++++ b/src/client/GameShell.ts
+@@ -101,6 +101,7 @@ export default abstract class GameShell {
+         canvas.onpointerenter = this.onpointerenter.bind(this);
+         canvas.onpointerleave = this.onpointerleave.bind(this);
+         canvas.onpointermove = this.onpointermove.bind(this);
++        canvas.onpointercancel = this.onpointercancel.bind(this); // custom (ios)
+         window.onmouseup = this.windowMouseUp.bind(this);
+         window.onmousemove = this.windowMouseMove.bind(this);
+ 
+@@ -244,6 +245,7 @@ export default abstract class GameShell {
+         canvas.onpointerenter = null;
+         canvas.onpointerleave = null;
+         canvas.onpointermove = null;
++        canvas.onpointercancel = null;
+         canvas.removeEventListener('touchend', this.touchEndHandler);
+         canvas.oncontextmenu = null;
+         window.onmouseup = null;
+@@ -334,10 +336,15 @@ export default abstract class GameShell {
+     }
+ 
+     private onpointerdown(e: PointerEvent) {
++        if (!this.acceptPointer(e, 'down')) {
++            return;
++        }
++
+         if (e.clientX < 0 || e.clientY < 0) {
+             return;
+         }
+ 
++        this.focusCanvas();
+         this.getMousePos(e);
+ 
+         this.pointerDown(this.absMouseX, this.absMouseY, e);
+@@ -362,6 +369,10 @@ export default abstract class GameShell {
+     }
+ 
+     private onpointerup(e: PointerEvent) {
++        if (!this.acceptPointer(e, 'up')) {
++            return;
++        }
++
+         this.getMousePos(e);
+ 
+         this.pointerUp(this.absMouseX, this.absMouseY, e);
+@@ -371,6 +382,10 @@ export default abstract class GameShell {
+     }
+ 
+     private onpointerenter(e: PointerEvent) {
++        if (!this.acceptPointer(e, 'other')) {
++            return;
++        }
++
+         if (e.clientX < 0 || e.clientY < 0) {
+             return;
+         }
+@@ -386,6 +401,10 @@ export default abstract class GameShell {
+     }
+ 
+     private onpointerleave(e: PointerEvent) {
++        if (!this.acceptPointer(e, 'other')) {
++            return;
++        }
++
+         this.pointerLeave(e);
+     }
+ 
+@@ -402,6 +421,10 @@ export default abstract class GameShell {
+     }
+ 
+     private onpointermove(e: PointerEvent) {
++        if (!this.acceptPointer(e, 'other')) {
++            return;
++        }
++
+         if (e.clientX < 0 || e.clientY < 0) {
+             return;
+         }
+@@ -417,6 +440,74 @@ export default abstract class GameShell {
+         this.mouseY = y;
+     }
+ 
++    private onpointercancel(e: PointerEvent) {
++        if (!this.acceptPointer(e, 'up')) {
++            return;
++        }
++
++        this.pointerCancel(e);
++    }
++
++    // custom (ios): the system took the gesture over (Control Center, a native gesture, a pinch...). Release
++    // whatever the gesture holds and never turn it into a click.
++    protected pointerCancel(_e: PointerEvent) {
++        this.nextMouseClickX = -1;
++        this.nextMouseClickY = -1;
++        this.nextMouseClickButton = 0;
++        this.mouseButton = 0;
++    }
++
++    /// custom (ios): one finger drives the canvas at a time, so multi-touch cannot produce extra clicks, drags or
++    /// camera moves; other touch/pen pointers are ignored until they lift. `e.isPrimary` alone is not enough: a
++    /// finger resting on a host overlay button (outside the canvas) makes every later canvas touch non-primary.
++    private canvasPointerId: number = -1;
++    private readonly ignoredCanvasPointers: Set<number> = new Set();
++
++    private acceptPointer(e: PointerEvent, phase: 'down' | 'up' | 'other'): boolean {
++        if (e.pointerType === 'mouse') {
++            return true;
++        }
++
++        const id: number = e.pointerId;
++        if (this.ignoredCanvasPointers.has(id)) {
++            if (phase === 'up') {
++                this.ignoredCanvasPointers.delete(id);
++            }
++            return false;
++        }
++
++        if (phase === 'down') {
++            if (e.isPrimary) {
++                // no other touch is down anywhere, so anything still tracked is stale (a lost pointerup)
++                this.ignoredCanvasPointers.clear();
++            } else if (this.canvasPointerId !== -1 && this.canvasPointerId !== id) {
++                this.ignoredCanvasPointers.add(id);
++                return false;
++            }
++
++            this.canvasPointerId = id;
++            return true;
++        }
++
++        if (this.canvasPointerId !== -1 && this.canvasPointerId !== id) {
++            return false;
++        }
++
++        if (phase === 'up') {
++            this.canvasPointerId = -1;
++        }
++        return true;
++    }
++
++    // custom (ios): give the canvas keyboard focus on touch as well, so a hardware keyboard types into the game,
++    // but never take focus away from a text field (the desktop keyboard fallback input).
++    private focusCanvas(): void {
++        const active: Element | null = document.activeElement;
++        if (active !== canvas && !(active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
++            canvas.focus({ preventScroll: true });
++        }
++    }
++
+     protected windowMouseUp(e: MouseEvent) {
+     }
+ 

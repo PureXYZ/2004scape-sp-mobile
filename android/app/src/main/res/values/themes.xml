@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Black, no title, full screen (the iOS app's black window and LaunchBackground): nothing
+      white shows before the page draws, the game draws under the display cutout, and the system bars, when a swipe
+      brings them back, are transparent over the game. values-v31 adds the plain black launch screen (API 31+).
+    -->
+    <style name="Base.Theme.LostCity" parent="android:Theme.DeviceDefault.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:colorBackground">@android:color/black</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+
+    <style name="Theme.LostCity" parent="Base.Theme.LostCity" />
+</resources>

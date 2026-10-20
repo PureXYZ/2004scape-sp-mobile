@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app's manifest (docs/ANDROID.md §1; ports the iOS Info.plist and project settings).
+  The permissions: VIBRATE (haptics) here, INTERNET (Claude online) from :llm's manifest.
+
+  - LostCityApp: the log, the launch line and the save store first (AppDelegate).
+  - label 2004Scape, as the iOS CFBundleDisplayName.
+  - hasFragileUserData: an uninstall from Settings offers to keep the saves (docs/ANDROID.md §1 Saves on disk).
+  - allowBackup with the rules in res/xml: Auto Backup and device transfer keep the saves and the settings, nothing
+    else (iOS backs up Documents and UserDefaults).
+  - networkSecurityConfig: no cleartext anywhere (the page never touches the network; its router answers 403).
+  - appCategory game: also keeps Android 16+ from ignoring the landscape lock on large screens.
+  - singleTask: one game at a time (iOS UIApplicationSupportsMultipleScenes = NO); two would run two engines on the
+    same saves.
+  - configChanges: every change the activity handles itself, so a rotation, keyboard, theme, font or locale change never
+    recreates it and reloads the WebView, which would restart the world (the newer kinds included).
+  - adjustNothing: the WebView is never resized by the keyboard; the page lifts its own UI (LostCityHost.keyboard.frame).
+  - WebView meta-data: no Safe Browsing lookups (offline), no metrics.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Haptics.kt: the page's and native's haptics (a normal permission, granted at install). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application
+        android:name=".LostCityApp"
+        android:allowBackup="true"
+        android:appCategory="game"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:hasFragileUserData="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:resizeableActivity="false"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="false"
+        android:theme="@style/Theme.LostCity">
+
+        <meta-data
+            android:name="android.webkit.WebView.EnableSafeBrowsing"
+            android:value="false" />
+        <meta-data
+            android:name="android.webkit.WebView.MetricsOptOut"
+            android:value="true" />
+
+        <activity
+            android:name=".GameActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|touchscreen|uiMode|density|fontScale|fontWeightAdjustment|layoutDirection|locale|mcc|mnc|colorMode|grammaticalGender"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="sensorLandscape"
+            android:supportsPictureInPicture="false"
+            android:windowSoftInputMode="adjustNothing|stateAlwaysHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- The saves in the system Files app as "2004Scape" (SavesDocumentsProvider; only the system's documents UI,
+             which holds MANAGE_DOCUMENTS, may bind it). -->
+        <provider
+            android:name=".SavesDocumentsProvider"
+            android:authorities="io.github.purexyz.scape2004.documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+    </application>
+</manifest>

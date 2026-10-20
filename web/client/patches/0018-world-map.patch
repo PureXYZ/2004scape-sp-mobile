@@ -1,0 +1,914 @@
+ios: world map
+
+For the mobile HUD's World map window. The 2004 map applet (MapView, upstream's port of Jagex's website map) runs in
+an iframe of its own (web/host/mapview.html) as MobileMapView, a subclass with a phone's controls in place of the
+applet's buttons and keys: drag to pan (it glides on), pinch to zoom, double-tap to zoom in, a two-finger tap to zoom
+out. Zooming settles on the applet's four zooms, the only ones its labels are drawn at. It marks the player, draws the
+applet's overview on request, flashes a key's icons (gliding to the nearest when none is in view) and shows the map
+the player is on (the surface, the underground or the other places: MapView's three maps). The host drives it with
+postMessage (see MobileMapView.ts).
+
+MapView's grids are columns of typed arrays: as nested plain arrays its 1600x1408 tiles took ~96 MB of JS heap.
+
+hudPlayerTile() gives the world tile the local player stands on.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index d956d85..ff7d8a7 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -12177,6 +12177,15 @@ export class Client extends GameShell {
+         };
+     }
+ 
++    // custom (ios): the world tile the local player stands on (for the HUD's world map), null when not in game
++    public hudPlayerTile(): { x: number; z: number } | null {
++        if (!this.ingame || !this.localPlayer) {
++            return null;
++        }
++
++        return { x: (this.localPlayer.x >> 7) + this.mapBuildBaseX, z: (this.localPlayer.z >> 7) + this.mapBuildBaseZ };
++    }
++
+     // custom (ios): the texts of an interface's text components in tree order, joined (identifies what it shows)
+     private interfaceText(com: IfType | undefined): string {
+         if (!com) {
+diff --git a/src/mapview/MapView.ts b/src/mapview/MapView.ts
+index 3901dc5..ca14305 100644
+--- a/src/mapview/MapView.ts
++++ b/src/mapview/MapView.ts
+@@ -5,12 +5,27 @@ import Pix8 from '#/graphics/Pix8.js';
+ import PixFont from '#/graphics/PixFont.js';
+ import JagFile from '#/io/JagFile.js';
+ import Packet from '#/io/Packet.js';
+-import { TypedArray1d, TypedArray2d } from '#/util/Arrays.js';
++import { TypedArray1d } from '#/util/Arrays.js'; // custom (ios): no TypedArray2d
+ import { downloadUrl, sleep } from '#/util/JsUtil.js';
+ import { canvas, saveDataURL } from '#/graphics/Canvas.js';
+ import PixMap from '#/graphics/PixMap.js';
+ import WorldMapFont from '#/mapview/WorldMapFont.js';
+ 
++// custom (ios): the map's grids as columns of typed arrays (nested plain arrays took ~96 MB of JS heap for the
++// 1600x1408 tiles, 8 bytes a tile each: too much beside the game in an iPhone's web view). Same [x][z] indexing; a flag
++// grid holds 1 for true.
++function bytes(width: number, height: number): number[][] {
++    return Array.from({ length: width }, (): number[] => new Uint8Array(height) as unknown as number[]);
++}
++
++function ints(width: number, height: number): number[][] {
++    return Array.from({ length: width }, (): number[] => new Int32Array(height) as unknown as number[]);
++}
++
++function flags(width: number, height: number): boolean[][] {
++    return Array.from({ length: width }, (): boolean[] => new Uint8Array(height) as unknown as boolean[]);
++}
++
+ export class MapView extends GameShell {
+     static shouldDrawBorders: boolean = false;
+     static shouldDrawLabels: boolean = true;
+@@ -223,39 +238,39 @@ export class MapView extends GameShell {
+         }
+ 
+         const underlay: Packet = new Packet(worldmap.read('underlay.dat'));
+-        this.floort1 = new TypedArray2d(this.mapWidth, this.mapHeight, 0);
++        this.floort1 = bytes(this.mapWidth, this.mapHeight); // custom (ios)
+         this.loadUnderlay(underlay);
+ 
+         const overlay: Packet = new Packet(worldmap.read('overlay.dat'));
+-        this.floort2 = new TypedArray2d(this.mapWidth, this.mapHeight, 0);
+-        this.floorsr = new TypedArray2d(this.mapWidth, this.mapHeight, 0);
++        this.floort2 = ints(this.mapWidth, this.mapHeight); // custom (ios)
++        this.floorsr = bytes(this.mapWidth, this.mapHeight); // custom (ios)
+         this.loadOverlay(overlay);
+ 
+         const loc: Packet = new Packet(worldmap.read('loc.dat'));
+-        this.locWall = new TypedArray2d(this.mapWidth, this.mapHeight, 0);
+-        this.locMapscene = new TypedArray2d(this.mapWidth, this.mapHeight, 0);
+-        this.locMapfunction = new TypedArray2d(this.mapWidth, this.mapHeight, 0);
++        this.locWall = bytes(this.mapWidth, this.mapHeight); // custom (ios)
++        this.locMapscene = bytes(this.mapWidth, this.mapHeight); // custom (ios)
++        this.locMapfunction = bytes(this.mapWidth, this.mapHeight); // custom (ios)
+         this.loadLoc(loc);
+ 
+         try {
+             // custom:
+             const obj: Packet = new Packet(worldmap.read('obj.dat'));
+-            this.objPos = new TypedArray2d(this.mapWidth, this.mapHeight, false);
++            this.objPos = flags(this.mapWidth, this.mapHeight); // custom (ios)
+             this.loadObj(obj);
+ 
+             // custom:
+             const npc: Packet = new Packet(worldmap.read('npc.dat'));
+-            this.npcPos = new TypedArray2d(this.mapWidth, this.mapHeight, false);
++            this.npcPos = flags(this.mapWidth, this.mapHeight); // custom (ios)
+             this.loadNpc(npc);
+ 
+             // custom:
+             const multi: Packet = new Packet(worldmap.read('multi.dat'));
+-            this.multiPos = new TypedArray2d(this.mapWidth, this.mapHeight, false);
++            this.multiPos = flags(this.mapWidth, this.mapHeight); // custom (ios)
+             this.loadMulti(multi);
+ 
+             // custom:
+             const free: Packet = new Packet(worldmap.read('free.dat'));
+-            this.freePos = new TypedArray2d(this.mapWidth, this.mapHeight, false);
++            this.freePos = flags(this.mapWidth, this.mapHeight); // custom (ios)
+             this.loadFree(free);
+         } catch (_e) {
+         }
+@@ -307,7 +322,7 @@ export class MapView extends GameShell {
+             this.f30 = WorldMapFont.fromSystem(30, true);
+         }
+ 
+-        this.blendedGroundColour = new TypedArray2d(this.mapWidth, this.mapHeight, 0);
++        this.blendedGroundColour = ints(this.mapWidth, this.mapHeight); // custom (ios)
+         this.getBlendedGroundColour();
+ 
+         this.overview = new Pix32(this.overviewWidth, this.overviewHeight);
+diff --git a/src/mapview/MobileMapView.ts b/src/mapview/MobileMapView.ts
+new file mode 100644
+index 0000000..c767f86
+--- /dev/null
++++ b/src/mapview/MobileMapView.ts
+@@ -0,0 +1,782 @@
++// custom (ios): the world map of the iOS app's HUD (web/host/mapview.html, in the World map window's iframe).
++//
++// Upstream's 2004 map applet (MapView) with a phone's controls in place of its own buttons and keys: drag to pan (it
++// glides on), pinch to zoom, double-tap to zoom in and a two-finger tap to zoom out. Zooming settles on the applet's
++// four zooms (37, 50, 75 and 100 %), the only ones its labels are drawn at. It draws the player where they are, the
++// applet's overview in the bottom right corner when asked, and flashes the icons of a key (the Key list is the host's).
++// The surface, the underground and the other places are MapView's three maps (reloadMain/Dungeon/Extra).
++//
++// The host talks to it with postMessage, { lcMap: <type>, ... }:
++//   show { player }   the window opened: shows the map the player is on, centred on them (player: { x, z } or null)
++//   player { x, z }   the player moved
++//   centre            glide back to the player
++//   area { area }     0 surface, 1 underground, 2 other places
++//   overview { on }   show or hide the overview
++//   key { index }     flash every icon of a key (MapView.keyNames), gliding to the nearest when none is in view
++//   pause             the window closed: the loop sleeps until the next show
++// and it answers { lcMap: 'state', ready, loading, area } whenever one of those changes, and { lcMap: 'keys', area, keys }
++// once a map has loaded: the keys it has icons of, [{ index, name }] by name.
++
++import { canvas } from '#/graphics/Canvas.js';
++import Pix2D from '#/graphics/Pix2D.js';
++import PixMap from '#/graphics/PixMap.js';
++import { MapView } from '#/mapview/MapView.js';
++
++// MapView's maps, in tiles (from reloadMain, reloadDungeon and reloadExtra): where each starts, and its focus at first
++const AREAS = [
++    { originX: 32 << 6, originZ: 41 << 6, width: 25 << 6, height: 22 << 6, startX: 50 << 6, startZ: 50 << 6 },
++    { originX: 32 << 6, originZ: 141 << 6, width: 25 << 6, height: 22 << 6, startX: 50 << 6, startZ: 150 << 6 },
++    { originX: 28 << 6, originZ: 63 << 6, width: 21 << 6, height: 17 << 6, startX: 39 << 6, startZ: 74 << 6 }
++];
++
++// MapView.zoom is twice the pixels per tile; its labels are drawn at these zooms only
++const ZOOMS = [3, 4, 6, 8];
++const START_ZOOM = 6;
++const MARGIN = 48; // tiles round the edge of a map that the view stays out of (MapView.mainloop)
++const BUFFER_PAD = 16; // px the drawing buffer has beyond the canvas: the view lies in it at a fraction of a tile
++const OVERVIEW_H = 120;
++const OVERVIEW_GAP = 6;
++const TAP_SLOP = 8; // px a finger may move and still tap
++const DOUBLE_TAP_MS = 300;
++const TWO_FINGER_TAP_MS = 250;
++const GLIDE_DECAY = 0.92; // of the speed per cycle (50 a second) after a pan
++const GLIDE_STOP = 0.2; // px per cycle
++const ZOOM_EASE = 0.35; // of the way to the zoom aimed at, per cycle
++const CENTRE_EASE = 0.25; // of the way to a place being glided to, per cycle
++const FLASH_CYCLES = 100; // how long a key's icons flash (upstream: 50)
++const MARKER_BLINK_MS = 500;
++
++type Gesture =
++    | { kind: 'pan'; id: number; x0: number; y0: number; fx0: number; fz0: number; moved: boolean; samples: { x: number; y: number; t: number }[] }
++    | { kind: 'pinch'; d0: number; zoom0: number; tileX: number; tileZ: number; mx0: number; my0: number; moved: boolean; t0: number }
++    | { kind: 'overview'; id: number }
++    | null;
++
++type Message = { lcMap?: string; player?: { x: number; z: number } | null; x?: number; z?: number; area?: number; on?: boolean; index?: number };
++
++export class MobileMapView extends MapView {
++    // the view's centre, in tiles of the current map (fractions too: MapView.focusX/Z are whole tiles)
++    private fx: number = 0;
++    private fz: number = 0;
++
++    private ready: boolean = false;
++    private loading: boolean = false;
++    private wantArea: number = -1; // an area asked for while one was loading
++    private player: { x: number; z: number } | null = null; // world tile
++    private showPending: boolean = false; // centre on the player once the map is ready
++    private spotPending: { x: number; z: number } | null = null; // ...or on this world tile
++
++    private pointers: Map<number, { x: number; y: number }> = new Map();
++    private gesture: Gesture = null;
++    private lastTap: { x: number; y: number; t: number } | null = null;
++    private velocity: { x: number; y: number } | null = null; // px per cycle, gliding after a pan
++    private zoomTo: { zoom: number; ax: number; ay: number; tileX: number; tileZ: number } | null = null;
++    private glideTo: { x: number; z: number } | null = null;
++
++    private view: PixMap | null = null; // the buffer the map is drawn in, BUFFER_PAD wider and taller than the canvas
++    private mapPixels: Int32Array = new Int32Array(0); // the drawn map, without what goes on top of it
++    private mapKey: string = ''; // what mapPixels shows
++    private shownKey: string = ''; // what the canvas shows
++    private paused: boolean = false;
++    private resume: (() => void) | null = null;
++    private lastState: string = '';
++
++    private started: boolean = false; // the first maininit has begun
++    private early: Message[] = []; // what the host said before that
++
++    private readonly onMessage = (e: MessageEvent): void => this.message(e.data as Message);
++    private readonly onResize = (): void => this.fitCanvas();
++
++    constructor() {
++        super(); // (which starts GameShell.run: maininit follows once it yields)
++        window.addEventListener('message', this.onMessage);
++    }
++
++    override async maininit(): Promise<void> {
++        const first = !this.started;
++        if (first) {
++            this.started = true;
++            this.bindInput();
++            window.addEventListener('resize', this.onResize);
++
++            // the first map: the one the player is on (mapview.html?x=&z=), so it is not loaded twice
++            const query = new URLSearchParams(location.search);
++            const x = Number(query.get('x'));
++            const z = Number(query.get('z'));
++            if (query.has('x') && Number.isFinite(x) && Number.isFinite(z)) {
++                this.player = { x, z };
++                this.showPending = true;
++            }
++            this.setArea(this.areaOf(this.player) ?? 0);
++            this.zoom = this.targetZoom = START_ZOOM;
++        }
++
++        this.ready = false;
++        this.loading = true;
++        this.postState();
++        if (first) {
++            for (const data of this.early.splice(0)) {
++                this.message(data);
++            }
++        }
++        this.overviewHeight = OVERVIEW_H;
++        this.activeMapFunctionCount = 0; // (upstream's reloads count on from the last map's)
++        await super.maininit();
++        this.floort1 = []; // only needed to blend the ground colours
++        this.loading = false;
++        this.ready = true;
++        this.fitCanvas();
++
++        // (where to look waits for the map asked for meanwhile, if another)
++        const next = this.wantArea;
++        this.wantArea = -1;
++        if (next === -1 || next === this.mapArea) {
++            if (this.showPending) {
++                this.showPending = false;
++                this.centreOnPlayer(false);
++            } else if (this.spotPending && this.areaOf(this.spotPending) === this.mapArea) {
++                const at = this.toMap(this.spotPending);
++                this.fx = at.x;
++                this.fz = at.z;
++                this.clampFocus();
++            }
++            this.spotPending = null;
++        }
++        this.postState();
++        this.postKeys();
++
++        if (next !== -1 && next !== this.mapArea) {
++            await this.switchArea(next);
++        }
++    }
++
++    // ---- host messages
++
++    private message(data: Message): void {
++        if (!data || typeof data.lcMap !== 'string') {
++            return;
++        }
++        if (!this.started) {
++            this.early.push(data);
++            return;
++        }
++
++        switch (data.lcMap) {
++            case 'show': {
++                this.player = data.player ?? null;
++                this.unpause();
++                const area = this.areaOf(this.player);
++                if (area !== null && area !== this.mapArea) {
++                    this.showPending = true;
++                    void this.switchArea(area);
++                } else if (this.ready) {
++                    this.centreOnPlayer(false);
++                } else {
++                    this.showPending = true;
++                }
++                break;
++            }
++            case 'player':
++                if (typeof data.x === 'number' && typeof data.z === 'number') {
++                    this.player = { x: data.x, z: data.z };
++                }
++                break;
++            case 'centre': {
++                const area = this.areaOf(this.player);
++                if (area !== null && area !== this.mapArea) {
++                    this.showPending = true;
++                    void this.switchArea(area);
++                } else {
++                    this.centreOnPlayer(true);
++                }
++                break;
++            }
++            case 'area':
++                if (typeof data.area === 'number' && AREAS[data.area] && data.area !== this.mapArea) {
++                    this.showPending = false;
++                    this.spotPending = this.ready ? this.spotOn(data.area) : null;
++                    void this.switchArea(data.area);
++                }
++                break;
++            case 'overview':
++                this.showOverview = data.on === true;
++                break;
++            case 'key':
++                if (typeof data.index === 'number') {
++                    this.flashKey(data.index);
++                }
++                break;
++            case 'pause':
++                this.paused = true;
++                this.gesture = null;
++                this.pointers.clear();
++                break;
++        }
++    }
++
++    private postState(): void {
++        const state = { lcMap: 'state', ready: this.ready, loading: this.loading, area: this.mapArea };
++        const key = JSON.stringify(state);
++        if (key !== this.lastState) {
++            this.lastState = key;
++            window.parent?.postMessage(state, '*');
++        }
++    }
++
++    private postKeys(): void {
++        const found = new Set<number>();
++        for (let i = 0; i < this.activeMapFunctionCount; i++) {
++            found.add(this.activeMapFunctions[i]);
++        }
++        const keys = [...found].filter(index => this.keyNames[index] && this.keyNames[index] !== '???').map(index => ({ index, name: this.keyNames[index] }));
++        keys.sort((a, b) => a.name.localeCompare(b.name));
++        window.parent?.postMessage({ lcMap: 'keys', area: this.mapArea, keys }, '*');
++    }
++
++    private unpause(): void {
++        this.paused = false;
++        this.resume?.();
++        this.resume = null;
++    }
++
++    // ---- maps
++
++    // which map a world tile is on, or null when none
++    private areaOf(tile: { x: number; z: number } | null): number | null {
++        if (!tile) {
++            return null;
++        }
++        const area = AREAS.findIndex(a => tile.x >= a.originX && tile.x < a.originX + a.width && tile.z >= a.originZ && tile.z < a.originZ + a.height);
++        return area === -1 ? null : area;
++    }
++
++    private setArea(area: number): void {
++        const a = AREAS[area];
++        this.mapArea = area;
++        this.mapOriginX = a.originX;
++        this.mapOriginZ = a.originZ;
++        this.mapWidth = a.width;
++        this.mapHeight = a.height;
++        this.mapStartX = a.startX;
++        this.mapStartZ = a.startZ;
++        this.fx = a.startX - a.originX;
++        this.fz = a.originZ + a.height - a.startZ;
++        this.focusX = this.fx | 0;
++        this.focusZ = this.fz | 0;
++        this.mapKey = '';
++        this.shownKey = '';
++        this.flashTimer = 0;
++        this.velocity = null;
++        this.glideTo = null;
++    }
++
++    private async switchArea(area: number): Promise<void> {
++        if (this.loading) {
++            this.wantArea = area;
++            return;
++        }
++        if (area === this.mapArea) {
++            if (this.showPending) {
++                this.showPending = false;
++                this.centreOnPlayer(true);
++            }
++            return;
++        }
++        this.setArea(area);
++        Pix2D.cls();
++        this.fullredraw = true;
++        await this.maininit();
++    }
++
++    // What lies under (or over) the view's centre on another map: the underground is the surface 6400 tiles north. Null
++    // for the other places, which lie nowhere in particular.
++    private spotOn(area: number): { x: number; z: number } | null {
++        const dz = this.mapArea === 0 && area === 1 ? 6400 : this.mapArea === 1 && area === 0 ? -6400 : null;
++        if (dz === null) {
++            return null;
++        }
++        const spot = { x: Math.floor(this.fx) + this.mapOriginX, z: this.mapOriginZ + this.mapHeight - 1 - Math.floor(this.fz) + dz };
++        return this.areaOf(spot) === area ? spot : null;
++    }
++
++    // a world tile's centre in tiles of the current map (MapView.loadUnderlay: rows run north to south)
++    private toMap(tile: { x: number; z: number }): { x: number; z: number } {
++        return { x: tile.x - this.mapOriginX + 0.5, z: this.mapOriginZ + this.mapHeight - tile.z - 0.5 };
++    }
++
++    private centreOnPlayer(glide: boolean): void {
++        if (!this.player || this.areaOf(this.player) !== this.mapArea) {
++            return;
++        }
++        const at = this.toMap(this.player);
++        this.velocity = null;
++        if (glide) {
++            this.glideTo = at;
++        } else {
++            this.glideTo = null;
++            this.fx = at.x;
++            this.fz = at.z;
++            this.clampFocus();
++        }
++    }
++
++    private flashKey(index: number): void {
++        this.currentKey = index;
++        this.flashTimer = FLASH_CYCLES;
++
++        // none in view: glide to the nearest
++        const view = this.viewRect();
++        let nearest = -1;
++        let best = Infinity;
++        for (let i = 0; i < this.activeMapFunctionCount; i++) {
++            if (this.activeMapFunctions[i] !== index) {
++                continue;
++            }
++            const x = this.activeMapFunctionX[i] + 0.5;
++            const z = this.activeMapFunctionZ[i] + 0.5;
++            if (x >= view.left && x < view.right && z >= view.top && z < view.bottom) {
++                return;
++            }
++            const d = (x - this.fx) ** 2 + (z - this.fz) ** 2;
++            if (d < best) {
++                best = d;
++                nearest = i;
++            }
++        }
++        if (nearest !== -1) {
++            this.velocity = null;
++            this.glideTo = { x: this.activeMapFunctionX[nearest] + 0.5, z: this.activeMapFunctionZ[nearest] + 0.5 };
++        }
++    }
++
++    // ---- view
++
++    private get ppt(): number {
++        return this.zoom / 2; // px per tile
++    }
++
++    // the tiles in view (fractions too)
++    private viewRect(): { left: number; top: number; right: number; bottom: number } {
++        const halfW = this.sWid / 2 / this.ppt;
++        const halfH = this.sHei / 2 / this.ppt;
++        return { left: this.fx - halfW, top: this.fz - halfH, right: this.fx + halfW, bottom: this.fz + halfH };
++    }
++
++    // a canvas point's tile, at a zoom
++    private tileAt(x: number, y: number, zoom: number = this.zoom): { x: number; z: number } {
++        return { x: this.fx + (x - this.sWid / 2) / (zoom / 2), z: this.fz + (y - this.sHei / 2) / (zoom / 2) };
++    }
++
++    // the focus that puts a tile at a canvas point, at a zoom
++    private focusFor(tileX: number, tileZ: number, x: number, y: number, zoom: number): void {
++        this.fx = tileX - (x - this.sWid / 2) / (zoom / 2);
++        this.fz = tileZ - (y - this.sHei / 2) / (zoom / 2);
++    }
++
++    private clampFocus(): void {
++        const halfW = this.sWid / 2 / this.ppt;
++        const halfH = this.sHei / 2 / this.ppt;
++        const clamp = (v: number, lo: number, hi: number): number => (lo > hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)));
++        this.fx = clamp(this.fx, MARGIN + halfW, this.mapWidth - MARGIN - halfW);
++        this.fz = clamp(this.fz, MARGIN + halfH, this.mapHeight - MARGIN - halfH);
++        this.focusX = this.fx | 0;
++        this.focusZ = this.fz | 0;
++    }
++
++    private fitCanvas(): void {
++        const width = Math.max(1, window.innerWidth | 0);
++        const height = Math.max(1, window.innerHeight | 0);
++        if (width !== this.sWid || height !== this.sHei || !this.view) {
++            this.resize(width, height);
++            this.view = new PixMap(width + BUFFER_PAD, height + BUFFER_PAD);
++            this.mapPixels = new Int32Array((width + BUFFER_PAD) * (height + BUFFER_PAD));
++            this.drawArea?.setPixels();
++        }
++        this.overviewX = this.sWid - this.overviewWidth - OVERVIEW_GAP;
++        this.overviewY = this.sHei - this.overviewHeight - OVERVIEW_GAP;
++        this.mapKey = '';
++        this.shownKey = '';
++        this.clampFocus();
++    }
++
++    // ---- input: our own pointer handling, not GameShell's (one finger, mouse emulation)
++
++    private bindInput(): void {
++        canvas.onmousedown = null;
++        canvas.onmouseup = null;
++        canvas.onpointerdown = null;
++        canvas.onpointerup = null;
++        canvas.onpointermove = null;
++        canvas.onpointerenter = null;
++        canvas.onpointerleave = null;
++        canvas.onpointercancel = null;
++        window.onmouseup = null;
++        window.onmousemove = null;
++        canvas.style.touchAction = 'none';
++        canvas.style.cursor = 'grab';
++
++        canvas.addEventListener('pointerdown', e => this.down(e));
++        canvas.addEventListener('pointermove', e => this.move(e));
++        canvas.addEventListener('pointerup', e => this.up(e, false));
++        canvas.addEventListener('pointercancel', e => this.up(e, true));
++        canvas.addEventListener('lostpointercapture', e => this.up(e, true));
++        canvas.addEventListener('wheel', e => this.wheel(e), { passive: false });
++    }
++
++    private point(e: PointerEvent | WheelEvent): { x: number; y: number } {
++        const rect = canvas.getBoundingClientRect();
++        return {
++            x: ((e.clientX - rect.left) * this.sWid) / Math.max(1, rect.width),
++            y: ((e.clientY - rect.top) * this.sHei) / Math.max(1, rect.height)
++        };
++    }
++
++    private inOverview(p: { x: number; y: number }): boolean {
++        return this.showOverview && p.x >= this.overviewX && p.y >= this.overviewY && p.x < this.overviewX + this.overviewWidth && p.y < this.overviewY + this.overviewHeight;
++    }
++
++    private down(e: PointerEvent): void {
++        e.preventDefault();
++        if (!this.ready || this.pointers.size >= 2) {
++            return;
++        }
++        canvas.setPointerCapture?.(e.pointerId);
++        const p = this.point(e);
++        this.pointers.set(e.pointerId, p);
++        this.velocity = null;
++        this.glideTo = null;
++        this.finishZoom();
++
++        if (this.pointers.size === 1) {
++            if (this.inOverview(p)) {
++                this.gesture = { kind: 'overview', id: e.pointerId };
++                this.overviewJump(p);
++            } else {
++                this.startPan(e.pointerId, p);
++            }
++        } else {
++            const [a, b] = [...this.pointers.values()];
++            const mx = (a.x + b.x) / 2;
++            const my = (a.y + b.y) / 2;
++            const tile = this.tileAt(mx, my);
++            this.zoomTo = null;
++            this.targetZoom = -1; // (no labels while pinching)
++            this.gesture = { kind: 'pinch', d0: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), zoom0: this.zoom, tileX: tile.x, tileZ: tile.z, mx0: mx, my0: my, moved: false, t0: performance.now() };
++        }
++    }
++
++    private startPan(id: number, p: { x: number; y: number }): void {
++        this.gesture = { kind: 'pan', id, x0: p.x, y0: p.y, fx0: this.fx, fz0: this.fz, moved: false, samples: [{ x: p.x, y: p.y, t: performance.now() }] };
++    }
++
++    private move(e: PointerEvent): void {
++        if (!this.pointers.has(e.pointerId)) {
++            return;
++        }
++        const p = this.point(e);
++        this.pointers.set(e.pointerId, p);
++        const g = this.gesture;
++
++        if (g?.kind === 'pan' && g.id === e.pointerId) {
++            if (!g.moved && Math.hypot(p.x - g.x0, p.y - g.y0) > TAP_SLOP) {
++                g.moved = true;
++            }
++            if (g.moved) {
++                this.fx = g.fx0 - (p.x - g.x0) / this.ppt;
++                this.fz = g.fz0 - (p.y - g.y0) / this.ppt;
++                this.clampFocus();
++            }
++            const now = performance.now();
++            g.samples.push({ x: p.x, y: p.y, t: now });
++            while (g.samples.length > 2 && now - g.samples[0].t > 100) {
++                g.samples.shift();
++            }
++        } else if (g?.kind === 'pinch' && this.pointers.size === 2) {
++            const [a, b] = [...this.pointers.values()];
++            const d = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
++            const mx = (a.x + b.x) / 2;
++            const my = (a.y + b.y) / 2;
++            if (!g.moved && (Math.abs(d - g.d0) > TAP_SLOP || Math.hypot(mx - g.mx0, my - g.my0) > TAP_SLOP)) {
++                g.moved = true;
++            }
++            if (g.moved) {
++                this.zoom = Math.min(ZOOMS[ZOOMS.length - 1], Math.max(ZOOMS[0], (g.zoom0 * d) / g.d0));
++                this.focusFor(g.tileX, g.tileZ, mx, my, this.zoom);
++                this.clampFocus();
++            }
++        } else if (g?.kind === 'overview' && g.id === e.pointerId) {
++            this.overviewJump(p);
++        }
++    }
++
++    private up(e: PointerEvent, cancelled: boolean): void {
++        if (!this.pointers.has(e.pointerId)) {
++            return;
++        }
++        const p = this.pointers.get(e.pointerId)!;
++        this.pointers.delete(e.pointerId);
++        const g = this.gesture;
++
++        if (g?.kind === 'pan' && g.id === e.pointerId) {
++            this.gesture = null;
++            if (cancelled) {
++                return;
++            }
++            if (!g.moved) {
++                const now = performance.now();
++                const last = this.lastTap;
++                if (last && now - last.t < DOUBLE_TAP_MS && Math.hypot(p.x - last.x, p.y - last.y) < TAP_SLOP * 4) {
++                    this.lastTap = null;
++                    this.zoomStep(1, p.x, p.y);
++                } else {
++                    this.lastTap = { x: p.x, y: p.y, t: now };
++                }
++                return;
++            }
++            // glide on at the finger's speed over its last 100 ms
++            const first = g.samples[0];
++            const last = g.samples[g.samples.length - 1];
++            const ms = last.t - first.t;
++            if (ms > 0 && performance.now() - last.t < 80) {
++                this.velocity = { x: ((last.x - first.x) / ms) * 20, y: ((last.y - first.y) / ms) * 20 };
++            }
++        } else if (g?.kind === 'pinch') {
++            const [other] = [...this.pointers.entries()];
++            const mid = other ? { x: (p.x + other[1].x) / 2, y: (p.y + other[1].y) / 2 } : p;
++            if (!g.moved && performance.now() - g.t0 < TWO_FINGER_TAP_MS) {
++                this.zoom = g.zoom0;
++                this.zoomStep(-1, mid.x, mid.y);
++            } else {
++                this.settleZoom(mid.x, mid.y);
++            }
++            this.gesture = null; // (the finger still down does nothing until it lifts)
++        } else if (g?.kind === 'overview' && g.id === e.pointerId) {
++            this.gesture = null;
++        }
++    }
++
++    private wheel(e: WheelEvent): void {
++        e.preventDefault();
++        if (!this.ready || this.zoomTo) {
++            return;
++        }
++        const p = this.point(e);
++        this.zoomStep(e.deltaY < 0 ? 1 : -1, p.x, p.y);
++    }
++
++    private overviewJump(p: { x: number; y: number }): void {
++        this.fx = ((p.x - this.overviewX) * this.mapWidth) / this.overviewWidth;
++        this.fz = ((p.y - this.overviewY) * this.mapHeight) / this.overviewHeight;
++        this.clampFocus();
++    }
++
++    // ---- zoom
++
++    private nearestZoom(zoom: number): number {
++        let best = 0;
++        for (let i = 1; i < ZOOMS.length; i++) {
++            if (Math.abs(Math.log(ZOOMS[i] / zoom)) < Math.abs(Math.log(ZOOMS[best] / zoom))) {
++                best = i;
++            }
++        }
++        return best;
++    }
++
++    // one of ZOOMS in (dir 1) or out (-1), around a canvas point
++    private zoomStep(dir: number, x: number, y: number): void {
++        const from = this.zoomTo?.zoom ?? this.zoom;
++        const i = Math.min(ZOOMS.length - 1, Math.max(0, this.nearestZoom(from) + dir));
++        this.animateZoom(ZOOMS[i], x, y);
++    }
++
++    private finishZoom(): void {
++        const z = this.zoomTo;
++        if (z) {
++            this.zoom = z.zoom;
++            this.focusFor(z.tileX, z.tileZ, z.ax, z.ay, this.zoom);
++            this.clampFocus();
++            this.zoomTo = null;
++        }
++    }
++
++    private settleZoom(x: number, y: number): void {
++        this.animateZoom(ZOOMS[this.nearestZoom(this.zoom)], x, y);
++    }
++
++    private animateZoom(zoom: number, x: number, y: number): void {
++        const tile = this.tileAt(x, y);
++        this.velocity = null;
++        this.glideTo = null;
++        this.targetZoom = zoom;
++        this.zoomTo = { zoom, ax: x, ay: y, tileX: tile.x, tileZ: tile.z };
++    }
++
++    // ---- loop
++
++    override async mainloop(): Promise<void> {
++        if (this.paused) {
++            await new Promise<void>(resolve => {
++                this.resume = resolve;
++            });
++        }
++        if (!this.ready) {
++            return;
++        }
++
++        const z = this.zoomTo;
++        if (z) {
++            const step = Math.log(z.zoom / this.zoom);
++            this.zoom = Math.abs(step) < 0.01 ? z.zoom : this.zoom * Math.exp(step * ZOOM_EASE);
++            this.focusFor(z.tileX, z.tileZ, z.ax, z.ay, this.zoom);
++            this.clampFocus();
++            if (this.zoom === z.zoom) {
++                this.zoomTo = null;
++            }
++        }
++
++        const v = this.velocity;
++        if (v) {
++            this.fx -= v.x / this.ppt;
++            this.fz -= v.y / this.ppt;
++            this.clampFocus();
++            v.x *= GLIDE_DECAY;
++            v.y *= GLIDE_DECAY;
++            if (Math.hypot(v.x, v.y) < GLIDE_STOP) {
++                this.velocity = null;
++            }
++        }
++
++        const to = this.glideTo;
++        if (to) {
++            this.fx += (to.x - this.fx) * CENTRE_EASE;
++            this.fz += (to.z - this.fz) * CENTRE_EASE;
++            const before = { x: this.fx, z: this.fz };
++            this.clampFocus();
++            const stuck = before.x !== this.fx || before.z !== this.fz; // (the place is near the edge)
++            if (stuck || Math.hypot(to.x - this.fx, to.z - this.fz) < 0.05) {
++                if (!stuck) {
++                    this.fx = to.x;
++                    this.fz = to.z;
++                    this.clampFocus();
++                }
++                this.glideTo = null;
++            }
++        }
++
++        if (this.flashTimer > 0) {
++            this.flashTimer--;
++        }
++
++        this.postState();
++    }
++
++    override async mainredraw(): Promise<void> {
++        const view = this.view;
++        if (!this.ready || !view) {
++            return;
++        }
++
++        const W = this.sWid;
++        const H = this.sHei;
++        const ppt = this.ppt;
++        const bufW = W + BUFFER_PAD;
++        const bufH = H + BUFFER_PAD;
++
++        // the whole tiles that cover the canvas, drawn from the buffer's corner; the canvas shows the buffer from
++        // (dx, dy), the fraction of a tile the view starts into its first tile
++        const edgeX = this.fx - W / 2 / ppt;
++        const edgeZ = this.fz - H / 2 / ppt;
++        const left = Math.max(0, Math.floor(edgeX));
++        const top = Math.max(0, Math.floor(edgeZ));
++        const cols = Math.min(this.mapWidth - left, Math.floor(bufW / ppt));
++        const rows = Math.min(this.mapHeight - top, Math.floor(bufH / ppt));
++        const dx = Math.max(0, Math.round((edgeX - left) * ppt));
++        const dy = Math.max(0, Math.round((edgeZ - top) * ppt));
++
++        const flashing = this.flashTimer > 0 && this.flashTimer % 10 < 5;
++        const mapKey = `${left},${top},${cols},${rows},${this.zoom},${this.targetZoom},${this.flashTimer > 0 ? this.currentKey : -1},${flashing}`;
++        const blink = Math.floor(performance.now() / MARKER_BLINK_MS) % 2;
++        const shownKey = `${mapKey},${dx},${dy},${blink},${this.player?.x},${this.player?.z},${this.showOverview},${this.overviewX},${this.overviewY}`;
++        if (shownKey === this.shownKey) {
++            return;
++        }
++
++        view.setPixels();
++        if (mapKey !== this.mapKey) {
++            Pix2D.cls();
++            this.renderWorldMap(left, top, left + cols, top + rows, 0, 0, Math.round(cols * ppt), Math.round(rows * ppt));
++            this.mapPixels.set(view.data);
++            this.mapKey = mapKey;
++        } else {
++            view.data.set(this.mapPixels);
++        }
++
++        // on top, at canvas positions (+ dx, dy in the buffer)
++        // the player: a white dot in a ring flashing red and white (a key's icons flash as white dots in yellow)
++        const player = this.player && this.areaOf(this.player) === this.mapArea ? this.toMap(this.player) : null;
++        if (player) {
++            const px = Math.round((player.x - this.fx) * ppt + W / 2) + dx;
++            const py = Math.round((player.z - this.fz) * ppt + H / 2) + dy;
++            this.disc(px, py, 7, 11.5, 0x000000);
++            this.disc(px, py, 8, 10.5, blink === 0 ? 0xff0000 : 0xffffff);
++            this.disc(px, py, 0, 5, 0x000000);
++            this.disc(px, py, 0, 3.8, 0xffffff);
++        }
++
++        if (this.showOverview && this.overview) {
++            const ox = this.overviewX + dx;
++            const oy = this.overviewY + dy;
++            const ow = this.overviewWidth;
++            const oh = this.overviewHeight;
++            this.overview.quickPlotSprite(ox, oy);
++
++            const rect = this.viewRect();
++            const rx = (ox + (ow * rect.left) / this.mapWidth) | 0;
++            const ry = (oy + (oh * rect.top) / this.mapHeight) | 0;
++            const rw = (((rect.right - rect.left) * ow) / this.mapWidth) | 0;
++            const rh = (((rect.bottom - rect.top) * oh) / this.mapHeight) | 0;
++            Pix2D.setClipping(ox, oy, ox + ow, oy + oh);
++            Pix2D.fillRectTrans(rx, ry, rw, rh, 0xff0000, 0x80);
++            Pix2D.drawRect(rx, ry, rw, rh, 0xff0000);
++
++            if (flashing) {
++                for (let i = 0; i < this.activeMapFunctionCount; i++) {
++                    if (this.activeMapFunctions[i] === this.currentKey) {
++                        Pix2D.fillCircle((ox + (ow * this.activeMapFunctionX[i]) / this.mapWidth) | 0, (oy + (oh * this.activeMapFunctionZ[i]) / this.mapHeight) | 0, 2, 0xffff00, 256);
++                    }
++                }
++            }
++            if (player) {
++                Pix2D.fillCircle((ox + (ow * player.x) / this.mapWidth) | 0, (oy + (oh * player.z) / this.mapHeight) | 0, 2, 0xffffff, 256);
++            }
++            Pix2D.resetClipping();
++        }
++
++        view.draw(-dx, -dy);
++        this.shownKey = shownKey;
++    }
++
++    // the pixels r0..r1 px from (x, y), within Pix2D's clipping: a ring, or a disc from 0
++    private disc(x: number, y: number, r0: number, r1: number, rgb: number): void {
++        const r = Math.ceil(r1);
++        for (let dy = -r; dy <= r; dy++) {
++            const py = y + dy;
++            if (py < Pix2D.clipMinY || py >= Pix2D.clipMaxY) {
++                continue;
++            }
++            for (let dx = -r; dx <= r; dx++) {
++                const px = x + dx;
++                const d = Math.hypot(dx, dy);
++                if (px >= Pix2D.clipMinX && px < Pix2D.clipMaxX && d >= r0 && d <= r1) {
++                    Pix2D.pixels[px + py * Pix2D.width] = rgb;
++                }
++            }
++        }
++    }
++
++    override refresh(): void {
++        this.shownKey = '';
++    }
++}
++
++(globalThis as { lcMapView?: MobileMapView }).lcMapView = new MobileMapView(); // (the tests read its state)

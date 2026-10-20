@@ -1,0 +1,92 @@
+ios: tap options: what a tap does with Attack on NPCs and players
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 0c476cc..20e120e 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -177,6 +177,9 @@ export interface HudDialogOption {
+     h: number;
+ }
+ 
++// custom (ios): what a tap does with an NPC's or a player's Attack option (see setAttackOptions)
++export type AttackOption = 'tap' | 'level' | 'hold' | 'hidden';
++
+ // custom (ios): a button of an open interface with its clickable rect in virtual coordinates (see chatButtons)
+ interface ButtonRect {
+     com: IfType;
+@@ -9935,9 +9938,9 @@ export class Client extends GameShell {
+                         continue;
+                     }
+ 
+-                    let priority: number = 0;
+-                    if (this.localPlayer && npc.vislevel > this.localPlayer.combatLevel) {
+-                        priority = MiniMenuAction._PRIORITY;
++                    const priority: number = this.attackPriority(this.npcAttackOption, npc.vislevel); // custom (ios)
++                    if (priority === -1) {
++                        continue;
+                     }
+ 
+                     this.menuOption[this.menuNumEntries] = npc.op[i] + ' @yel@' + tooltip;
+@@ -10005,17 +10008,18 @@ export class Client extends GameShell {
+                     continue;
+                 }
+ 
+-                this.menuOption[this.menuNumEntries] = op + ' @whi@' + tooltip;
+-
+                 let priority = 0;
+                 if (op.toLowerCase() === 'attack') {
+-                    if (player.combatLevel > this.localPlayer.combatLevel) {
+-                        priority = MiniMenuAction._PRIORITY;
++                    priority = this.attackPriority(this.playerAttackOption, player.combatLevel); // custom (ios)
++                    if (priority === -1) {
++                        continue;
+                     }
+                 } else if (this.playerOpPriority[i]) {
+                     priority = MiniMenuAction._PRIORITY;
+                 }
+ 
++                this.menuOption[this.menuNumEntries] = op + ' @whi@' + tooltip;
++
+                 if (i === 0) {
+                     this.menuAction[this.menuNumEntries] = priority + MiniMenuAction.OP_PLAYER1;
+                 } else if (i === 1) {
+@@ -12147,6 +12151,8 @@ export class Client extends GameShell {
+     private cameraZoom: number = 1; // custom (ios): see setCameraZoom
+     private minimapZoom: number = 1; // custom (ios): see setMinimapZoom
+     private tapToDrop: boolean = false; // custom (ios): see setTapToDrop
++    private npcAttackOption: AttackOption = 'level'; // custom (ios): see setAttackOptions
++    private playerAttackOption: AttackOption = 'level';
+     private depositModalId: number = -1; // custom (ios): see sideModalDeposits
+     private depositModal: boolean = false;
+     private surfaceLayout: SurfaceLayout | null = null;
+@@ -12526,6 +12532,30 @@ export class Client extends GameShell {
+         return this.tapToDrop;
+     }
+ 
++    // custom (ios): host API (Settings › Tap options, as OSRS's "NPC/Player 'Attack' options"). What a tap does with the
++    // Attack option of an NPC, and of a player (in the Wilderness): 'tap' makes Attack the top entry whatever their level,
++    // 'level' (upstream) only when their combat level is not above yours, 'hold' never (Attack stays in the long-press
++    // menu and a tap does the next entry, often Walk here), 'hidden' leaves Attack out of the menu. Anything else is
++    // 'level'. Returns the options now on.
++    public setAttackOptions(npc: string, player: string): { npc: AttackOption; player: AttackOption } {
++        const option = (value: string): AttackOption => (value === 'tap' || value === 'hold' || value === 'hidden' ? value : 'level');
++        this.npcAttackOption = option(npc);
++        this.playerAttackOption = option(player);
++        return { npc: this.npcAttackOption, player: this.playerAttackOption };
++    }
++
++    // custom (ios): the priority of an Attack entry on something of this combat level (see setAttackOptions): 0 for a top
++    // entry, MiniMenuAction._PRIORITY to sort it below the others, -1 to leave it out
++    private attackPriority(option: AttackOption, level: number): number {
++        if (option === 'hidden') {
++            return -1;
++        }
++        if (option === 'hold' || (option === 'level' && this.localPlayer && level > this.localPlayer.combatLevel)) {
++            return MiniMenuAction._PRIORITY;
++        }
++        return 0;
++    }
++
+     // custom (ios): with tap-to-drop on, the menu entry that drops the item a tap in the side panel acts on (the top
+     // entry's slot: upstream does the top entry), else -1. Only when the top entry is one of the item's own ops in the
+     // tab panel, not a side modal's (bank, shop, trade: their items have other ops), so a use or target mode, whose

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  No cleartext traffic anywhere. The game itself never touches the network (its router answers any other host with 403);
+  only the bots' Claude online talks to api.anthropic.com, over HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

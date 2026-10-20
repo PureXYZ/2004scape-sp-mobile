@@ -1,0 +1,21 @@
+ios: stay logged in (no IDLE_TIMER)
+
+After 90 s without input the client sends IDLE_TIMER (the server may then log the player out) and
+arms logoutTimer=250, which turns any connection hiccup in the next 5 s into a logout. With
+lcHost.settings.stayLoggedIn (read live) the client does neither; everything else is unchanged.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 04a5550..3d40b37 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -2366,7 +2366,9 @@ export class Client extends GameShell {
+ 
+         await this.handleInputKey();
+ 
+-        if (now - this.idleTimer > 90_000) {
++        // custom (ios): single-player "stay logged in" (lcHost.settings.stayLoggedIn): never report idling, so the
++        // server is not asked to log the player out and no logout countdown turns a later hiccup into a logout
++        if (now - this.idleTimer > 90_000 && !lcSetting('stayLoggedIn', false)) {
+             // no input in 90s, notify the server
+             this.logoutTimer = 250;
+             this.idleTimer += 10_000; // 10s backoff

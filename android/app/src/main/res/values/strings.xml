@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- the name under the icon, as the iOS app's CFBundleDisplayName (no space) -->
+    <string name="app_name" translatable="false">2004Scape</string>
+</resources>

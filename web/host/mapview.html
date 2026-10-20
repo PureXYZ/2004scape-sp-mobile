@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="color-scheme" content="dark">
+    <title>World map</title>
+    <link rel="icon" href="data:,">
+    <!-- The HUD's World map window shows this page in an iframe (worldmap.js): the 2004 map applet with touch controls
+         (client/mapview.js, client patch 0018), drawn at one canvas pixel per CSS px like the game. -->
+    <style>
+        html,
+        body {
+            margin: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            outline: none;
+            image-rendering: pixelated;
+            touch-action: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" tabindex="-1"></canvas>
+    <script>
+        // the canvas at the window's size before the map starts (MobileMapView follows a resize)
+        {
+            const canvas = document.getElementById('canvas');
+            canvas.width = Math.max(1, innerWidth | 0);
+            canvas.height = Math.max(1, innerHeight | 0);
+        }
+    </script>
+    <script type="module" src="client/mapview.js"></script>
+</body>
+</html>

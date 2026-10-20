@@ -1,0 +1,71 @@
+ios: touch wording (tap, long-press and drag in the game's instructions)
+
+Tutorial Island tells new players to "use your left mouse-button to click", that "Right clicking will also give more
+options" and to "use your keyboard's arrow keys to rotate the view"; dialogues and message boxes say "right click",
+"left click" and "mouse over". On a touch screen every text the server sets (IF_SETTEXT) goes through the touch wording
+table of the new module TouchWording.ts (overrides), and so do the interfaces' own texts once they are loaded ("Click
+here to continue" -> "Tap here to continue", "Click here to logout", the shop's "Right-click on shop to buy item"), as
+well as the tutorial box's "Click to continue". Without a touch screen nothing changes.
+
+The table holds exact, case-sensitive phrases taken from the rev-274 content, applied one line at a time: "use your left
+mouse-button to click" -> "tap", "left-mouse button" -> "finger", "left click(ing on)" -> "tap(ping)", "Right clicking"
+-> "Long-pressing", "right click (on)" / "right-click (on)" -> "long-press", "click(ing) on" -> "tap(ping)", "use your
+keyboard's arrow keys to rotate the view" -> "drag the view with your finger to turn it", "by pressing the arrow keys"
+-> "by dragging it", "move your mouse over" / "put the mouse over" -> "touch", "with your mouse" -> "with your
+finger", "found at the bottom right" -> "found at the right" (the mobile layout's tabs are a column on the right). The
+server splits long texts into lines itself (split_init with the font's metrics) and sends each line on its own, so a
+phrase broken over two lines has an entry for each piece, anchored to the start or end of a line. Checked against every
+script text that mentions mouse, click, arrow keys or keyboard (96 lines rewritten): each rewritten line stays within
+the width the server split it to (450 px of q8 in the tutorial box, 380 in dialogues, 470 in message boxes), and the
+static texts within their components. A mouse that is an animal and a click that is a sound are left alone.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index c4f9408..77ee1fd 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -10,6 +10,7 @@ import MobileKeyboard from '#/client/MobileKeyboard.js';
+ import MouseTracking from '#/client/MouseTracking.js';
+ import Skill from '#/client/Skill.js';
+ import TitleFlames from '#/client/TitleFlames.js';
++import { touchWording } from '#/client/TouchWording.js'; // custom (ios)
+ 
+ import FloType from '#/config/FloType.js';
+ import SeqType, { PostanimMove, PreanimMove, RestartMode } from '#/config/SeqType.js';
+@@ -1300,6 +1301,17 @@ export class Client extends GameShell {
+ 
+             IfType.init(interfaces, media, [this.p11, this.p12, this.b12, this.q8]);
+ 
++            if (this.isMobile) {
++                // custom (ios): the interfaces' own texts in touch wording ("Click here to continue", "Click here to
++                // logout", the shop's "Right-click on shop to buy item"...), like the server's (IF_SETTEXT)
++                for (const com of IfType.list) {
++                    if (com && com.type === ComponentType.TYPE_TEXT) {
++                        com.text = com.text ? touchWording(com.text) : com.text;
++                        com.text2 = com.text2 ? touchWording(com.text2) : com.text2;
++                    }
++                }
++            }
++
+             await this.drawProgress('Preparing game engine', 100);
+ 
+             for (let y: number = 0; y < 33; y++) {
+@@ -6377,7 +6389,9 @@ export class Client extends GameShell {
+                 const comId: number = this.in.g2();
+                 const text = this.in.gjstr();
+ 
+-                IfType.list[comId].text = text;
++                // custom (ios): on a touch screen, the instructions say tap, long-press and drag instead of left click,
++                // right click and arrow keys (Tutorial Island, dialogues, message boxes)
++                IfType.list[comId].text = this.isMobile ? touchWording(text) : text;
+ 
+                 if (IfType.list[comId].layerId === this.sideIcon[this.activeIcon]) {
+                     this.redrawSide = true;
+@@ -11473,7 +11487,7 @@ export class Client extends GameShell {
+             this.b12?.centreString(this.dialogInput + '*', 239, 60, Colour.DARKBLUE);
+         } else if (this.tutComMessage) {
+             this.b12?.centreString(this.tutComMessage, 239, 40, Colour.BLACK);
+-            this.b12?.centreString('Click to continue', 239, 60, Colour.DARKBLUE);
++            this.b12?.centreString(this.isMobile ? 'Tap to continue' : 'Click to continue', 239, 60, Colour.DARKBLUE); // custom (ios)
+         } else if (this.chatModalId !== -1) {
+             this.drawInterface(IfType.list[this.chatModalId], 0, 0, 0);
+         } else if (this.tutComId !== -1) {

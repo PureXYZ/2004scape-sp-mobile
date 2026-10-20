@@ -1,0 +1,21 @@
+bots: declare the bot script commands (engine.rs2)
+
+Progressive's two commands for bot players, appended to the command list like upstream:
+p_isbot (1 if the active player is a bot; .p_isbot for the secondary player) and
+p_bot_interact_trade (tell a bot that a player wants to trade: stage 0 begins, -1 resets).
+The compiler binds them by name to the opcodes the overlay compiler registers
+(P_ISBOT = 10100, P_BOT_INTERACT_TRADE = 10101, web/engine/bots/src/port/BotScriptCommands.ts).
+Not carried over: Progressive's last_string, p_namedialog and map_feature (clans, GE, features).
+
+diff --git a/scripts/engine.rs2 b/scripts/engine.rs2
+index dd4e3b9..e2e8a3f 100644
+--- a/scripts/engine.rs2
++++ b/scripts/engine.rs2
+@@ -1065,3 +1065,7 @@
+ // [command,inv_totalparam](inv $inv, param param)(int)
+ // [command,inv_totalparam_stack](inv $inv, param param)(int)
+ // [command,obj_adddelayed]
++[command,p_isbot]()(int)
++[command,.p_isbot]()(int)
++[command,p_bot_interact_trade](player_uid $puid, int $stage)
++[command,.p_bot_interact_trade](player_uid $puid, int $stage)

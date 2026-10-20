@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Auto Backup on Android 11 (API 30, before data_extraction_rules.xml): the same saves and settings, nothing else. -->
+<full-backup-content>
+    <include domain="file" path="Documents/players/" />
+    <include domain="file" path="Documents/bots/" />
+    <include domain="sharedpref" path="LostCity.xml" />
+</full-backup-content>

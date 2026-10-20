@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup (Android 12+) and device-to-device transfer: the saves (Documents/players,
+  Documents/bots) and the settings (shared_prefs/LostCity.xml), as iOS backs up Documents and UserDefaults. Nothing else:
+  not the WebView's data, the caches or the log. The cloud quota is 25 MB; bots.sav is about 1.2 MB at 1,000 bots.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="Documents/players/" />
+        <include domain="file" path="Documents/bots/" />
+        <include domain="sharedpref" path="LostCity.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="Documents/players/" />
+        <include domain="file" path="Documents/bots/" />
+        <include domain="sharedpref" path="LostCity.xml" />
+    </device-transfer>
+</data-extraction-rules>

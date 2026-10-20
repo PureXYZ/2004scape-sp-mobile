@@ -1,0 +1,48 @@
+{
+    "_doc": [
+        "port (the realism work, phase 5b, Track P: drop parties and the Seers' Party Room): where the parties are held, what a host's kit is made of, and the defaults chosen. Read by src/port/BotParty.ts. Every item is named by its 274 debugname (test/party.test.mjs checks each resolves).",
+        "venues: the F2P drop parties' three (the busiest of them at the start, by the bots within 60 tiles: never the human's place), and the members' Party Room in Seers' Village (its room box, chest, lever, Party Pete and the Seers' bank, measured on the 274 map: the research). `drop`: the middle of the 5x5 square the host drops in; `say`: how a bot names it.",
+        "kit: from the host's own bank (and pack), never bought: the stackables it drops one pile each (cheap runes, arrows, feathers); produce (logs, ores, bars, cooked fish, uncut gems: single items, or a note in the Party Room when one is worth under 100, which Pete leaves); gear of the metals named (bronze to black); 1 party in 10 one better item (a mithril or adamant piece, or 50 natures on members) within `betterMax`. Never a tool, a rare, an untradeable or (on a free world) a members item: those never reveal (Zone.revealObj) and the chest refuses them.",
+        "budget: the kit's value (port/BotPrices.itemValue) in coins, log-uniform in the range; drops: how many piles; coins: the share of the budget a coin pile is (now and then a joke pile of 1-10: 'lol 1 coin drop'). The lever: 1,000 coins (the knights' dance 500 more, 1 party in 4): a sink.",
+        "guests (the variety work, round 1, track F: ISS-3): each bot of the pool asked with chance joinChance[0] + joinChance[1] x its sociability (0.4 + 0.4 before: parties of 2-5); an asked guest busy at its moment is asked again every 20 ticks while it can still be there for the drop, then the next of the pool in its place; a full pack comes too (it drops a piece of junk for a pile, or watches); and at the build-up and the drop passers-by within 15 tiles walk in now and then (at most 8: 2004's drop parties drew whoever heard the calls)."
+    ],
+    "venues": [
+        { "key": "falador_park", "kind": "drop_party", "x": 2997, "z": 3375, "drop": [2997, 3376], "say": "fally park" },
+        { "key": "varrock_square", "kind": "drop_party", "x": 3212, "z": 3428, "drop": [3213, 3425], "say": "varrock square" },
+        { "key": "lumbridge_courtyard", "kind": "drop_party", "x": 3222, "z": 3218, "drop": [3222, 3220], "say": "lumby castle" },
+        { "key": "party_room", "kind": "party_room", "members": true, "x": 2737, "z": 3468, "drop": [2737, 3466], "say": "the seers party room", "room": [2729, 3460, 2746, 3476], "chest": [2729, 3470], "lever": [2729, 3469], "pete": [2733, 3472], "bank": [2725, 3493] }
+    ],
+    "stackable": ["airrune", "mindrune", "waterrune", "earthrune", "firerune", "bodyrune", "chaosrune", "bronze_arrow", "iron_arrow", "steel_arrow", "feather"],
+    "produce": ["logs", "oak_logs", "willow_logs", "maple_logs", "yew_logs", "copper_ore", "tin_ore", "iron_ore", "coal", "silver_ore", "gold_ore", "mithril_ore", "bronze_bar", "iron_bar", "steel_bar", "silver_bar", "gold_bar", "shrimp", "sardine", "herring", "anchovies", "trout", "pike", "salmon", "tuna", "lobster", "swordfish", "bass", "uncut_sapphire", "uncut_emerald", "leather"],
+    "gearMetals": ["bronze", "iron", "steel", "black"],
+    "betterMetals": ["mithril", "adamant"],
+    "betterRunes": { "naturerune": 50 },
+    "tools": ["axe", "pickaxe", "harpoon", "lobster_pot", "fishing_rod", "fly_fishing_rod", "net", "big_net", "tinderbox", "knife", "hammer", "chisel", "needle", "shears"],
+    "defaults": {
+        "budget": { "drop_party": [2000, 10000], "party_room": [5000, 20000] },
+        "drops": { "drop_party": [12, 28], "party_room": [8, 26] },
+        "betterChance": 0.1,
+        "betterMax": 30000,
+        "coinShare": [0.1, 0.35],
+        "jokeCoinChance": 0.15,
+        "hostCoins": 3000,
+        "lever": 1000,
+        "knights": 500,
+        "knightsChance": 0.25,
+        "lead": { "drop_party": [300, 500], "party_room": [500, 900] },
+        "guestRadius": { "drop_party": 60, "party_room": 250 },
+        "hostRadius": { "drop_party": 80, "party_room": 120 },
+        "guestCap": [15, 25],
+        "joinChance": [0.55, 0.4],
+        "minGuests": { "drop_party": 6, "party_room": 3 },
+        "minComing": { "drop_party": 3, "party_room": 3 },
+        "hostSessionLeft": 4500,
+        "guestSessionLeft": 3000,
+        "firstGrab": [2, 6],
+        "grabGap": [2, 4],
+        "takes": [2, 5],
+        "pops": [5, 20],
+        "popGap": [3, 8],
+        "runTicks": 1500
+    }
+}

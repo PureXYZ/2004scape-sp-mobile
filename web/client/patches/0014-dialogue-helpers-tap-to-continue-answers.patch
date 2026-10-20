@@ -1,0 +1,261 @@
+ios: dialogue helpers (tap to continue, answers, cancel prompts, tutorial step)
+
+For the mobile HUD's dialogue handling (ios/web/host):
+
+- "Click here to continue" is a 350x16 strip directly above the chat buttons; a slightly low tap changed a chat filter
+  or, on Report abuse, ended the dialogue. While a dialogue's only button is that continue button (hudState()
+  .chatContinue), a touch tap anywhere on the chatbox continues it, with the 'selection' haptic. hudContinue() does the
+  same for the host (Space or Return on a hardware keyboard) and returns false when there is nothing to continue. Both
+  run in the next client cycle exactly like doAction's PAUSE_BUTTON (RESUME_PAUSEBUTTON, "Please wait...").
+- hudDialog() returns the open dialogue's answers (NPC dialogue choices, the ::~help menu, "what would you like to
+  make" items: the chat modal's text components with buttontype "normal" and a text), top to bottom, with their text
+  as drawn and their clickable rect in virtual coordinates, clipped like addComponentOptions clips them, so the host
+  can show them as large rows and pick one with tapAt(x + w / 2, y + h / 2). Null when no dialogue shows.
+- hudCancelInput() closes an open amount prompt, name prompt or the report abuse screen without submitting, like the
+  game's own cancel paths (the amount prompt closes on any other action, the report screen's close button calls
+  closeModal). A name prompt could not be closed at all once the keyboard was down.
+- hudState().tutorialKey identifies Tutorial Island's current instruction (the texts of its interface, joined; '' when
+  none), so the HUD can collapse the instruction box and show it again for the next step.
+- hudState().tutorialMessage: Tutorial Island's chatbox shows a plain game message ("You catch some shrimps."), which
+  the next click anywhere dismisses. It still counts in chatModal; the HUD can tell it from a dialogue with it (an
+  open panel need not step aside for one line).
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 8c31c35..c4f9408 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -147,6 +147,32 @@ export interface HudState {
+     cameraYaw: number; // 0..2047, 0 = facing north (the compass)
+     cameraZoom: number; // see setCameraZoom
+     longPressable: boolean; // a long-press at the pointer would open a menu: something besides "Cancel" is under it
++    chatContinue: boolean; // a dialogue waits for its "Click here to continue", its only button (see hudContinue)
++    tutorialKey: string; // the current Tutorial Island instruction (its texts joined), '' when none
++    tutorialMessage: boolean; // Tutorial Island's chatbox shows a game message until a click (it counts in chatModal)
++}
++
++// custom (ios): the open dialogue's answers (see hudDialog)
++export interface HudDialog {
++    options: HudDialogOption[]; // top to bottom; empty for a dialogue without answers
++}
++
++// custom (ios): one answer of the open dialogue
++export interface HudDialogOption {
++    text: string; // as drawn, colour tags included
++    x: number; // the answer's clickable rect in virtual coordinates: tapAt(x + w / 2, y + h / 2) picks it
++    y: number;
++    w: number;
++    h: number;
++}
++
++// custom (ios): a button of an open interface with its clickable rect in virtual coordinates (see chatButtons)
++interface ButtonRect {
++    com: IfType;
++    x: number;
++    y: number;
++    w: number;
++    h: number;
+ }
+ 
+ // custom (ios): the open options menu as the host shows it (see setHostMenus)
+@@ -527,6 +553,7 @@ export class Client extends GameShell {
+     private menuAnchorX: number = 0; // custom (ios): where the open menu was opened, area-local (see mouseLoop)
+     private menuAnchorY: number = 0;
+     private menuSerial: number = 0; // custom (ios): counts the menus opened (see HudMenu)
++    private pendingContinue: number = -1; // custom (ios): a "Click here to continue" to press (see hudContinue)
+     private hostMenus: boolean = false; // custom (ios): the host shows the open menu itself (see setHostMenus)
+     private pendingMenuChoice: { serial: number; option: number } | null = null; // custom (ios): see hudMenuSelect
+     private menuParamB: Int32Array = new Int32Array(500);
+@@ -8460,6 +8487,23 @@ export class Client extends GameShell {
+             }
+         }
+ 
++        if (this.pendingContinue !== -1) {
++            // custom (ios): continue the dialogue (hudContinue, a tap on the chatbox) like doAction's PAUSE_BUTTON
++            const comId: number = this.pendingContinue;
++            this.pendingContinue = -1;
++
++            if (comId === this.chatContinueComId()) {
++                this.out.p1Enc(ClientProt.RESUME_PAUSEBUTTON);
++                this.out.p2(comId);
++                this.resumedPauseButton = true;
++                this.useMode = 0;
++                this.targetMode = 0;
++                this.redrawSide = true;
++                this.redrawChat = true; // "Please wait..."
++                return;
++            }
++        }
++
+         if (this.objDragArea !== 0) {
+             return;
+         }
+@@ -12096,10 +12140,154 @@ export class Client extends GameShell {
+             prayerMax: this.statBaseLevel[PRAYER_STAT],
+             cameraYaw: this.orbitCameraYaw,
+             cameraZoom: this.cameraZoom,
+-            longPressable: !this.isMenuOpen && this.menuNumEntries >= 2 // custom (ios): see fireLongPress
++            longPressable: !this.isMenuOpen && this.menuNumEntries >= 2, // custom (ios): see fireLongPress
++            chatContinue: this.chatContinueComId() !== -1,
++            tutorialKey: this.tutComId !== -1 ? this.interfaceText(IfType.list[this.tutComId]) : '',
++            tutorialMessage: this.tutComMessage !== null
+         };
+     }
+ 
++    // custom (ios): the texts of an interface's text components in tree order, joined (identifies what it shows)
++    private interfaceText(com: IfType | undefined): string {
++        if (!com) {
++            return '';
++        }
++
++        if (com.type === ComponentType.TYPE_TEXT) {
++            return com.text ?? '';
++        }
++
++        return com.type === ComponentType.TYPE_LAYER && com.children ? com.children.map((id: number): string => this.interfaceText(IfType.list[id])).join('|') : '';
++    }
++
++    // custom (ios): the buttons of the chat modal a click can reach, walking its tree like addComponentOptions (hidden
++    // layers skipped, each child clipped to its layers and the chatbox, scrolled with its layer), with their clickable
++    // rects in virtual coordinates. Any component with a button type counts, and any inventory.
++    private chatButtons(): ButtonRect[] {
++        const buttons: ButtonRect[] = [];
++        const root: IfType | undefined = IfType.list[this.chatModalId];
++        if (root) {
++            // buildMinimenu's chatbox test: 17 < x < 496, 357 < y < 453
++            this.collectButtons(root, CHAT_RECT.x, CHAT_RECT.y, 0, CHAT_RECT.x + 1, CHAT_RECT.y + 1, CHAT_RECT.x + CHAT_RECT.w, CHAT_RECT.y + CHAT_RECT.h, buttons);
++        }
++        return buttons;
++    }
++
++    // custom (ios): see chatButtons (clip: left/top inclusive, right/bottom exclusive)
++    private collectButtons(com: IfType, x: number, y: number, scrollPosition: number, left: number, top: number, right: number, bottom: number, buttons: ButtonRect[]): void {
++        if (com.type !== ComponentType.TYPE_LAYER || !com.children || com.hide || !com.childX || !com.childY) {
++            return;
++        }
++
++        // addComponentOptions: a layer takes x..x + width inclusive
++        left = Math.max(left, x);
++        top = Math.max(top, y);
++        right = Math.min(right, x + com.width + 1);
++        bottom = Math.min(bottom, y + com.height + 1);
++
++        for (let i: number = 0; i < com.children.length; i++) {
++            const child: IfType | undefined = IfType.list[com.children[i]];
++            if (!child) {
++                continue;
++            }
++
++            const childX: number = com.childX[i] + x + child.x;
++            const childY: number = com.childY[i] + y - scrollPosition + child.y;
++
++            if (child.type === ComponentType.TYPE_LAYER) {
++                this.collectButtons(child, childX, childY, child.scrollPos, left, top, right, bottom, buttons);
++            } else if (child.buttonType !== 0 || child.type === ComponentType.TYPE_INV) {
++                const width: number = child.type === ComponentType.TYPE_INV ? child.width * (child.marginX + 32) : child.width;
++                const height: number = child.type === ComponentType.TYPE_INV ? child.height * (child.marginY + 32) : child.height;
++                const x0: number = Math.max(left, childX);
++                const y0: number = Math.max(top, childY);
++                const x1: number = Math.min(right, childX + width);
++                const y1: number = Math.min(bottom, childY + height);
++                if (x1 > x0 && y1 > y0) {
++                    buttons.push({ com: child, x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
++                }
++            }
++        }
++    }
++
++    // custom (ios): the chat modal's "Click here to continue" button when it is the dialogue's only button and the
++    // dialogue shows (no amount/name prompt or game message over it) and waits for it, else -1
++    private chatContinueComId(): number {
++        if (!this.ingame || this.chatModalId === -1 || this.tutComMessage !== null || this.dialogInputOpen || this.socialInputOpen || this.resumedPauseButton) {
++            return -1;
++        }
++
++        const buttons: ButtonRect[] = this.chatButtons();
++        return buttons.length === 1 && buttons[0].com.buttonType === ButtonType.BUTTON_CONTINUE ? buttons[0].com.id : -1;
++    }
++
++    // custom (ios): host API. Continue the dialogue like its "Click here to continue" button (hudState().chatContinue),
++    // in the next client cycle; a touch tap anywhere on the chatbox does the same. False if there is nothing to continue.
++    public hudContinue(): boolean {
++        const comId: number = this.chatContinueComId();
++        if (comId === -1) {
++            return false;
++        }
++
++        this.pendingContinue = comId;
++        return true;
++    }
++
++    // custom (ios): host API. The open dialogue's answers (NPC dialogue choices, the ::~help menu, "what would you like
++    // to make" items), or null when no dialogue shows in the chatbox. The answers are the chat modal's text buttons
++    // that resume a dialogue (buttontype "normal") and have a text; a "Click here to continue" is not one (see
++    // chatContinue), nor are the skill menus' unlabelled Make 1/5/10/X areas.
++    public hudDialog(): HudDialog | null {
++        if (!this.ingame || this.chatModalId === -1 || this.tutComMessage !== null || this.dialogInputOpen || this.socialInputOpen) {
++            return null;
++        }
++
++        const options: HudDialogOption[] = [];
++        for (const button of this.chatButtons()) {
++            const com: IfType = button.com;
++            if (com.type !== ComponentType.TYPE_TEXT || com.buttonType !== ButtonType.BUTTON_OK) {
++                continue;
++            }
++
++            // drawInterface's text
++            const text: string | null = this.getIfActive(com) && com.text2 ? com.text2 : com.text;
++            if (text && text.replace(/@...@/g, '').trim().length > 0) {
++                options.push({ text, x: button.x, y: button.y, w: button.w, h: button.h });
++            }
++        }
++
++        options.sort((a: HudDialogOption, b: HudDialogOption): number => a.y - b.y || a.x - b.x);
++        return { options };
++    }
++
++    // custom (ios): host API. Close an open amount prompt, name prompt (add friend, private message...) or the report
++    // abuse screen without submitting, like the game's own cancel paths (a click elsewhere closes the amount prompt,
++    // the report screen's close button calls closeModal). False when none was open.
++    public hudCancelInput(): boolean {
++        let closed: boolean = false;
++
++        if (this.dialogInputOpen) {
++            this.dialogInputOpen = false;
++            closed = true;
++        }
++
++        if (this.socialInputOpen) {
++            this.socialInputOpen = false;
++            closed = true;
++        }
++
++        if (this.ingame && this.mainModalId !== -1 && this.mainModalId === this.reportAbuseComId) {
++            this.closeModal();
++            closed = true;
++        }
++
++        if (closed) {
++            this.redrawChat = true;
++        }
++
++        return closed;
++    }
++
+     // custom (ios): host API. The host shows the options menu itself (a large one for fingers) instead of the drawn one:
+     // the client neither draws the open menu nor picks from it or closes it on its own (a long-press release, the
+     // pointer moving away); the host picks with hudMenuSelect or closes it with hudMenuClose.
+@@ -12451,6 +12639,13 @@ export class Client extends GameShell {
+                     }
+                 }
+ 
++                // custom (ios): while a dialogue waits for "Click here to continue" (a 350x16 strip just above the chat
++                // buttons), a tap anywhere on the chatbox continues it
++                if (!this.isMenuOpen && x > CHAT_RECT.x && y > CHAT_RECT.y && x < CHAT_RECT.x + CHAT_RECT.w && y < CHAT_RECT.y + CHAT_RECT.h && this.hudContinue()) {
++                    lcHaptic('selection');
++                    return;
++                }
++
+                 // within click threshold: activate mouse button
+                 // custom (ios): a tap is a left click; it right-clicks when the host's one-shot "right-click" mode
+                 // is armed, or for a starved long-press with a menu to open (normally it opened while holding)

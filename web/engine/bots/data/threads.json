@@ -1,0 +1,243 @@
+{
+  "_doc": [
+    "port (the variety work, round 2, Track S2: P4, topic threads): conversations of 3-6 turns between two bots (port/BotThreads), from 2004 player culture's topics: levels and the race to an unlock, what u doing, goals and saving up, members, how long u been playing, asl and where u from, drops, randoms, clans, the bank, school, Halo 2, World of Warcraft, Castle Wars next month, Zezima, the lag, food, music, films, being tired, a friend hacked, a million gp, Dragon Slayer, the weather.",
+    "Each topic's pools by turn: 'ask' opens it (a's line), 'answer' the other's ({v}: its own value from its state: a level, what it does, where it lives ...), and the opener's own answer to a counter-question ('own'); 'lower'/'higher'/'same' the opener's own answer by how its value compares with the other's; 'after' the other's word on it ('afterLower' ... when it compares); 'more' a second question and its answers (depth 6 only: clique mates and hub regulars); 'follow' and 'followUp' when the pair talked of it earlier this session (bots only: 'still 41?', 'u get 50 yet?'), never asked again from scratch.",
+    "Shared pools: 'counter' joins a counter-question to an answer ({x}: the answer): the asker then answers from its own state (the counter-question rule); 'segue' opens a second topic (once a thread); 'closers' end one now and then.",
+    "Every line, its slots filled from every value they take, passes the 274 word filter and chat codec (test/chat-filter.test.mjs). The words are the period's: lower case, u/ur/r, no apostrophes, nothing after November 2004. Said in the speaker's style (port/BotStyle)."
+  ],
+  "counter": ["{x} u?", "{x}, u?", "{x} wbu", "{x}, wbu?", "{x} and u?", "{x} hbu?", "{x} u"],
+  "counterAsk": ["u?", "wbu?", "and u?", "hbu?"],
+  "segue": ["btw ", "anyway ", "o and ", "also ", ""],
+  "closers": ["k cya", "gl", "kk", "lol ok", "k gl", "ttyl", "k back to it", "cya"],
+  "skills": ["wc", "mining", "fishing", "cooking", "att", "str", "def", "range", "magic", "prayer", "smithing", "fm", "crafting"],
+  "topics": {
+    "level": {
+      "ask": ["{skill} lvl?", "whats ur {skill}?", "what {skill} lvl r u", "wats ur {skill} lvl", "whats ur {skill} lvl?", "ur {skill} lvl?"],
+      "answer": ["{v}", "{v} lol", "im {v}", "only {v}", "{v} atm", "{v} :)"],
+      "lower": ["{v} :(", "{v} lol ur higher", "only {v}", "{v}, gj", "{v} lol", "{v}, ur beating me"],
+      "higher": ["{v} :)", "{v}, beat u", "{v} haha", "{v} lol", "{v}, owned", "{v}, i win lol"],
+      "same": ["{v} too lol", "same, {v}", "{v} same lol", "no way {v} too", "{v} too!!"],
+      "afterLower": ["lol", "ill catch up", "dang", "gj", "show off lol", "nice"],
+      "afterHigher": ["haha", "catch up lol", "lol newb", "ill wait for u", "ez"],
+      "afterSame": ["race u", "twins lol", "lol", "race to {next}?"],
+      "more": [
+        ["how long did that take", ["like a week", "ages lol", "2 days", "forever", "like 3 days", "a month lol"]],
+        ["whats ur goal", ["99 lol", "{next} for {unlock}", "{next}", "just {next} for now"]],
+        ["where u train it", ["{place}", "{place} lol", "near {place}", "all over"]]
+      ],
+      "howLongLow": ["not long", "like an hour lol", "a day", "not long lol", "an hour or so"],
+      "howLongMid": ["like a week", "few days", "2 days", "like 3 days", "a while lol"],
+      "howLongHigh": ["ages lol", "forever", "a month lol", "months", "like 2 months"],
+      "follow": ["still {was} {skill}?", "u get {next} {skill} yet?", "hows ur {skill} going", "still {was}?"],
+      "followUp": ["{v} now :)", "ya {v} now", "{v} now lol", "got {v} lol"],
+      "followSame": ["ya still {v} lol", "not yet lol", "still {v} :(", "ya still {v}"],
+      "afterFollow": ["nice", "gj", "gz", "nice one"],
+      "afterFollowSame": ["lol", "slow lol", "lol same", "keep going lol"]
+    },
+    "cb": {
+      "ask": ["whats ur cb", "cb?", "what cb r u", "whats ur combat", "what lvl r u"],
+      "answer": ["{v}", "{v} cb", "lvl {v}", "{v} lol", "im {v}"],
+      "lower": ["{v} :(", "{v} lol", "only {v}", "{v} ur higher"],
+      "higher": ["{v} :)", "{v} lol", "{v}, beat u", "{v} haha"],
+      "same": ["{v} too", "same lol {v}", "{v} too lol"],
+      "afterLower": ["lol", "u will get there", "nice", "dang"],
+      "afterHigher": ["lol", "catch up", "haha", "newb lol"],
+      "afterSame": ["lol", "twins", "fight me lol"],
+      "more": [
+        ["u pure?", ["nah main", "no lol", "ya str pure", "nah just a main"]],
+        ["u pk?", ["sometimes", "nah", "ya at edge", "not really"]]
+      ],
+      "follow": ["still {was} cb?", "what cb now", "still {was}?"],
+      "followUp": ["{v} now", "{v} now :)", "{v} lol"],
+      "followSame": ["ya still {v}", "still {v} lol"],
+      "afterFollow": ["nice", "gj", "gz"],
+      "afterFollowSame": ["lol", "slow lol"]
+    },
+    "total": {
+      "ask": ["whats ur total", "total lvl?", "whats ur total lvl", "total?"],
+      "answer": ["{v}", "{v} total", "like {v}", "{v} lol"],
+      "lower": ["{v} :(", "{v} lol", "only {v}", "{v}, ur higher"],
+      "higher": ["{v} :)", "{v}, beat u", "{v} haha", "{v} lol"],
+      "same": ["{v} too", "{v} same lol"],
+      "afterLower": ["lol", "nice", "gj"],
+      "afterHigher": ["dang", "lol", "newb lol", "catch up"],
+      "afterSame": ["lol", "weird"],
+      "more": [["whats ur highest", ["{skill} lol", "prob {skill}", "{skill}"]]],
+      "follow": ["whats ur total now", "still {was} total?"],
+      "followUp": ["{v} now", "{v} :)"],
+      "followSame": ["still {v} lol", "same lol"],
+      "afterFollow": ["nice", "gj"],
+      "afterFollowSame": ["lol", "lol same"]
+    },
+    "doing": {
+      "ask": ["wyd", "what u doing", "wat r u doing", "what u up to", "wat u doing"],
+      "answer": ["{v}", "{v} lol", "just {v}", "{v} atm"],
+      "own": ["{v}", "{v} lol", "just {v}", "{v} atm"],
+      "same": ["{v} too lol", "same, {v}", "{v} too"],
+      "after": ["nice", "cool", "fun lol", "good xp?", "lol", "boring lol"],
+      "afterSame": ["lol same", "twins lol", "nice"],
+      "more": [
+        ["good xp?", ["ya decent", "its ok", "nah its slow lol", "ya pretty good"]],
+        ["how long u been at it", ["like an hour", "ages lol", "just started", "all day lol"]]
+      ],
+      "follow": ["still {was}?", "u still {was}?", "still at it?"],
+      "followUp": ["nah {v} now", "nah im {v} now", "nope {v} now"],
+      "followSame": ["ya lol", "ya still", "ya forever lol"],
+      "afterFollow": ["lol", "nice", "fun"]
+    },
+    "goal": {
+      "ask": ["what u going for", "whats ur goal", "goals?", "what u training for"],
+      "answer": ["{v}", "{v} lol", "going for {v}"],
+      "own": ["{v}", "{v} lol", "going for {v}"],
+      "after": ["gl", "nice gl", "gl with that", "nice", "gl lol"],
+      "more": [["how far", ["like half way", "almost lol", "far lol", "a few lvls"]]]
+    },
+    "saving": {
+      "ask": ["saving for anything?", "what u saving for", "saving up?"],
+      "answer": ["{v}", "{v} lol", "saving for {v}"],
+      "own": ["{v}", "{v} lol", "saving for {v}"],
+      "after": ["gl", "nice", "gl lol", "thats a lot lol"],
+      "more": [["how much u got", ["like {k}", "{k} lol", "only {k}", "bout {k}"]]]
+    },
+    "members": {
+      "ask": ["u members?", "r u members", "u p2p?", "members?"],
+      "yes": ["ya", "yep", "ya lol", "ya since the summer", "yes"],
+      "no": ["nah f2p", "nah", "no im f2p", "nope"],
+      "both": ["ya but im on f2p lol", "ya just playing f2p"],
+      "afterYes": ["members is so worth it", "nice", "worth it", "cool"],
+      "afterNo": ["members is 5 bucks lol", "my mom wont pay lol", "same", "get members"]
+    },
+    "playtime": {
+      "ask": ["how long u been playing", "how long u played", "when did u start", "how long u been on rs"],
+      "after": ["nice", "lol newb", "respect", "cool", "dang"]
+    },
+    "asl": {
+      "ask": ["asl?", "asl", "asl lol"],
+      "answer": ["{age} {g} {region}"],
+      "own": ["{age} {g} {region}", "{age} {g} {region} :)", "cool, {age} {g} {region}"],
+      "after": ["cool", "nice", "kk", "same age lol"]
+    },
+    "from": {
+      "ask": ["where u from?", "where u from", "where do u live"],
+      "answer": ["{region}", "{region} lol", "im from {region}"],
+      "own": ["{region}", "{region} here", "cool, {region}", "{region} lol"],
+      "same": ["same!!", "no way same", "me too", "same lol"],
+      "after": ["cool", "nice", "never been lol", "cool cool"]
+    },
+    "drops": {
+      "ask": ["get any good drops?", "any good drops?", "got any drops today", "get anything good?"],
+      "got": ["ya {v} lol", "{v}", "got a {v}", "ya {v}"],
+      "none": ["nah", "just bones lol", "nope", "nothing good", "nah never lol"],
+      "after": ["lucky", "nice", "lol", "jealous", "rip"]
+    },
+    "randoms": {
+      "ask": ["had any randoms today?", "get any randoms?", "randoms today?"],
+      "answer": ["ya the genie lol", "got a lamp", "the old man lol", "nah", "the frog one lol", "a swarm lol", "nope", "the drill guy lol", "ya the mime"],
+      "after": ["lol", "i hate randoms", "ya theyre so annoying", "lucky", "lol same"]
+    },
+    "clan": {
+      "ask": ["u in a clan?", "r u in a clan", "any clan?"],
+      "yes": ["ya {clan}", "{clan}", "ya im in {clan}"],
+      "no": ["nah", "no", "nope", "no lol"],
+      "after": ["cool", "nice", "never heard of it lol"],
+      "invite": ["u should join {clan} lol", "join {clan}", "come to {clan}"]
+    },
+    "favskill": {
+      "ask": ["whats ur fav skill", "fav skill?", "best skill?", "whats the best skill"],
+      "answer": ["{v} lol", "{v}", "prob {v}", "{v} for sure"],
+      "own": ["{v}", "{v} lol", "{v} for me"],
+      "same": ["same!!", "{v} too", "same lol"],
+      "after": ["{v} is boring lol", "nice", "lol", "eh", "really?"]
+    },
+    "bank": {
+      "ask": ["hows ur bank", "how much u got", "whats ur bank worth", "rich?"],
+      "answer": ["like {v}", "{v} lol", "bout {v}", "only {v}", "{v}"],
+      "own": ["{v}", "{v} lol", "like {v}"],
+      "afterRich": ["nice", "rich lol", "dang", "can i have some lol"],
+      "afterPoor": ["lol im poor", "lol", "same", "rip"]
+    },
+    "school": {
+      "ask": ["got school tmrw?", "school tmrw?", "u got school"],
+      "young": ["ya :(", "ya ugh", "nah day off", "ya lol", "ya dont remind me"],
+      "adult": ["lol im {age}", "work tmrw", "no lol im old", "nah work"],
+      "after": ["lucky", "lol", "ugh", "same"]
+    },
+    "halo": {
+      "ask": ["u got halo 2?", "anyone play halo 2", "halo 2 is sick", "u play halo 2?"],
+      "yes": ["ya its sick", "ya so good", "ya i play online", "ya", "ya its the best"],
+      "no": ["not yet", "dont have one lol", "nah", "want it lol"],
+      "after": ["its so good", "get it lol", "nice", "lol"]
+    },
+    "wow": {
+      "ask": ["u getting wow?", "gonna get wow?", "anyone getting wow", "wow looks good"],
+      "answer": ["maybe", "nah rs is better", "ya prob", "whats wow", "my pc is too slow lol", "too expensive"],
+      "after": ["lol", "rs is better", "same", "ya"]
+    },
+    "cw": {
+      "ask": ["castle wars next month!!", "cant wait for castle wars", "castle wars soon"],
+      "answer": ["ya cant wait", "whats castle wars", "finally", "ya", "sweet"],
+      "own": ["gonna be so fun", "its like capture the flag", "its gonna be sick", "sara or zammy lol"],
+      "after": ["sweet", "nice", "cool", "ya"]
+    },
+    "zezima": {
+      "ask": ["saw zezima once", "zezima is so high lvl", "zezima has like 99 everything"],
+      "answer": ["no way", "lol where", "hes a no life", "lucky", "who"],
+      "own": ["at fally lol", "ya he had a phat", "ya hes like 1900 total", "on world 2"],
+      "after": ["lucky", "lol", "nice", "no life lol"]
+    },
+    "lag": {
+      "ask": ["lag?", "so laggy", "laggy today", "lag!!"],
+      "answer": ["ya", "ya super laggy", "not for me", "a bit", "ya so bad"],
+      "own": ["jagex fix ur servers lol", "ugh", "i keep lagging out", "my dialup lol"],
+      "after": ["lol", "ya", "lol ya"]
+    },
+    "food": {
+      "ask": ["what u eating", "eating anything?", "im hungry lol", "what u having for dinner"],
+      "answer": ["pizza lol", "cereal", "nothing", "chips lol", "mac and cheese", "a sandwich", "pizza rolls", "toast"],
+      "after": ["nice", "lol", "now im hungry", "yum"]
+    },
+    "music": {
+      "ask": ["listening to anything?", "u like green day?", "music?", "what u listening to"],
+      "answer": ["green day", "linkin park", "eminem", "the radio lol", "nothing", "blink 182", "usher lol", "nothing lol"],
+      "after": ["nice", "ya theyre good", "lol", "eh"]
+    },
+    "movies": {
+      "ask": ["seen the incredibles?", "seen any good movies?", "seen shrek 2?", "seen napoleon dynamite"],
+      "answer": ["ya it was good", "not yet", "ya so funny", "no", "ya twice lol", "want to"],
+      "after": ["its so good", "go see it", "lol", "ya"]
+    },
+    "tired": {
+      "ask": ["so tired lol", "im so tired", "should sleep lol", "its so late lol"],
+      "answer": ["go sleep lol", "same", "lol me too", "its not even late", "sleep is for the weak lol"],
+      "own": ["after this lvl", "1 more trip", "lol ya", "5 more min"],
+      "after": ["lol", "famous last words", "ya right lol", "lol same"]
+    },
+    "hacked": {
+      "ask": ["my friend got hacked", "my mate got hacked yesterday", "my bro got hacked lol"],
+      "answer": ["omg how", "lol how", "did he give his pass out?", "thats bad", "rip"],
+      "own": ["he gave his pass to someone", "some fake mod lol", "he clicked some site", "dunno lol"],
+      "after": ["lol newb", "never give ur pass", "thats sad", "rip"]
+    },
+    "dream": {
+      "ask": ["if u had 1m what would u buy", "what would u do with 1m", "1m what would u buy"],
+      "answer": ["a phat lol", "full rune", "members forever lol", "a dragon long", "a santa", "rune everything", "lots of lobs lol"],
+      "after": ["lol same", "nice", "good choice", "lol"]
+    },
+    "quest": {
+      "ask": ["done dragon slayer?", "u done dragon slayer?", "did u do dragon slayer"],
+      "yes": ["ya", "yep", "ya ages ago", "ya it was hard"],
+      "no": ["not yet", "nah", "no im too low", "not yet lol"],
+      "after": ["nice", "its hard lol", "the dragon is scary", "gl with it"]
+    },
+    "weather": {
+      "ask": ["its snowing here lol", "its raining here", "so cold here", "its so cold"],
+      "answer": ["lucky", "no snow here", "same here", "its sunny here lol", "same", "brr"],
+      "after": ["lol", "ya", "lol ya"]
+    },
+    "inwhat": {
+      "ask": ["in what?", "what lvl?", "in what lol"],
+      "answer": ["{v}", "{v} lol", "{v}!!"],
+      "after": ["nice", "gz", "nice gz", "gz lol"]
+    }
+  }
+}

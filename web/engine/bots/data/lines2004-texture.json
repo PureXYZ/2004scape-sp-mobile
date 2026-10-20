@@ -1,0 +1,32 @@
+{
+    "about": "Phase 5a's new lines in a late-2004 voice (the realism work: texture), the same shape and rules as lines2004.json: each group's tag says where and when it is true. Every line through the 274 filter and charset. Track F (fights, skills and manners) comes first (\"track\": \"F\"): misclicks, forgotten food, White Wolf Mountain, kill- and rock-stealing and the arguments; the arguments' lines are said only through port/BotChatter.argue (a victim's 'ks', a stealer's 'ks-taken' and 'rock-reply': who:rude is a rude talker's answer, the rest a polite one's). Track M (movement and magic, its block at the end): teleport spells (said after a real cast, a landing's own lines only at its town), wrong turns ('lost', fired by BotAction's wrong turns: one group for both tracks' lines) and alching. \"magic\" holds Track M's lines said only at their moment (port/BotTeleport: the cast that used the last law rune), never picked as idle talk.",
+    "groups": [
+        {"track": "F", "tag": {"c": "event", "event": "ks"}, "lines": ["ks!", "kser", "omg ks", "hey i was fighting that", "i was on that", "stop ksing", "wow ks"]},
+        {"track": "F", "tag": {"c": "event", "event": "ks", "targets": ["cow"]}, "lines": ["that was my cow", "hey thats my cow", "omg my cow"]},
+        {"track": "F", "tag": {"c": "event", "event": "ks", "targets": ["chicken"]}, "lines": ["that was my chicken"]},
+        {"track": "F", "tag": {"c": "event", "event": "ks", "targets": ["goblin"]}, "lines": ["that was my goblin"]},
+        {"track": "F", "tag": {"c": "event", "event": "ks-taken", "who": ["rude"]}, "lines": ["first come first serve", "finders keepers", "move nub", "too slow lol", "deal with it", "u snooze u lose"]},
+        {"track": "F", "tag": {"c": "event", "event": "ks-taken", "who": ["rude"], "targets": ["cow"]}, "lines": ["its not ur cow"]},
+        {"track": "F", "tag": {"c": "event", "event": "ks-taken"}, "lines": ["sry", "oops my bad", "sry didnt see u", "oh sorry"]},
+        {"track": "F", "tag": {"c": "event", "event": "rock-reply", "who": ["rude"]}, "lines": ["rocks r for everyone", "its a free rock", "ty for the rock lol", "get ur own rock"]},
+        {"track": "F", "tag": {"c": "event", "event": "rock-reply"}, "lines": ["oops thought it was free", "sry ill find another", "oh my bad"]},
+        {"track": "F", "tag": {"c": "event", "event": "misclick", "skills": ["Mine"]}, "lines": ["wrong rock lol", "oops empty rock"]},
+        {"track": "F", "tag": {"c": "event", "event": "misclick", "skills": ["Combat"], "targets": ["cow"]}, "lines": ["lol wrong cow"]},
+        {"track": "F", "tag": {"c": "event", "event": "misclick", "skills": ["Combat"]}, "lines": ["missclicked lol"]},
+        {"track": "F", "tag": {"c": "event", "event": "misclick", "skills": ["Woodcut"]}, "lines": ["oops wrong tree", "lol wrong tree"]},
+        {"track": "F", "tag": {"c": "event", "event": "misclick"}, "lines": ["whoops", "misclick lol", "oops wrong click"]},
+        {"track": "F", "tag": {"c": "event", "event": "forgot-food"}, "lines": ["oh no forgot food", "forgot my food lol", "oops no food", "no food lol"]},
+        {"track": "F", "tag": {"c": "event", "event": "wolves"}, "lines": ["stupid wolves", "wolves r so annoying", "omg wolves", "white wolf mountain lol", "hate these wolves"]},
+        {"tag": {"c": "event", "event": "teleport"}, "lines": ["laws r so expensive", "anyone selling laws?", "tele ftw", "teles r the best", "lol so much faster than walking", "need more laws"]},
+        {"tag": {"c": "event", "event": "teleport", "places": ["camelot"]}, "lines": ["tele to camelot lol", "camelot tele ftw", "cammy tele lol"]},
+        {"tag": {"c": "event", "event": "teleport", "places": ["falador"]}, "lines": ["fally tele ftw", "fally tele lol"]},
+        {"tag": {"c": "event", "event": "teleport", "places": ["varrock"]}, "lines": ["varrock tele lol", "varrock tele ftw"]},
+        {"tag": {"c": "event", "event": "teleport", "places": ["lumbridge"]}, "lines": ["lumby tele lol"]},
+        {"tag": {"c": "event", "event": "teleport", "places": ["ardougne"]}, "lines": ["ardy tele ftw", "ardy tele lol"]},
+        {"tag": {"c": "event", "event": "lost"}, "lines": ["oops wrong way", "lol wrong way", "lol got lost", "wait wrong way lol", "lol im lost", "wait where am i going lol"]},
+        {"tag": {"c": "event", "event": "alch", "at": ["bank"]}, "lines": ["alching lol", "alching for mage lvls", "nats r so expensive", "alch alch alch", "need more nats"]}
+    ],
+    "magic": {
+        "lastLaw": ["last law rune lol", "out of laws lol", "last law lol"]
+    }
+}

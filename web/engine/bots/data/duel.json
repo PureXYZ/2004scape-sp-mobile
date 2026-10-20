@@ -1,0 +1,25 @@
+{
+    "about": "The Duel Arena's places and numbers for the bots (the realism work, phase 5b, Track A defaults). Read by port/BotArena. The places are 274's (game_duelarena: duelarena.dbrow's zones, the map's chests, crate and nurses); 'approach' is the walkway in from the west, where a visitor from outside walks first, and from west of Al Kharid's fence ('fenceX') the toll gate's east side ('tollGate') before it: walkTo straight to the bank from the north-west wandered along the complex's walls for 300-450 ticks, and from Lumbridge, Draynor or Falador to the walkway along the River Lum and the fence for 400-850, so the stuck check jumped them; by the gate 34-363 ticks from Lumbridge, Varrock, Barbarian Village or Edgeville, 39 on to the walkway, 42 on to the bank. 'rules' are the bot-against-bot rule sets by %dueloptions bit (duelarena.constant: 1 no movement, 2 no weapons, 4 no ranged, 6 no magic), all fightable by melee, never obstacles. 'stakes': about a quarter of bot-against-bot duels stake nothing (`none`, 0.35, is the share of the deals with no stake named in a call: since the rooms grew, a named stake fits more often), the rest log-uniform 1k-100k, at most 30-50 % of the poorer bot's coins (`share`: drawn for each bot each deal, within what it carries; zero-sum between bots. The variety work, round 1, track F, ISS-8: a tenth made a median stake of 1.2-1.7k). The human's caps are apart ('human'). 'human': by design (2026-10-16): coins only, mirrored, at most min(25k, 10 % of the bot's coins) a stake, the human's net winnings from bots at most 50k per hour of play (6,000 play ticks), the bot at full Hitpoints and its combat at least the human's minus 3; challenges only while the human stands in the challenge area, the first 30-120 s after they come, then at least 5 minutes apart. 'stakeSpots': where stakers stand (x, z, radius, weight: the walkway between the arenas first, by the hospital second); a staker goes where the others stand (a spot's weight times 1 + 2 a visitor standing there or bound for it). 'staker': a call every 4-9 minutes while players are near (its offer: X2's set-piece lines kept to a handful an hour a staker), a partner looked for every 10-30 s within 25 tiles (the next spot's stakers too) and 15 combat levels (with 10, two or three stakers at a time at 100 online, of combat 20-90, found none in one 2-hour run), a move to where the others stand now and then, home after 2-4 losses in a row. 'visit': combat 20+ levelling bots with 5k+ coins within 900 tiles and 25+ minutes of their session left ('sessionLeft') come for 20-45 minutes ('length', ticks), 60 % to stake (one with under 10k coins, too few for the least stake at a tenth of them, watches) and 40 % to watch, at most 8 per 100 online (24 in all), every 1-2 hours of play ('gap': ticks of the bot's own play, counted over its sessions; a world's bots begin mid-gap, or mid-visit as often as the hours make it): the defaults' 3-6 hours made about 1 at 100 online, not their 4-8 (only 12-17 of 100 online bots are combat 20+ with 5k+ coins within reach; the research had counted more), so the gap is a third of theirs. 'watch': 3 watchers in 10 throw 1-3 rotten tomatoes a duel, 10+ ticks apart, from within 10 tiles (274's reach for an item used on a player), 5-15 bought a visit at the crate. 'bigStake': the director's set piece (duel_stake): two rich regulars, 50k-1m (at most half the poorer's coins), up to 12 bots within 80 tiles come to watch.",
+    "places": {
+        "bank": [3382, 3268],
+        "approach": [3318, 3242],
+        "tollGate": [3276, 3229],
+        "fenceX": 3268,
+        "crate": [3381, 3267],
+        "hospital": [3355, 3267, 3379, 3279],
+        "stakeSpots": [[3360, 3242, 3, 5], [3367, 3262, 4, 2], [3360, 3222, 3, 1], [3346, 3262, 3, 1], [3330, 3233, 2, 0.5]],
+        "idleSpot": [3367, 3262, 5]
+    },
+    "rules": [
+        {"key": "none", "bits": [], "weight": 40},
+        {"key": "melee", "bits": [4, 6], "weight": 35},
+        {"key": "box", "bits": [2, 4, 6], "weight": 15},
+        {"key": "nomove", "bits": [1, 4, 6], "weight": 10}
+    ],
+    "stakes": {"none": 0.35, "min": 1000, "max": 100000, "share": [0.3, 0.5]},
+    "human": {"cap": 25000, "share": 0.1, "purse": 50000, "purseTicks": 6000, "first": [50, 200], "gap": [500, 700], "answerTicks": 100, "noTicks": 50, "below": 3, "reach": 10, "caps": [1000, 2000, 3000, 5000, 10000, 15000, 20000, 25000]},
+    "visit": {"gap": [6000, 12000], "length": [2000, 4500], "minCombat": 20, "minCoins": 5000, "sessionLeft": 2500, "stakers": 0.6, "perHundred": 8, "cap": 24, "range": 900, "carry": 0.3, "food": [3, 6]},
+    "staker": {"call": [400, 900], "search": [17, 50], "reach": 25, "combat": 15, "losses": [2, 4]},
+    "watch": {"tomatoShare": 0.3, "throws": [1, 3], "gap": 10, "buy": [5, 15], "reach": 10, "shout": 0.3, "emote": 0.2},
+    "bigStake": {"min": 50000, "max": 1000000, "share": 0.5, "minCoins": 100000, "minCombat": 40, "combat": 15, "crowd": 12, "radius": 80, "spectators": 4, "minutes": 25}
+}

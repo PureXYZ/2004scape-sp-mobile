@@ -1,0 +1,5 @@
+{
+    "about": "data/names.json is append only (test/names.test.mjs): its first `count` names, joined by newlines, hash to `sha256`. After appending names: node web/engine/bots/test/names.test.mjs --update-lock",
+    "count": 4800,
+    "sha256": "aaf73dddd2deb50abf93b852b66dcc01cd49b105d490adb5b5edd69f5bcbf809"
+}

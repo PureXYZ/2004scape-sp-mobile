@@ -1,0 +1,15 @@
+{
+  "name": "2004scape-sp-mobile-web",
+  "private": true,
+  "type": "module",
+  "description": "Build tooling for 2004Scape on iOS and Android: bundles the engine worker, the patched web client, the host page and the HUD into build/Game.",
+  "scripts": {
+    "build": "node ../scripts/build-web.mjs",
+    "build:debug": "node ../scripts/build-web.mjs --debug"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.0",
+    "fflate": "0.8.3",
+    "node-forge": "1.4.0"
+  }
+}

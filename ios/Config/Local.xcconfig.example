@@ -1,0 +1,12 @@
+// Your own signing settings for device builds: copy this file to Local.xcconfig (beside it, git-ignored) and fill it in.
+// Signing.xcconfig includes it when it is there; without it the app still builds for the simulator and unsigned.
+//
+// DEVELOPMENT_TEAM: your Apple ID's team id (Xcode › Settings › Accounts › your team; a free Personal Team works,
+// with apps that expire after 7 days).
+//
+// BUNDLE_ID_SUFFIX: a bundle id belongs to the first team that registers it, so with a team of your own the plain
+// io.github.purexyz.scape2004 is taken: add a suffix of your own, e.g. ".yourname" for io.github.purexyz.scape2004.yourname.
+// (ios/scripts/deploy.sh with TEAM=<team id> and no BUNDLE_ID uses io.github.purexyz.scape2004.<team id>.)
+
+DEVELOPMENT_TEAM = ABCDE12345
+BUNDLE_ID_SUFFIX = .yourname

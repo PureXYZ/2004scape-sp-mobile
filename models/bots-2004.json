@@ -1,0 +1,11 @@
+{
+    "name": "2004 chat (Qwen3.5 0.8B + LoRA)",
+    "file": "bots-2004-q4km.gguf",
+    "bytes": 529297472,
+    "sha256": "94ef25e02ce7badd1f1d8600bd191f1e8c172acebc59541ff3b54e504867b9c4",
+    "ctx": 1024,
+    "template": "qwen-chatml-hybrid",
+    "base": "Qwen/Qwen3.5-0.8B@2fc06364715b967f1860aea9cf38778875588b17",
+    "quant": "Q4_K_M, imatrix from the training text (llama.cpp b11297)",
+    "url": "https://github.com/PureXYZ/2004scape-sp-mobile/releases/download/model-v1/bots-2004-q4km.gguf"
+}

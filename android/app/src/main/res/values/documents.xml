@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The saves' root in the system Files app (SavesDocumentsProvider; the iOS app's Files › On My iPhone › 2004Scape). -->
+<resources>
+    <string name="documents_root_title" translatable="false">2004Scape</string>
+    <string name="documents_root_summary" translatable="false">Characters and the bots\' world</string>
+</resources>

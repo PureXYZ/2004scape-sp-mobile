@@ -1,0 +1,43 @@
+ios: an item drag presses where the finger went down
+
+A drag only starts once the finger has moved TOUCH_SLOP (10 CSS px, about 13 game px), and it pressed at the
+finger's position at that moment, which can already be over the neighbouring inventory or bank slot (icons are
+32 px with a 4 px gap): touching the lower half of an item and dragging down moved the item below it. The press
+now happens at the touch-down point, and the minimenu (where mouseLoop takes the dragged slot from) is rebuilt
+for that point first.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 5b185a9..a8e3523 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -12029,6 +12029,8 @@ export class Client extends GameShell {
+             this.sx = this.nx = this.mx = e.screenX | 0;
+             this.sy = this.ny = this.my = e.screenY | 0;
+             this.ttime = e.timeStamp;
++            this.touchStartX = x; // custom (ios): the press point of a drag
++            this.touchStartY = y;
+ 
+             this.startedInGame = this.insideGame();
+             this.startedInSide = this.insideSide();
+@@ -12124,8 +12126,19 @@ export class Client extends GameShell {
+                 if (!this.dragging && this.exceedsGrabThreshold(TOUCH_SLOP)) {
+                     this.dragging = true;
+ 
+-                    this.nextMouseClickX = x;
+-                    this.nextMouseClickY = y;
++                    // custom (ios): press where the finger went down, not where it is now: TOUCH_SLOP later it can be
++                    // over the neighbouring item. mouseLoop takes the dragged slot from the minimenu, which the last
++                    // draw built at the current position, so rebuild that for the press point (no draw runs before
++                    // the mainloop that handles this press).
++                    if (!this.isMenuOpen) {
++                        this.mouseX = this.touchStartX;
++                        this.mouseY = this.touchStartY;
++                        this.buildMinimenu();
++                        this.mouseX = x;
++                        this.mouseY = y;
++                    }
++                    this.nextMouseClickX = this.touchStartX;
++                    this.nextMouseClickY = this.touchStartY;
+                     this.nextMouseClickButton = 1;
+                     this.mouseButton = 1;
+                 }

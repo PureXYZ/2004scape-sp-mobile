@@ -1,0 +1,47 @@
+{
+    "about": "The variety work's round 2 lines of Track M (members places and minigames: the far towns' outings, the Fishing Trawler, the Brimhaven Agility Arena, the Ranging Guild, a Treasure Trail), in a late-2004 voice, the same shape and rules as lines2004.json: each group's tag says where and when it is true. These are the outings' and minigames' own lines: port/BotOutings sayMembers says them at their moment (kind setpiece: out of H7, counted as X2; in the place of the speaker's next unprompted line), never the chatter (their one event, members, is never noted on a bot, so no idle pick fits them); a group's kind names its moment: outing-go-yanille, outing-there-rellekka, trawler-call, arena-tag, trail-dig ... Every line through the 274 filter and charset (test/chat-filter.test.mjs covers every group of GROUPS_2004).",
+    "groups": [
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-go-yanille"], "members": true}, "lines": ["off to yanille", "heading to yanille for some ogres", "yanille time", "gonna go kill ogres", "walking to yanille brb", "ogres here i come", "going yanille for big bones"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-there-yanille"], "members": true}, "lines": ["made it to yanille", "yanille is so quiet", "these ogres hit hard lol", "nobody ever comes here", "love it out here", "big bones from ogres nice", "ogres r good xp"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-leave-yanille"], "members": true}, "lines": ["ok done with ogres", "heading back now", "out of food lol", "bye yanille", "long walk back"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-go-karamja"], "members": true}, "lines": ["going to karamja", "off to kill jogres", "jungle time", "gonna take the boat to karamja", "jogres anyone?"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-there-karamja"], "members": true}, "lines": ["this jungle is huge", "jogres r easy xp", "so many trees lol", "nobody in this jungle", "jogres drop big bones"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-leave-karamja"], "members": true}, "lines": ["back to the boat", "ok enough jogres", "leaving the jungle", "time to head home"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-go-burthorpe"], "members": true}, "lines": ["off to burthorpe", "gonna fight the imperial guard", "heading up to burthorpe", "burthorpe trip"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-there-burthorpe"], "members": true}, "lines": ["burthorpe is dead lol", "these soldiers r tough", "the archers keep shooting me", "made it to burthorpe", "never anyone here"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-leave-burthorpe"], "members": true}, "lines": ["leaving burthorpe", "ok done here", "heading back down"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-go-rellekka"], "members": true}, "lines": ["going to rellekka", "off to fish in rellekka", "lobsters at rellekka today", "gonna fish with the vikings lol", "long walk to rellekka lol"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-there-rellekka"], "members": true}, "lines": ["nobody fishes here", "lol the rock crabs look like rocks", "rellekka is so far", "these vikings r weird", "quiet pier", "made it to rellekka"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-leave-rellekka"], "members": true}, "lines": ["ok full of lobsters", "heading back to seers", "bye vikings", "leaving rellekka"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-go-shilo"], "members": true}, "lines": ["going to shilo", "taking the cart to shilo", "fishing in shilo today", "shilo trip"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-there-shilo"], "members": true}, "lines": ["shilo is so nice", "quiet fishing spot here", "love the cart ride lol", "nobody fishes in shilo"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["outing-leave-shilo"], "members": true}, "lines": ["cart back to brimhaven", "ok leaving shilo", "done fishing here"]},
+
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["range-go"], "members": true}, "lines": ["going to the ranging guild", "gonna do the archery comp", "ranging guild time", "off to shoot some targets"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["range-start"], "members": true}, "lines": ["10 arrows lets go", "ok shooting", "here goes", "gl me lol"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["range-shot"], "members": true}, "lines": ["missed lol", "hit red", "bullseye!", "hit black lol", "so close", "hit blue", "my aim is bad today"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["range-done"], "members": true}, "lines": ["meh score", "got some tickets", "done with the comp", "ok out of coins lol", "not bad"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["range-done-good"], "members": true}, "lines": ["good score!", "nice tickets", "woo lots of tickets", "best score yet"]},
+
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trawler-call"], "members": true}, "lines": ["trawler anyone?", "anyone wanna do trawler", "trawler team?", "going trawler, who wants to come", "need people for trawler"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trawler-join"], "members": true}, "lines": ["im in for trawler", "sure ill come", "ill come to trawler", "me! trawler", "count me in for trawler", "ok lets do trawler"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trawler-board"], "members": true}, "lines": ["all aboard", "on the boat", "lets go fishing", "everyone on?", "hope we dont sink lol"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trawler-sea"], "members": true}, "lines": ["fix the leaks!", "bail!!", "theres a leak", "i got the leaks", "more leaks lol", "keep bailing"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trawler-net"], "members": true}, "lines": ["net ripped", "someone fix the net", "i got the net", "net again lol"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trawler-win"], "members": true}, "lines": ["we made it", "nice job guys", "good trawl", "gg trawler", "back on land"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trawler-sink"], "members": true}, "lines": ["we sank lol", "noooo", "so much for that", "that boat is a joke", "wet again lol"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trawler-catch"], "members": true}, "lines": ["got some lobsters", "junk again lol", "nice catch", "got a shark", "all junk lol", "got a swordfish"]},
+
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["arena-go"], "members": true}, "lines": ["going to the agility arena", "brimhaven arena time", "gonna get some tickets", "off to brimhaven"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["arena-tag"], "members": true}, "lines": ["got a ticket", "tagged it", "ticket!", "got that one", "made it in time"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["arena-hit"], "members": true}, "lines": ["ow darts", "darts lol", "stupid spikes", "ouch these traps", "these traps hurt"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["arena-done"], "members": true}, "lines": ["ok done with the arena", "got a few arena tickets", "my hp is low lol", "enough agility for now"]},
+
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trail-go"], "members": true}, "lines": ["doing my clue", "clue time", "gonna do this clue", "lets see where this clue goes"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trail-ask"], "members": true}, "lines": ["anyone know this clue?", "where is this lol", "clue help anyone?", "what does this clue mean"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trail-dig"], "members": true}, "lines": ["digging", "dig dig", "should be here", "x marks the spot lol"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trail-step"], "members": true}, "lines": ["another clue lol", "got a casket", "next clue", "ugh another one"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trail-done"], "members": true}, "lines": ["finished my clue!", "got my reward", "clue done", "nice reward", "meh reward lol"]},
+        {"track": "M", "tag": {"c": "event", "event": "members", "kinds": ["trail-giveup"], "members": true}, "lines": ["this clue is too hard", "cant do this clue", "dropping this clue lol", "no idea where this is"]}
+    ]
+}

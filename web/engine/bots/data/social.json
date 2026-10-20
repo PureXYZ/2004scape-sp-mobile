@@ -1,0 +1,92 @@
+{
+  "_doc": [
+    "port (the realism work, phase 3: population, track C): what social regulars, lurers and friend cliques say (tasks/SocialTask, port/BotCliques). Upstream's social lines (the approach, the small talk, the goodbyes, the lure's lead and its betrayal) stay in tasks/SocialTask.ts with their words; these are the new ones.",
+    "regular: a social bot at its hub greets a passer-by (a bot or a human) now and then; {name} is the passer-by's first name (or, for a one-word name, its letters before any digits).",
+    "lure: 'keep luring' with 2004's lure forms (free armour in the wildy, a fake drop party, 'ill guard u while u mine', a safe spot): 'pitch' opens it after the small talk, 'lead' is said on the way north. Then upstream's lead to Edgeville and its betrayal. (Phase 5b, Track P: six more forms, drawn evenly with the rest: a vendor's deal at the edge, free lobs, a clan recruiting, a phat dropped, a paid helper, a rare spawn; and 'ambush': the arrival line when the lure leads to a PK team waiting in the Wilderness, half the lures while a team is there: tasks/SocialTask.)",
+    "clique: friends of a clique (port/BotCliques): a greeting when two meet ({nick}: the other's first name), the answer, a goodbye naming a friend near when one logs out (each a departure line: gtg, cya, bye, gn), the friend's answer, and now and then 'me too' (it logs out soon after); 'lead'/'follow': a word when they set off together (rare).",
+    "Every line, its slots filled, passes the 274 word filter and chat codec (test/chat-filter.test.mjs). The words are the period's: lower case, u/ur/r, nothing after November 2004.",
+    "(the variety work, round 2, Track S2) clique.banter/banterPlain: a friend's word to a mate while they are together (P8: port/BotCliques' banter pass; {nick} the mate's), banterBack the mate's answer now and then, inJokes a clique's own (one per clique, from its names' seed: never another clique's). approach: a social regular's opener for a human, by what the human is (P5: its gear {item}, armour only at armour (trims, god, dragon, full rune: the fixes, B5), a cape or a hat, its combat level {n} high or low, what it does: a fight {target}, a tree, a rock, fishing, standing; the place {place}), with upstream's small talk (tasks/SocialTask CHAT_LINES, word for word) in the pool; approachAfter what it says once the human answered."
+  ],
+  "regular": {
+    "greet": ["hi", "hey", "yo", "sup", "hiya", "hello", "heya", "hey there", "hi there", "ello", "yo whats up", "hey whats up", "sup man", "hi :)"],
+    "greetNamed": ["hi {name}", "hey {name}", "yo {name}", "sup {name}", "hiya {name}", "heya {name}", "o hey {name}", "hey {name} :)"]
+  },
+  "lure": {
+    "forms": {
+      "armour": {
+        "pitch": ["giving away free armour in the wildy, follow me", "free rune armour just north of edge, come", "im giving my old addy away in the wild, wanna come?", "free armour at the wildy edge, follow"],
+        "lead": ["its just past edge", "almost there", "this way, its free lol", "few more steps", "its all yours lol"]
+      },
+      "party": {
+        "pitch": ["drop party at the wildy edge in 2 min!!", "drop party north of edge, come!", "im doing a drop party in the wild, follow me", "dp at edge in a sec, follow"],
+        "lead": ["hurry its starting", "almost there", "the party is just up here", "come on we gonna miss it", "theres loads of ppl already"]
+      },
+      "guard": {
+        "pitch": ["u mine? theres coal in the wildy, ill guard u", "ill guard u while u mine in the wild, ive got food", "wanna mine in the wildy? ill protect u", "i know rune rocks in the wild, ill guard u"],
+        "lead": ["its safe dont worry", "ill keep watch", "just up here", "nearly there", "no pkers today"]
+      },
+      "spot": {
+        "pitch": ["follow me i know a safe spot", "come i know a good spot up north", "follow me, secret training spot", "i know a spot with no pkers, follow"],
+        "lead": ["this way", "almost there", "just up here", "trust me lol", "its worth it"]
+      },
+      "vendor": {
+        "pitch": ["selling rune scim 10k, meet me north of edge", "selling cheap rune at the wildy edge, follow", "selling addy cheap, meet me in the wildy"],
+        "lead": ["its just past the edge", "got it in my bank up here", "few more steps", "almost there"]
+      },
+      "lobs": {
+        "pitch": ["free lobs at the wildy edge, follow", "giving away lobs up north, come", "free food at the edge, follow me"],
+        "lead": ["loads of lobs lol", "just up here", "hurry before theyre gone", "almost there"]
+      },
+      "clan": {
+        "pitch": ["my clan is recruiting, meet at the wildy", "wanna join my clan? meet us up north", "clan meeting in the wildy, come"],
+        "lead": ["the clan is just up here", "theyre waiting", "this way", "almost there"]
+      },
+      "phat": {
+        "pitch": ["dropping a phat at lvl 3 wildy!!", "giving away a phat in the wildy, follow", "free phat north of edge lol"],
+        "lead": ["its real lol", "hurry up", "just up here", "almost there"]
+      },
+      "help": {
+        "pitch": ["i need help killing something up north, ill pay 5k", "help me kill a boss up north? 5k", "need a hand in the wildy, ill pay"],
+        "lead": ["its just up here", "ill pay when its dead", "this way", "almost there"]
+      },
+      "rare": {
+        "pitch": ["wanna see a rare spawn? follow me", "theres a rare spawn up north, come", "secret rare spawn, follow"],
+        "lead": ["its so rare lol", "u wont believe it", "just up here", "almost there"]
+      }
+    },
+    "ambush": ["team!", "lol get him guys", "got one for u guys", "surprise lol", "here he is guys"]
+  },
+  "clique": {
+    "greet": ["yo {nick}", "hey {nick}", "sup {nick}", "{nick}!", "hi {nick}", "o hey {nick}", "{nick} :)", "wassup {nick}", "heya {nick}", "hey {nick} wb"],
+    "greetPlain": ["yo", "hey", "sup", "hi", "o hey", "wassup"],
+    "greetBack": ["sup", "hey", "yo", "hey {nick}", "yo {nick}", "sup {nick}", "hi", "o hi", "hey :)"],
+    "greetBackPlain": ["sup", "hey", "yo", "hi", "o hi", "hey :)"],
+    "bye": ["gtg cya {nick}", "cya {nick}", "bye {nick}", "gtg {nick}", "gn {nick}", "cya tmrw {nick}", "gtg, cya {nick}", "bye {nick} gtg"],
+    "byePlain": ["gtg cya", "cya guys", "bye guys", "gtg", "gtg cya tmrw"],
+    "byeBack": ["cya", "bye", "cya {nick}", "later", "laters", "bye {nick}", "cya tmrw", "night"],
+    "byeBackPlain": ["cya", "bye", "later", "laters", "cya tmrw", "night"],
+    "meToo": ["ya me too gtg", "same gtg too", "me too cya", "ya i gtg too", "gtg too lol", "same lol cya", "me 2, cya"],
+    "lead": ["follow me", "come on", "this way", "follow", "lets go"],
+    "follow": ["k", "coming", "wait up", "ok", "kk"],
+    "banter": ["lol ur so slow {nick}", "{nick} lol", "omg {nick} look", "ur turn to bank {nick}", "im gonna beat u {nick}", "lol nice one {nick}", "{nick} hurry up", "wait for me {nick}", "{nick} u still here?", "race u {nick}", "how many u got {nick}", "{nick} stop stealing my spot lol", "{nick} ur so bad lol", "lol {nick} wake up", "{nick} afk again?", "come on {nick}", "{nick} what lvl now", "haha {nick}", "{nick} u newb", "{nick} give me ur stuff lol", "{nick} ur lagging lol"],
+    "banterPlain": ["lol ur so slow", "race u to the bank", "wait for me", "u still here?", "ur turn to bank", "im gonna beat u lol", "how many logs u got", "lol nice one", "hurry up lol", "lol newb", "this is boring lol", "1 more trip?", "brb dont leave lol", "ur so slow lol", "lets go somewhere else", "beat u lol", "lol look at that guy"],
+    "banterBack": ["lol shut up", "lol", "ya ya", "no u", "shut up {nick}", "lol ok", "whatever {nick}", "haha", "u wish", "lol im trying", "k k", "lol {nick}"],
+    "banterBackPlain": ["lol shut up", "lol", "ya ya", "no u", "lol ok", "whatever", "haha", "u wish", "lol im trying", "k k"],
+    "inJokes": ["remember the goblin lol", "chicken king lol", "never forget the cow", "lol the bronze scim", "lumby forever", "the lobster incident lol", "lol the wildy trip", "{nick} and his pink hat lol", "remember when {nick} got lost lol", "lol the dragon", "no more ice giants lol", "the frog lol", "best clan ever", "lol the bank pin", "never trust {nick} with food lol", "lol remember draynor", "{nick} and the gnome lol", "shrimps for life", "lol the jail random", "the cake stall lol"]
+  },
+  "approach": {
+    "gear": ["nice {item}", "where u get that {item}", "omg {item}", "how much was ur {item}"],
+    "armour": ["nice gear", "nice armour lol"],
+    "cape": ["nice cape", "where u get that cape", "i like ur cape", "cape lol nice"],
+    "hat": ["nice hat lol", "where u get that hat", "cool hat"],
+    "high": ["ur high lvl", "wow lvl {n}", "ur so high lol", "lvl {n} nice", "teach me lol"],
+    "low": ["lvl {n} lol hi", "u new?", "hi newbie", "first day?", "welcome to rs lol"],
+    "fight": ["good spot?", "killing {target}?", "good xp here?", "these {target} drop anything?", "need help lol"],
+    "Woodcut": ["how many logs u got", "good tree?", "nice spot", "chopping lol"],
+    "Mine": ["any rocks left?", "mining lol", "good rocks here?", "how many ores u got"],
+    "Fish": ["catching much?", "fishing lol", "good spot?"],
+    "idle": ["u waiting for someone?", "wyd", "bored?", "whats up"],
+    "place": ["first time in {place}?", "{place} is busy today", "u come to {place} a lot?", "nice day in {place} lol"],
+    "after": ["cool", "nice", "lol", "ah ok", "nice :)", "cool cool", "sweet"]
+  }
+}

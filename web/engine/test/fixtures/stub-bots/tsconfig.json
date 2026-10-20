@@ -1,0 +1,19 @@
+{
+    // The glue (src/**) type-checked against this stub bot library instead of bots/src (test/all.mjs; `--real` and
+    // `tsc -p web/engine` check it against the real one). Paths resolve from web/engine (the base config's baseUrl); like
+    // the base config's they name the sibling ../Server, and test/all.mjs checks a copy pointed at the resolved upstream
+    // folder (scripts/lib/upstream.mjs derivedTsconfig).
+    "extends": "../../../tsconfig.json",
+    "compilerOptions": {
+        "paths": {
+            "#3rdparty/*": ["../../../Server/engine/src/3rdparty/*"],
+            "#/engine/bot/*": ["test/fixtures/stub-bots/*"],
+            "#/*": ["../../../Server/engine/src/*"],
+            "kleur": ["../../../Server/engine/node_modules/kleur"],
+            "@isaacs/ttlcache": ["../../../Server/engine/node_modules/@isaacs/ttlcache"],
+            "fflate": ["../../../Server/engine/node_modules/fflate"],
+            "node-forge": ["../../../Server/engine/node_modules/@types/node-forge"]
+        }
+    },
+    "include": ["../../../src/**/*.ts", "./**/*.ts"]
+}

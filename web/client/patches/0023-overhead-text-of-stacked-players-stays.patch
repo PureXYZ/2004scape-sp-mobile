@@ -1,0 +1,50 @@
+ios: overhead text of stacked players stays on top
+
+Only the first entity standing on a tile's centre is drawn each scene cycle (upstream's tileLastOccupiedCycle); the
+others are skipped, so their model is never built and their height (set from the model's top in getTempModel) stays
+0, or whatever it was when last drawn. Their chat, health bar, hitsplats and head icons were then placed on the
+ground. With hundreds of bots standing on the same tiles at the bank and the hotspots this was common. A skipped
+player or NPC now takes the height of the entity drawn on its tile (tileOccupant), so its overhead text sits on top
+of the model that is shown there.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 521d6ee..8f31463 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -496,6 +496,8 @@ export class Client extends GameShell {
+     private chats: (string | null)[] = new TypedArray1d(MAX_CHATS, null);
+ 
+     private tileLastOccupiedCycle: Int32Array[] = new Int32Array2d(BuildArea.SIZE, BuildArea.SIZE);
++    // custom (ios): the entity drawn on each tile this scene cycle (valid where tileLastOccupiedCycle == sceneCycle)
++    private tileOccupant: (ClientEntity | null)[][] = Array.from({ length: BuildArea.SIZE }, () => new Array(BuildArea.SIZE).fill(null));
+     private sceneCycle: number = 0;
+ 
+     private projectX: number = 0;
+@@ -4562,10 +4564,14 @@ export class Client extends GameShell {
+             if (!player.locModel || Client.loopCycle < player.locStartCycle || Client.loopCycle >= player.locStopCycle) {
+                 if ((player.x & 0x7f) === 64 && (player.z & 0x7f) === 64) {
+                     if (this.tileLastOccupiedCycle[stx][stz] == this.sceneCycle && i != -1) {
++                        // custom (ios): a player stacked under another is not drawn, so its height (set when its model is
++                        // built) stayed 0 and its chat, health bar and hitsplats sat on the ground. Take the drawn one's.
++                        player.height = this.tileOccupant[stx][stz]?.height ?? player.height;
+                         continue;
+                     }
+ 
+                     this.tileLastOccupiedCycle[stx][stz] = this.sceneCycle;
++                    this.tileOccupant[stx][stz] = player; // custom (ios)
+                 }
+ 
+                 player.y = this.getAvH(player.x, player.z, this.minusedlevel);
+@@ -4596,10 +4602,12 @@ export class Client extends GameShell {
+ 
+             if (npc.size === 1 && (npc.x & 0x7f) === 64 && (npc.z & 0x7f) === 64) {
+                 if (this.tileLastOccupiedCycle[x][z] === this.sceneCycle) {
++                    npc.height = this.tileOccupant[x][z]?.height ?? npc.height; // custom (ios): as for players
+                     continue;
+                 }
+ 
+                 this.tileLastOccupiedCycle[x][z] = this.sceneCycle;
++                this.tileOccupant[x][z] = npc; // custom (ios)
+             }
+ 
+             this.world?.addDynamic(this.minusedlevel, npc.x, this.getAvH(npc.x, npc.z, this.minusedlevel), npc.z, npc, typecode, npc.yaw, (npc.size - 1) * 64 + 60, npc.needsForwardDrawPadding);

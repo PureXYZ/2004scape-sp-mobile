@@ -1,0 +1,134 @@
+ios: keyboard follows the game's text inputs
+
+MobileKeyboard (overridden to call lcHost.keyboard on iOS) is now driven by one place,
+syncMobileKeyboard(), run once per client cycle on mobile. It derives the typing context in
+handleInputKey()'s order ('login-user' | 'login-pass' | 'report' | 'social' | 'dialog' | 'chat' | null,
+the host keyboard kinds of ARCHITECTURE.md §7) and acts on changes only (edge-triggered, so a keyboard
+the player dismissed stays down until the next change):
+- opening the amount dialog (P_COUNTDIALOG), report abuse (button or menu option) or social input
+  (add/delete friend or ignore, private message) shows the keyboard; upstream never showed it for
+  social input, and its two direct show() calls ran outside a user gesture, which WKWebView ignores
+  (they are replaced by the sync);
+- switching login field (Enter or tap) while the keyboard is up re-shows it so the host can update
+  its prompt / secure entry; any other change while it is up (input closed, logged in, logged out,
+  chat modal opened) hides it.
+Taps: a tap on an input area always (re)shows the keyboard (upstream hid it when you tapped from the
+username to the password field) and selects the tapped login field first, so the host sees the right
+context synchronously.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 094e636..04a5550 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -1272,6 +1272,10 @@ export class Client extends GameShell {
+         }
+ 
+         await this.onDemandLoop();
++
++        if (this.isMobile) {
++            this.syncMobileKeyboard(); // custom (ios)
++        }
+     }
+ 
+     override async mainredraw() {
+@@ -2901,9 +2905,7 @@ export class Client extends GameShell {
+                 }
+             }
+ 
+-            if (this.isMobile) {
+-                MobileKeyboard.show();
+-            }
++            // custom (ios): the keyboard is raised by syncMobileKeyboard() at the end of this cycle
+         }
+     }
+ 
+@@ -6777,9 +6779,7 @@ export class Client extends GameShell {
+                 this.dialogInput = '';
+                 this.redrawChat = true;
+ 
+-                if (this.isMobile) {
+-                    MobileKeyboard.show();
+-                }
++                // custom (ios): the keyboard is raised by syncMobileKeyboard() at the end of this cycle
+ 
+                 this.ptype = -1;
+                 return true;
+@@ -11730,9 +11730,19 @@ export class Client extends GameShell {
+                 this.panning = false;
+                 return;
+             } else {
+-                if (!MobileKeyboard.isDisplayed() && this.insideMobileInput()) {
++                // custom (ios): a tap on an input area (re)shows the keyboard even when it is already up, so the host
++                // can switch context (upstream hid it when you tapped from the username to the password field);
++                // a tapped login field is selected first so the host sees the right one
++                if (this.insideMobileInput()) {
++                    if (this.insideLoginUser()) {
++                        this.loginSelect = 0;
++                    } else if (this.insideLoginPass()) {
++                        this.loginSelect = 1;
++                    }
++
+                     // show keyboard when tapping in an input area
+                     MobileKeyboard.show(x, y, e.clientX, e.clientY);
++                    this.keyboardContext = this.typingContext(); // already shown for it: no second show() from the sync
+                 } else if (MobileKeyboard.isDisplayed() && !MobileKeyboard.isWithinCanvasKeyboard(x, y)) {
+                     // hide keyboard when tapping outside of an input area
+                     MobileKeyboard.hide();
+@@ -11999,6 +12009,57 @@ export class Client extends GameShell {
+         return this.insideChatInput() || this.insideChatPopup() || this.insideLoginUser() || this.insideLoginPass() || this.insideReportAbuse();
+     }
+ 
++    // custom (ios): the text input that currently receives typed keys, in handleInputKey()'s order (the title screen
++    // types into loginSelect): 'login-user' | 'login-pass' | 'report' | 'social' | 'dialog' | 'chat', or null.
++    // These are the host keyboard kinds of ARCHITECTURE.md §7.
++    private keyboardContext: string | null = null;
++
++    private typingContext(): string | null {
++        if (!this.ingame) {
++            if (this.loginscreen !== 2) {
++                return null;
++            }
++
++            return this.loginSelect === 0 ? 'login-user' : 'login-pass';
++        }
++
++        if (this.mainModalId !== -1 && this.mainModalId === this.reportAbuseComId) {
++            return 'report';
++        } else if (this.socialInputOpen) {
++            return 'social';
++        } else if (this.dialogInputOpen) {
++            return 'dialog';
++        }
++
++        return this.chatModalId === -1 ? 'chat' : null;
++    }
++
++    // custom (ios): keep the keyboard in step with the game's text inputs, once per client cycle. Upstream raised it
++    // on a tap in an input area plus two server-driven cases (amount dialog, report abuse: outside a user gesture,
++    // which WKWebView ignores), never for social input (add friend/ignore, private message) and never hid it when an
++    // input closed. Edge-triggered on context changes: a keyboard the player dismissed stays down until the next one.
++    private syncMobileKeyboard(): void {
++        const context: string | null = this.typingContext();
++        if (context === this.keyboardContext) {
++            return;
++        }
++
++        this.keyboardContext = context;
++
++        if (context === 'dialog' || context === 'social' || context === 'report') {
++            // modal inputs need typing right away
++            MobileKeyboard.show();
++        } else if (MobileKeyboard.isDisplayed()) {
++            if (context === 'login-user' || context === 'login-pass') {
++                // the login field changed (Enter or a tap): let the host update its prompt and secure entry
++                MobileKeyboard.show();
++            } else {
++                // the input the keyboard was raised for has closed
++                MobileKeyboard.hide();
++            }
++        }
++    }
++
+     private insideGame() {
+         const x1: number = 4;
+         const y1: number = 4;

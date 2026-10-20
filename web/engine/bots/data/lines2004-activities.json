@@ -1,0 +1,927 @@
+{
+    "about": "The variety work's new lines (2026-10-17), Tracks D (what and where) and D2 (round 2: new activities, quest look-alikes), in a late-2004 voice, the same shape and rules as lines2004.json: each group's tag says where and when it is true. Every line through the 274 filter and charset. Track D2's groups (event 'errand', said by the errands themselves near others and through the talk budget: port/BotErrandLines; each group's kinds the errand's moment): the economy chains' (chain-...), the quest look-alikes' by step (q-<quest>-<step>), the prayer and magic runs' (magic-...) and the Wilderness trips' (wild-...).",
+    "groups": [
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-cook-start"
+                ]
+            },
+            "lines": [
+                "where do i get an egg",
+                "anyone know where the cook is",
+                "doin cooks assistant",
+                "the cook needs milk egg and flour",
+                "starting cooks assistant lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-cook-egg"
+                ]
+            },
+            "lines": [
+                "got an egg",
+                "found the egg by the chickens",
+                "egg check"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-cook-milk"
+                ]
+            },
+            "lines": [
+                "need a bucket of milk",
+                "how do u milk a cow",
+                "where can i get milk",
+                "milking the cow lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-cook-flour"
+                ]
+            },
+            "lines": [
+                "how do u make flour",
+                "wheres the windmill",
+                "need flour for the cook",
+                "the mill is north right"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-cook-done"
+                ]
+            },
+            "lines": [
+                "finally done cooks assistant lol",
+                "cook is happy now",
+                "done my first quest"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-sheep-start"
+                ]
+            },
+            "lines": [
+                "fred wants wool lol",
+                "doin sheep shearer",
+                "where r the sheep"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-sheep-shear"
+                ]
+            },
+            "lines": [
+                "shearing sheep",
+                "baa lol",
+                "these sheep keep running"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-sheep-spin"
+                ]
+            },
+            "lines": [
+                "wheres the spinning wheel",
+                "spinning wool upstairs"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-sheep-done"
+                ]
+            },
+            "lines": [
+                "done sheep shearer",
+                "fred paid me lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-rune-start"
+                ]
+            },
+            "lines": [
+                "the duke gave me a quest",
+                "doin rune mysteries",
+                "talking to the duke"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-rune-tower"
+                ]
+            },
+            "lines": [
+                "how do i get to the wizards tower",
+                "wizards tower is south right",
+                "wheres the head wizard"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-rune-aubury"
+                ]
+            },
+            "lines": [
+                "wheres aubury",
+                "aubury is in varrock right",
+                "taking notes to aubury"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-rune-done"
+                ]
+            },
+            "lines": [
+                "done rune mysteries",
+                "now i can mine ess"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-ghost-start"
+                ]
+            },
+            "lines": [
+                "the priest says theres a ghost",
+                "doin restless ghost"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-ghost-urhney"
+                ]
+            },
+            "lines": [
+                "wheres father urhney",
+                "the swamp priest is so rude lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-ghost-grave"
+                ]
+            },
+            "lines": [
+                "wheres the ghosts skull",
+                "the coffin is in the graveyard"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-ghost-done"
+                ]
+            },
+            "lines": [
+                "done restless ghost",
+                "that ghost was creepy"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-romeo-start"
+                ]
+            },
+            "lines": [
+                "romeo is so whiny lol",
+                "doin romeo and juliet",
+                "where is juliet"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-romeo-lawrence"
+                ]
+            },
+            "lines": [
+                "wheres father lawrence",
+                "the church is north"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-romeo-potion"
+                ]
+            },
+            "lines": [
+                "wheres the apothecary",
+                "need cadava berries"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-romeo-done"
+                ]
+            },
+            "lines": [
+                "done romeo and juliet lol",
+                "poor juliet"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-doric-start"
+                ]
+            },
+            "lines": [
+                "doric wants clay copper and iron",
+                "doin dorics quest",
+                "mining stuff for doric"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-doric-walk"
+                ]
+            },
+            "lines": [
+                "wheres doric",
+                "doric is north of fally right"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-doric-done"
+                ]
+            },
+            "lines": [
+                "done dorics quest",
+                "doric let me use his anvils"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-prince-start"
+                ]
+            },
+            "lines": [
+                "doin prince ali rescue",
+                "wheres hassan"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-prince-draynor"
+                ]
+            },
+            "lines": [
+                "wheres leela",
+                "need to get the prince out"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-prince-jail"
+                ]
+            },
+            "lines": [
+                "the jail is in draynor",
+                "lady keli is scary lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-prince-done"
+                ]
+            },
+            "lines": [
+                "done prince ali",
+                "no more toll gate lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-goblin-start"
+                ]
+            },
+            "lines": [
+                "the goblins r fighting about armour lol",
+                "doin goblin diplomacy"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-goblin-done"
+                ]
+            },
+            "lines": [
+                "done goblin diplomacy",
+                "goblins r so dumb lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-witch-start"
+                ]
+            },
+            "lines": [
+                "hetty wants an eye of newt",
+                "doin witchs potion"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-witch-hetty"
+                ]
+            },
+            "lines": [
+                "wheres hetty",
+                "hetty is in rimmington"
+            ]
+        },
+        {
+            "tag": {
+                "c": "quest",
+                "event": "errand",
+                "kinds": [
+                    "q-witch-done"
+                ]
+            },
+            "lines": [
+                "done witchs potion",
+                "drank from the cauldron lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-hides-go"
+                ]
+            },
+            "lines": [
+                "killing cows for hides",
+                "cowhides r good money",
+                "gonna tan some hides"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-hides-tan"
+                ]
+            },
+            "lines": [
+                "off to al kharid to tan",
+                "tanning these hides"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-hides-done"
+                ]
+            },
+            "lines": [
+                "made some leather gloves",
+                "leather is so easy lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-feathers-go"
+                ]
+            },
+            "lines": [
+                "feathers r good money",
+                "killing chickens for feathers",
+                "chicken farm time"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-feathers-sell"
+                ]
+            },
+            "lines": [
+                "selling my feathers",
+                "gonna sell these feathers"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-pottery-go"
+                ]
+            },
+            "lines": [
+                "need clay for pots",
+                "mining clay"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-pottery-wheel"
+                ]
+            },
+            "lines": [
+                "making pots",
+                "pottery is so slow"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-pottery-done"
+                ]
+            },
+            "lines": [
+                "made some pots",
+                "pots r done"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-flour-go"
+                ]
+            },
+            "lines": [
+                "picking wheat",
+                "need wheat for flour"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-flour-mill"
+                ]
+            },
+            "lines": [
+                "the mill is so confusing",
+                "putting grain in the hopper"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-flour-bread"
+                ]
+            },
+            "lines": [
+                "making bread",
+                "baking bread lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-flour-done"
+                ]
+            },
+            "lines": [
+                "selling my bread",
+                "made some bread"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-picking-cabbages"
+                ]
+            },
+            "lines": [
+                "picking cabbages lol",
+                "cabbages r free money"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-picking-potatoes"
+                ]
+            },
+            "lines": [
+                "picking potatoes",
+                "potato farm lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-picking-done"
+                ]
+            },
+            "lines": [
+                "full of veggies lol",
+                "selling these"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-firecook-go"
+                ]
+            },
+            "lines": [
+                "catching shrimps",
+                "gonna cook my shrimps"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-firecook-cook"
+                ]
+            },
+            "lines": [
+                "cooking on my fire",
+                "burnt another one lol",
+                "shrimp on the fire"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-barbfire-go"
+                ]
+            },
+            "lines": [
+                "fly fishing",
+                "trout trout trout"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-barbfire-cook"
+                ]
+            },
+            "lines": [
+                "cooking on the barb fire",
+                "the barb fire is the best"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "magic-bones-go"
+                ]
+            },
+            "lines": [
+                "going for big bones",
+                "hill giants for bones"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "magic-bones-bury"
+                ]
+            },
+            "lines": [
+                "burying big bones",
+                "prayer xp is so slow"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "magic-superheat-go"
+                ]
+            },
+            "lines": [
+                "superheating iron",
+                "superheat is so fast"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "magic-superheat-done"
+                ]
+            },
+            "lines": [
+                "out of nats lol",
+                "made a load of bars"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "magic-enchant-go"
+                ]
+            },
+            "lines": [
+                "enchanting rings",
+                "making rings of recoil"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "magic-wine-go"
+                ]
+            },
+            "lines": [
+                "going for wines",
+                "telegrabbing wines"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "magic-wine-done"
+                ]
+            },
+            "lines": [
+                "got a load of wines",
+                "out of laws lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "wild-go"
+                ]
+            },
+            "lines": [
+                "going wildy to train",
+                "nobody trains in the wild lol",
+                "wildy is empty today"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "wild-back"
+                ]
+            },
+            "lines": [
+                "made it out of the wild",
+                "back from wildy lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "wild-level"
+                ]
+            },
+            "lines": [
+                "lvl in the wild lol",
+                "leveled in the wildy"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "wild-close"
+                ]
+            },
+            "lines": [
+                "that was way too close",
+                "almost died lol",
+                "pkers everywhere"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-bronze-go"
+                ]
+            },
+            "lines": [
+                "mining copper and tin",
+                "need tin lol",
+                "gonna make bronze bars"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-bronze-smelt"
+                ]
+            },
+            "lines": [
+                "smelting bronze",
+                "off to the furnace"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-iron-go"
+                ]
+            },
+            "lines": [
+                "mining iron",
+                "gonna smelt some iron",
+                "iron for bars"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "chain-iron-smelt"
+                ]
+            },
+            "lines": [
+                "smelting iron",
+                "half my iron fails lol",
+                "off to the furnace w iron"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "herbs-go"
+                ]
+            },
+            "lines": [
+                "druids for herbs",
+                "herb run time",
+                "killing druids for herbs"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "errand",
+                "kinds": [
+                    "herbs-identify"
+                ]
+            },
+            "lines": [
+                "identifying my herbs",
+                "so many guams lol"
+            ]
+        }
+    ]
+}

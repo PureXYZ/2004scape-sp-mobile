@@ -1,0 +1,24 @@
+ios: offline "New User" opens the login form
+
+The bundled world has no account server: logging in with a new name creates the character (on Tutorial
+Island). Upstream's "New User" screen tells the player to create an account on the website, which is a
+dead end offline, so the button now opens the login form with a hint ("New character: choose any username
+and password.").
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 9d18c1f..5b185a9 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -1423,7 +1423,11 @@ export class Client extends GameShell {
+ 
+             y += 20;
+             if (this.mouseClickButton === 1 && this.mouseClickX >= x - 75 && this.mouseClickX <= x + 75 && this.mouseClickY >= y - 20 && this.mouseClickY <= y + 20) {
+-                this.loginscreen = 3;
++                // custom (ios): the offline world creates a character for any new name, so "New User" opens the login
++                // form with a hint instead of upstream's "create an account on the website" screen
++                this.loginMes1 = 'New character: choose any';
++                this.loginMes2 = 'username and password.';
++                this.loginscreen = 2;
+                 this.loginSelect = 0;
+             }
+ 

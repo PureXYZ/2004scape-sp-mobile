@@ -1,0 +1,109 @@
+ios: action label
+
+On a touch screen nothing hovers and the finger covers what it taps, so the hover text (drawFeedback, shown only
+while a finger is down) flashes by on a tap and the red cross alone does not say what the tap did. doAction now
+wraps the upstream handler (doMenuAction): after an action that starts a red cross (an op on an NPC, player, loc or
+ground item, an item used or a spell cast on one, also from the long-press menu) or acts on an item in a slot (an
+inventory, worn equipment, the bank, a shop: OP_HELD1-6, TGT_HELD, USEHELD_START/ONHELD, INV_BUTTON1-5) it tells the
+host: lcEvent 'action-label' { text: the option as drawn, colour tags included, x, y: the red cross or the tapped
+point in page px }. The host shows it beside that point (menu.js). GameShell.pagePoint maps a virtual point to the
+page through the surface (or the canvas) that shows it, the inverse of getMousePos. Touch screens only.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 37861f6..7716cfb 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -8859,7 +8859,62 @@ export class Client extends GameShell {
+         return action === MiniMenuAction.FRIENDLIST_ADD;
+     }
+ 
++    // custom (ios): on a touch screen nothing hovers and the finger covers what it taps, so an action that starts a red
++    // cross (on an NPC, player, loc or ground item, also from the long-press menu) or acts on an item in a slot (an
++    // inventory, worn equipment, the bank, a shop) tells the host what it was, which shows it beside that point for a
++    // moment (the action label): lcEvent 'action-label' { text: the option as drawn, colour tags included ("Attack
++    // @yel@Goblin@gre@ (level-2)"), x, y: the red cross or the tapped point, in page px }
+     private doAction(optionId: number): void {
++        if (!this.isMobile || optionId < 0) {
++            this.doMenuAction(optionId);
++            return;
++        }
++
++        const option: string = this.menuOption[optionId];
++        let action: number = this.menuAction[optionId];
++        if (action >= MiniMenuAction._PRIORITY) {
++            action -= MiniMenuAction._PRIORITY;
++        }
++
++        const x: number = this.mouseClickX;
++        const y: number = this.mouseClickY;
++        const crossStarted: boolean = this.crossMode === 2 && this.crossCycle === 0;
++
++        this.doMenuAction(optionId);
++
++        let at: { x: number; y: number } | null = null;
++        if (this.crossMode === 2 && this.crossCycle === 0 && !crossStarted) {
++            at = this.pagePoint(this.crossX, this.crossY);
++        } else if (Client.isSlotAction(action)) {
++            at = this.pagePoint(x, y);
++        }
++
++        if (at) {
++            lcEvent('action-label', { text: option, x: at.x, y: at.y });
++        }
++    }
++
++    // custom (ios): an action on an item in a slot (an inventory, worn equipment, the bank, a shop)
++    private static isSlotAction(action: number): boolean {
++        return (
++            action === MiniMenuAction.OP_HELD1 ||
++            action === MiniMenuAction.OP_HELD2 ||
++            action === MiniMenuAction.OP_HELD3 ||
++            action === MiniMenuAction.OP_HELD4 ||
++            action === MiniMenuAction.OP_HELD5 ||
++            action === MiniMenuAction.OP_HELD6 ||
++            action === MiniMenuAction.TGT_HELD ||
++            action === MiniMenuAction.USEHELD_START ||
++            action === MiniMenuAction.USEHELD_ONHELD ||
++            action === MiniMenuAction.INV_BUTTON1 ||
++            action === MiniMenuAction.INV_BUTTON2 ||
++            action === MiniMenuAction.INV_BUTTON3 ||
++            action === MiniMenuAction.INV_BUTTON4 ||
++            action === MiniMenuAction.INV_BUTTON5
++        );
++    }
++
++    private doMenuAction(optionId: number): void {
+         if (optionId < 0) {
+             return;
+         }
+diff --git a/src/client/GameShell.ts b/src/client/GameShell.ts
+index 0d5e373..c2d6ee7 100644
+--- a/src/client/GameShell.ts
++++ b/src/client/GameShell.ts
+@@ -669,6 +669,26 @@ export default abstract class GameShell {
+         }
+     }
+ 
++    // custom (ios): where virtual (x, y) shows in the page (CSS px, like clientX/Y): on the surface whose rect holds it,
++    // else on the canvas; null if nothing shows it
++    protected pagePoint(x: number, y: number): { x: number; y: number } | null {
++        for (const [el, r] of this.surfaces) {
++            if (x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h) {
++                const box: DOMRect = el.getBoundingClientRect();
++                if (box.width > 0 && box.height > 0) {
++                    return { x: box.left + ((x - r.x) * box.width) / r.w, y: box.top + ((y - r.y) * box.height) / r.h };
++                }
++            }
++        }
++
++        const box: DOMRect = canvas.getBoundingClientRect();
++        if (box.width > 0 && box.height > 0 && !this.isFullScreen() && x >= 0 && y >= 0 && x < canvas.width && y < canvas.height) {
++            return { x: box.left + (x * box.width) / canvas.width, y: box.top + (y * box.height) / canvas.height };
++        }
++
++        return null;
++    }
++
+     private endSurfaceGesture(pointerId: number): void {
+         if (this.surfaceGesture?.pointerId === pointerId) {
+             this.surfaceGesture = null;

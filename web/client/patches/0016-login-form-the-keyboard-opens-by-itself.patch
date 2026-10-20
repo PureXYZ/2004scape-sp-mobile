@@ -1,0 +1,102 @@
+ios: login form (the keyboard opens by itself, 30 px field rows)
+
+Logging in took a tap on New User or Existing User, then a tap on an 11 pt strip to bring up the keyboard:
+
+- When the login form opens (the typing context goes from none to the username field), the keyboard is shown for the
+  username at once (patch "keyboard-follows-input"'s sync). The native keyboard needs no user gesture. A connection
+  that drops in game and logs in again shows the form's context too; that never raises the keyboard.
+- The username and password fields take 30 px rows (upstream 15, about 11 pt on the phone): the username's grows
+  upwards and the password's downwards, clear of the Login and Cancel buttons. The taps that select a field
+  (titleScreenLoop) and the ones that raise the keyboard (insideLoginUser / insideLoginPass, now across the title box)
+  use the same rows. Nothing is drawn differently.
+- New User's hint says what the offline world needs: "New character: type any name. No password needed." (it said to
+  choose a username and password; the host logs in with the name alone and fills a password in).
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 77ee1fd..bc8b867 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -80,6 +80,7 @@ const CLIENT_VERSION = 274;
+ // resting on a game target wanders a little more: within 14 px a hold still opens the menu and no drag starts.
+ const TOUCH_SLOP = 14;
+ const LONG_PRESS_MS = 400; // default for lcHost.settings.longPressMs
++const LOGIN_ROW = 30; // custom (ios): height of the login form's field rows (titleScreenLoop, insideLoginUser/Pass)
+ const CAMERA_YAW_PER_PX = 4; // orbitCameraYaw units (2048 per turn) per CSS px of horizontal drag
+ const CAMERA_PITCH_PER_PX = 2; // orbitCameraPitch units (range 128..383) per CSS px of vertical drag
+ // custom (ios): momentum of a drag-to-scroll after the finger lifts (glideTouchScroll): the finger's speed over its last
+@@ -1563,8 +1564,9 @@ export class Client extends GameShell {
+                 this.buttonFeedback(); // custom (ios)
+                 // custom (ios): the offline world creates a character for any new name, so "New User" opens the login
+                 // form with a hint instead of upstream's "create an account on the website" screen
+-                this.loginMes1 = 'New character: choose any';
+-                this.loginMes2 = 'username and password.';
++                // custom (ios): a name is enough (offline the password is not checked; the host fills one in)
++                this.loginMes1 = 'New character: type any name.';
++                this.loginMes2 = 'No password needed.';
+                 this.loginscreen = 2;
+                 this.loginSelect = 0;
+             }
+@@ -1581,13 +1583,15 @@ export class Client extends GameShell {
+             let y: number = ((this.sHei / 2) | 0) - 40;
+             y += 30;
+ 
++            // custom (ios): each field takes a 30 px row (upstream 15, about 11 pt on the phone): the username's grows
++            // upwards, the password's downwards, clear of the buttons below (see insideLoginUser / insideLoginPass)
+             y += 25;
+-            if (this.mouseClickButton === 1 && this.mouseClickY >= y - 15 && this.mouseClickY < y) {
++            if (this.mouseClickButton === 1 && this.mouseClickY >= y - LOGIN_ROW && this.mouseClickY < y) {
+                 this.loginSelect = 0;
+             }
+ 
+             y += 15;
+-            if (this.mouseClickButton === 1 && this.mouseClickY >= y - 15 && this.mouseClickY < y) {
++            if (this.mouseClickButton === 1 && this.mouseClickY >= y - 15 && this.mouseClickY < y - 15 + LOGIN_ROW) {
+                 this.loginSelect = 1;
+             }
+             // y += 15; dead code
+@@ -13178,11 +13182,15 @@ export class Client extends GameShell {
+             return;
+         }
+ 
++        const previous: string | null = this.keyboardContext; // custom (ios)
+         this.keyboardContext = context;
+ 
+         if (context === 'dialog' || context === 'social' || context === 'report') {
+             // modal inputs need typing right away
+             MobileKeyboard.show();
++        } else if (context === 'login-user' && previous === null && !this.reconnecting) {
++            // custom (ios): the login form just opened (New User / Existing User): type the username right away
++            MobileKeyboard.show();
+         } else if (MobileKeyboard.isDisplayed()) {
+             if (context === 'login-user' || context === 'login-pass') {
+                 // the login field changed (Enter or a tap): let the host update its prompt and secure entry
+@@ -13254,19 +13262,21 @@ export class Client extends GameShell {
+         return this.mouseX >= x1 && this.mouseX <= x2 && this.mouseY >= y1 && this.mouseY <= y2;
+     }
+ 
++    // custom (ios): the field rows titleScreenLoop selects (30 px each, upstream 280, 233 190x31 and 280, 264 278x20),
++    // across the title box (202..562)
+     private insideLoginUser() {
+-        const x1: number = 280;
+-        const y1: number = 233;
+-        const x2: number = x1 + 190;
+-        const y2: number = y1 + 31;
++        const x1: number = 202;
++        const y1: number = ((this.sHei / 2) | 0) + 15 - LOGIN_ROW;
++        const x2: number = 562;
++        const y2: number = y1 + LOGIN_ROW - 1;
+         return !this.ingame && this.loginscreen === 2 && this.mouseX >= x1 && this.mouseX <= x2 && this.mouseY >= y1 && this.mouseY <= y2;
+     }
+ 
+     private insideLoginPass() {
+-        const x1: number = 280;
+-        const y1: number = 264;
+-        const x2: number = x1 + 278;
+-        const y2: number = y1 + 20;
++        const x1: number = 202;
++        const y1: number = ((this.sHei / 2) | 0) + 15;
++        const x2: number = 562;
++        const y2: number = y1 + LOGIN_ROW - 1;
+         return !this.ingame && this.loginscreen === 2 && this.mouseX >= x1 && this.mouseX <= x2 && this.mouseY >= y1 && this.mouseY <= y2;
+     }
+ }

@@ -1,0 +1,2164 @@
+/* LostCity iOS host page. The look is RuneScape's in 2004: the game's own fonts and sprites (ui/, built from
+   Server/content by web/ui/build.mjs), stone and slate, pure-colour text with a hard 1 px black shadow. Text sizes are
+   multiples of 16 px: one game pixel per CSS px (3 device px on an iPhone), so the bitmap fonts stay pixel-exact. */
+
+@font-face {
+    font-family: 'RS Plain 11';
+    src: url('ui/fonts/p11.ttf') format('truetype');
+}
+
+@font-face {
+    font-family: 'RS Plain 12';
+    src: url('ui/fonts/p12.ttf') format('truetype');
+}
+
+@font-face {
+    font-family: 'RS Bold 12';
+    src: url('ui/fonts/b12.ttf') format('truetype');
+}
+
+@font-face {
+    font-family: 'RS Quill 8';
+    src: url('ui/fonts/q8.ttf') format('truetype');
+}
+
+:root {
+    --yellow: #ffff00;
+    --orange: #ff981f;
+    --white: #ffffff;
+    --green: #00ff00;
+    --red: #ff0000;
+    --cyan: #00ffff;
+    --stone: #453c30;
+    --stone-light: #776754;
+    --stone-dark: #201b15;
+    --stone-edge: #090807;
+    /* rough stone for the HUD's own frames: a world texture in the colours of the 2004 frame's stones (web/ui/build.mjs),
+       at one texel per game pixel like the frame the client draws */
+    --rough-stone: #39312a url('ui/textures/stone.png') 0 0 / 128px 128px;
+    /* the frame's bevel over that stone: lit from the top left, a black edge */
+    --rough-bevel: inset 1px 1px 0 rgba(255, 236, 200, 0.28), inset -1px -1px 0 rgba(0, 0, 0, 0.65);
+    --menu: #5d5447;
+    --sand: #b9a17c;
+    --font-plain: 'RS Plain 12', 'Helvetica Neue', Arial, sans-serif;
+    --font-small: 'RS Plain 11', 'Helvetica Neue', Arial, sans-serif;
+    --font-bold: 'RS Bold 12', 'Helvetica Neue', Arial, sans-serif;
+    --font-quill: 'RS Quill 8', Georgia, serif;
+    --shadow: 1px 1px 0 #000;
+    /* until host.js layout() sets them from readSafeArea (Settings › Display's margins): the sides
+       made equal, the larger of the two, as iOS reports them in landscape (Android reports the camera hole on its side
+       only); the bottom 0 (iOS's is the home indicator, which the overlays may cover) */
+    --safe-left: max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+    --safe-right: max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: 0px;
+}
+
+html,
+body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: none;
+    font-synthesis: none;
+    font: 16px/16px var(--font-plain);
+    color: var(--white);
+}
+
+button {
+    font: inherit;
+    color: inherit;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+/* ---------- canvases ---------- */
+
+#canvas,
+.surface {
+    position: absolute;
+    left: 0;
+    top: 0;
+    display: block;
+    outline: none;
+    /* GameShell sets touch-action inline on touch devices; the page never zooms. */
+    touch-action: none !important;
+    -webkit-user-drag: none;
+    image-rendering: auto;
+}
+
+#canvas {
+    width: 765px;
+    height: 503px;
+}
+
+/* In the HUD the title canvas stays focusable (key events go to it) but is invisible and lets touches through. */
+#canvas.behind {
+    opacity: 0;
+    pointer-events: none;
+}
+
+body.pixelated #canvas,
+body.pixelated .surface {
+    image-rendering: pixelated;
+}
+
+/* ---------- 2004 building blocks ---------- */
+
+/* A grey interface button (the Walk/Run buttons of the Player controls tab); red while switched on. */
+.stone-btn,
+.orb {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    border-style: solid;
+    border-width: 5px;
+    border-image: url('ui/sprites/miscgraphics-0.png') 5 fill / 5px stretch;
+    color: var(--white);
+    text-shadow: var(--shadow);
+}
+
+.stone-btn.active,
+.orb.active {
+    border-image-source: url('ui/sprites/miscgraphics-9.png');
+}
+
+/* Run while a window is open (the game's Walk / Run buttons would close it), the keyboard with nothing to type into */
+.orb.disabled,
+#btn-keyboard.disabled {
+    opacity: 0.45;
+}
+
+.stone-btn.pressed,
+.orb.pressed,
+.tab.pressed {
+    filter: brightness(1.25);
+}
+
+/* A slate button like the title screen's "Existing User". */
+.title-btn {
+    box-sizing: border-box;
+    min-width: 147px;
+    height: 41px;
+    padding: 0 14px;
+    border-style: solid;
+    border-width: 6px;
+    border-image: url('ui/sprites/titlebutton.png') 6 fill / 6px stretch;
+    font: 16px/16px var(--font-bold);
+    color: var(--white);
+    text-shadow: var(--shadow);
+}
+
+.title-btn:active {
+    filter: brightness(1.2);
+}
+
+.title-btn:disabled {
+    color: #b0b0b0;
+}
+
+/* ---------- icons (pixel art, 2004 palette) ---------- */
+
+.icon {
+    display: block;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    background: center / contain no-repeat;
+    image-rendering: pixelated;
+    pointer-events: none;
+}
+
+.icon-run {
+    background-image: url('ui/sprites/sideicons-11.png');
+    width: 30px;
+    height: 30px;
+}
+
+.icon-keyboard {
+    width: 26px;
+    height: 20px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 10' shape-rendering='crispEdges'%3E%3Cpath fill='%23000' d='M0 1h13v9H0z'/%3E%3Cpath fill='%23c8c8c8' d='M1 2h11v7H1z'/%3E%3Cpath fill='%23404040' d='M2 3h1v1H2zm2 0h1v1H4zm2 0h1v1H6zm2 0h1v1H8zm2 0h1v1h-1zM3 5h1v1H3zm2 0h1v1H5zm2 0h1v1H7zm2 0h1v1H9zM3 7h7v1H3z'/%3E%3C/svg%3E");
+}
+
+/* a speech bubble; a down chevron while the chatbox is open */
+.icon-chat {
+    width: 26px;
+    height: 22px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 11' shape-rendering='crispEdges'%3E%3Cpath fill='%23000' d='M2 0h9v1h1v1h1v4h-1v1h-1v1H5v1H4v1H3v1H2V8H1V7H0V2h1V1h1z'/%3E%3Cpath fill='%23fff' d='M2 1h9v1h1v4h-1v1H4v1H3v1V7H2V6H1V2h1z'/%3E%3Cpath fill='%23000' d='M3 3h2v2H3zm3 0h2v2H6zm3 0h2v2H9z'/%3E%3C/svg%3E");
+}
+
+.open > .icon-chat {
+    width: 18px;
+    height: 12px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 6' shape-rendering='crispEdges'%3E%3Cpath fill='%23000' d='M4 0h1v1h1v1h1v1h1v1h1v2H8V5H7V4H6V3H5V2H4v1H3v1H2v1H1v1H0V4h1V3h1V2h1V1h1z'/%3E%3Cpath fill='%23ff0' d='M4 1h1v1h1v1h1v1h1v1H7V4H6V3H5V2H4v1H3v1H2v1H1V4h1V3h1V2h1z'/%3E%3C/svg%3E");
+    transform: rotate(180deg);
+}
+
+.icon-menu {
+    width: 22px;
+    height: 26px;
+    /* a mouse with its right button lit: the next tap is a right click */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 13' shape-rendering='crispEdges'%3E%3Cpath fill='%23000' d='M4 0h1v1h-1zM5 0h1v1h-1zM6 0h1v1h-1zM5 1h1v1h-1zM2 2h1v1h-1zM3 2h1v1h-1zM4 2h1v1h-1zM5 2h1v1h-1zM6 2h1v1h-1zM7 2h1v1h-1zM8 2h1v1h-1zM1 3h1v1h-1zM5 3h1v1h-1zM9 3h1v1h-1zM0 4h1v1h-1zM5 4h1v1h-1zM10 4h1v1h-1zM0 5h1v1h-1zM5 5h1v1h-1zM10 5h1v1h-1zM0 6h1v1h-1zM5 6h1v1h-1zM10 6h1v1h-1zM0 7h1v1h-1zM1 7h1v1h-1zM2 7h1v1h-1zM3 7h1v1h-1zM4 7h1v1h-1zM5 7h1v1h-1zM6 7h1v1h-1zM7 7h1v1h-1zM8 7h1v1h-1zM9 7h1v1h-1zM10 7h1v1h-1zM0 8h1v1h-1zM10 8h1v1h-1zM0 9h1v1h-1zM10 9h1v1h-1zM0 10h1v1h-1zM10 10h1v1h-1zM1 11h1v1h-1zM9 11h1v1h-1zM2 12h1v1h-1zM3 12h1v1h-1zM4 12h1v1h-1zM5 12h1v1h-1zM6 12h1v1h-1zM7 12h1v1h-1zM8 12h1v1h-1z'/%3E%3Cpath fill='%23bdbdbd' d='M2 3h1v1h-1zM3 3h1v1h-1zM4 3h1v1h-1zM1 4h1v1h-1zM2 4h1v1h-1zM3 4h1v1h-1zM4 4h1v1h-1zM1 5h1v1h-1zM2 5h1v1h-1zM3 5h1v1h-1zM4 5h1v1h-1zM1 6h1v1h-1zM2 6h1v1h-1zM3 6h1v1h-1zM4 6h1v1h-1zM1 8h1v1h-1zM2 8h1v1h-1zM3 8h1v1h-1zM4 8h1v1h-1zM5 8h1v1h-1zM6 8h1v1h-1zM7 8h1v1h-1zM8 8h1v1h-1zM9 8h1v1h-1zM1 9h1v1h-1zM2 9h1v1h-1zM3 9h1v1h-1zM4 9h1v1h-1zM5 9h1v1h-1zM6 9h1v1h-1zM7 9h1v1h-1zM8 9h1v1h-1zM9 9h1v1h-1zM1 10h1v1h-1zM2 10h1v1h-1zM3 10h1v1h-1zM4 10h1v1h-1zM5 10h1v1h-1zM6 10h1v1h-1zM7 10h1v1h-1zM8 10h1v1h-1zM9 10h1v1h-1zM2 11h1v1h-1zM3 11h1v1h-1zM4 11h1v1h-1zM5 11h1v1h-1zM6 11h1v1h-1zM7 11h1v1h-1zM8 11h1v1h-1z'/%3E%3Cpath fill='%23ff0' d='M6 3h1v1h-1zM7 3h1v1h-1zM8 3h1v1h-1zM6 4h1v1h-1zM7 4h1v1h-1zM8 4h1v1h-1zM9 4h1v1h-1zM6 5h1v1h-1zM7 5h1v1h-1zM8 5h1v1h-1zM9 5h1v1h-1zM6 6h1v1h-1zM7 6h1v1h-1zM8 6h1v1h-1zM9 6h1v1h-1z'/%3E%3C/svg%3E");
+}
+
+/* an arrow down onto a ledge: tap-to-drop (the chat bar), red while on */
+.icon-drop {
+    width: 22px;
+    height: 26px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 13' shape-rendering='crispEdges'%3E%3Cpath fill='%23000' d='M3 0h5v1H3zM3 1h1v1H3zM7 1h1v1H7zM3 2h1v1H3zM7 2h1v1H7zM1 3h3v1H1zM7 3h3v1H7zM1 4h1v1H1zM9 4h1v1H9zM1 5h2v1H1zM8 5h2v1H8zM2 6h2v1H2zM7 6h2v1H7zM3 7h2v1H3zM6 7h2v1H6zM4 8h3v1H4zM0 10h11v1H0zM0 11h1v1H0zM10 11h1v1H10zM0 12h11v1H0z'/%3E%3Cpath fill='%23ff0' d='M4 1h3v1H4zM4 2h3v1H4zM4 3h3v1H4zM2 4h7v1H2zM3 5h5v1H3zM4 6h3v1H4zM5 7h1v1H5z'/%3E%3Cpath fill='%23bdbdbd' d='M1 11h9v1H1z'/%3E%3C/svg%3E");
+}
+
+.icon-cog {
+    width: 26px;
+    height: 26px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 13' shape-rendering='crispEdges'%3E%3Cpath fill='%23000' d='M5 0h3v2h1V1h2v2h-1v1h2v3h-2v1h1v2h-2V9H8v2H5V9H4v1H2V8h1V7H1V4h2V3H2V1h2v1h1z'/%3E%3Cpath fill='%23bdbdbd' d='M6 1h1v2h2V2h1v2H9v1h2v1H9v2h1v1H9V8H7v2H6V8H4v1H3V8h1V6H2V5h2V4H3V3h1v1h2z'/%3E%3Cpath fill='%23000' d='M5 5h3v1H5z'/%3E%3Cpath fill='%23707070' d='M5 6h3v1H5z'/%3E%3C/svg%3E");
+}
+
+.icon-up {
+    width: 16px;
+    height: 16px;
+    background-image: url('ui/sprites/scrollbar-0.png');
+}
+
+.icon-down {
+    width: 16px;
+    height: 16px;
+    background-image: url('ui/sprites/scrollbar-1.png');
+}
+
+.icon-rotate-left,
+.icon-rotate-right {
+    width: 22px;
+    height: 18px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 9' shape-rendering='crispEdges'%3E%3Cpath fill='%23000' d='M3 0h1v1h5v1h1v1h1v5h-3V4H4v1H3v1H2V5H1V4H0V3h1V2h1V1h1z'/%3E%3Cpath fill='%23ff0' d='M3 1h1v1h5v1h1v4H9V4H8V3H4v1H3v1H2V4H1V3h1V2h1z'/%3E%3C/svg%3E");
+}
+
+.icon-rotate-right {
+    transform: scaleX(-1);
+}
+
+/* ---------- HUD ---------- */
+
+#hud {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+
+#hud > .surface {
+    position: absolute;
+}
+
+/* everything over the world (on a large screen hud.js lays it out in HUD px, the viewport divided by the zoom, and
+   scales it up as a whole from the top left corner) */
+#hud-ui {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    transform-origin: 0 0;
+    pointer-events: none;
+}
+
+#hud-ui > * {
+    position: absolute;
+    pointer-events: auto;
+}
+
+/* The HUD's own frames (the tab column, the minimap's ring, the compass, the panel's and chatbox's edges) are rough
+   stone, like the frame around the 2004 interface. */
+#hud-tabs,
+#hud-map,
+#btn-compass,
+#hud-panel,
+#hud-chat-box {
+    background: var(--rough-stone);
+    image-rendering: pixelated;
+}
+
+/* minimap: the round map in a stone ring (the canvas is placed so that the player is at the centre of the round) */
+#hud-map {
+    box-sizing: border-box;
+    border-radius: 50%;
+    box-shadow:
+        0 0 0 1px var(--stone-edge),
+        var(--rough-bevel),
+        0 2px 10px rgba(0, 0, 0, 0.55);
+}
+
+#hud-map-clip {
+    position: absolute;
+    border-radius: 50%;
+    overflow: hidden;
+    background: #000;
+    box-shadow: 0 0 0 1px var(--stone-edge), 0 0 0 2px rgba(255, 240, 210, 0.12);
+}
+
+#hud-map-clip .surface {
+    position: absolute;
+}
+
+/* a soft dark edge inside the ring, over the map */
+#hud-map-clip::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.7), inset 0 2px 6px rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+}
+
+/* the compass on the ring: the game's compass rose, turned with the camera; a tap faces north */
+#btn-compass {
+    box-sizing: border-box;
+    border-radius: 50%;
+    overflow: hidden;
+    padding: 3px;
+    box-shadow: 0 0 0 1px var(--stone-edge), var(--rough-bevel), 0 1px 5px rgba(0, 0, 0, 0.5);
+}
+
+#btn-compass .compass-rose {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: url('ui/sprites/compass.png') center / 155% 155% no-repeat;
+    box-shadow: 0 0 0 1px var(--stone-edge);
+    pointer-events: none;
+}
+
+#btn-compass.pressed {
+    filter: brightness(1.25);
+}
+
+/* the minimap's zoom slider: a groove carved along the ring's lower left, a round stone knob with a magnifying glass in
+   it, + and - at the ends (hud.js placeZoom) */
+#map-zoom-track {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: visible;
+    pointer-events: none;
+}
+
+#map-zoom-track path {
+    fill: none;
+    stroke-linecap: round;
+}
+
+#map-zoom-track .groove {
+    stroke: rgba(0, 0, 0, 0.8);
+    stroke-width: 3px;
+}
+
+/* (lit along its outer edge, like a cut lit from the top left) */
+#map-zoom-track .groove-light {
+    stroke: rgba(255, 236, 200, 0.35);
+    stroke-width: 1px;
+}
+
+/* the groove's touch area: a finger-wide band along it */
+#map-zoom-track .groove-hit {
+    stroke: transparent;
+    stroke-width: 18px;
+    pointer-events: stroke;
+}
+
+#map-zoom {
+    position: absolute;
+    box-sizing: border-box;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--rough-stone);
+    box-shadow: 0 0 0 1px var(--stone-edge), var(--rough-bevel), 0 1px 4px rgba(0, 0, 0, 0.6);
+    touch-action: none;
+}
+
+/* a finger-sized touch area around the small knob */
+#map-zoom::before {
+    content: '';
+    position: absolute;
+    inset: -9px;
+    border-radius: 50%;
+}
+
+#map-zoom.pressed {
+    filter: brightness(1.3);
+}
+
+.icon-zoom {
+    width: 14px;
+    height: 14px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M8.6 8.6 12.4 12.4' stroke='%23000' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M8.6 8.6 12.4 12.4' stroke='%23c89048' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='5.6' cy='5.6' r='3.9' fill='%239fd0ff' fill-opacity='0.55' stroke='%23000' stroke-width='3'/%3E%3Ccircle cx='5.6' cy='5.6' r='3.9' fill='none' stroke='%23fff' stroke-width='1.4'/%3E%3C/svg%3E");
+    image-rendering: auto;
+}
+
+/* the World map button on the ring's lower right (opposite the compass): a globe filling a stone knob the size of the
+   zoom slider's, with only a hairline of stone round it (worldmap.js) */
+#btn-worldmap {
+    position: absolute;
+    box-sizing: border-box;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--rough-stone);
+    image-rendering: pixelated;
+    box-shadow: 0 0 0 1px var(--stone-edge), var(--rough-bevel), 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+/* a finger-sized touch area around the small knob */
+#btn-worldmap::before {
+    content: '';
+    position: absolute;
+    inset: -9px;
+    border-radius: 50%;
+}
+
+#btn-worldmap.pressed {
+    filter: brightness(1.3);
+}
+
+.icon-globe {
+    width: 20px;
+    height: 20px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='9.4' fill='%233d5c94' stroke='%23000' stroke-width='1.1'/%3E%3Cpath d='M3.6 6.1C5.1 4.5 8 4.6 8.6 6.4 9.1 7.9 7.4 8.5 7 10.1 6.6 11.9 5 12.5 3.9 11.3 2.9 10.1 2.6 7.4 3.6 6.1Z' fill='%23668f2e' stroke='%23000' stroke-width='0.6'/%3E%3Cpath d='M11.2 9.4C12.6 8.5 15 9 15.4 10.8 15.6 12.5 14 14.4 12.4 14.3 11.3 14.2 11.6 12.5 11 11.7 10.4 10.8 10.4 9.9 11.2 9.4Z' fill='%23668f2e' stroke='%23000' stroke-width='0.6'/%3E%3Cpath d='M10.9 3.9C12.3 3.4 14 4.1 14.5 5.4 13.5 5.9 12.1 5.8 10.9 3.9Z' fill='%23b49a5c' stroke='%23000' stroke-width='0.5'/%3E%3Cpath d='M4.4 4.6A7.6 7.6 0 0 1 9.6 2.2' fill='none' stroke='%23fff' stroke-opacity='0.6' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
+    image-rendering: auto;
+}
+
+.zoom-mark {
+    position: absolute;
+    transform: translate(-50%, -55%);
+    font: 16px/16px var(--font-bold);
+    color: var(--yellow);
+    text-shadow: var(--shadow);
+    pointer-events: none;
+}
+
+/* the orbs left of the minimap: hitpoints, prayer and run, as stone plates */
+#hud-orbs {
+    display: flex;
+    gap: 4px;
+    align-items: stretch;
+}
+
+#hud-orbs > .orb {
+    position: relative;
+    width: auto;
+    height: 30px;
+    min-width: 34px;
+    padding: 0 7px 0 4px;
+    flex-direction: row;
+    gap: 3px;
+    border-width: 4px;
+    border-image-slice: 4 fill;
+    border-image-width: 4px;
+}
+
+#hud-orbs > .orb .icon {
+    width: 20px;
+    height: 20px;
+}
+
+#hud-orbs > .orb .orb-value {
+    position: static;
+    font: 16px/16px var(--font-plain);
+    min-width: 16px;
+    text-align: right;
+}
+
+#hud-orbs > .orb .orb-value:empty {
+    display: none;
+}
+
+/* Run, like the Player controls tab's Walk/Run buttons: the word on grey stone, red stone while running (its icon is
+   the Player controls tab's, so the HUD shows the word instead) */
+#hud-orbs > #btn-run .icon-run {
+    display: none;
+}
+
+#btn-run .run-label {
+    display: none;
+}
+
+#hud-orbs > #btn-run .run-label {
+    display: block;
+    font: 16px/16px var(--font-plain);
+    color: var(--white);
+}
+
+#hud-orbs > #btn-run {
+    padding: 0 7px;
+    gap: 5px;
+}
+
+#hud-orbs > .orb.unavailable {
+    pointer-events: none;
+}
+
+.orb-value.high {
+    color: var(--green);
+}
+
+.orb-value.mid {
+    color: var(--yellow);
+}
+
+.orb-value.low {
+    color: var(--orange);
+}
+
+.orb-value.critical {
+    color: var(--red);
+}
+
+/* hitpoints running out: the orb pulses */
+#orb-hp:has(.orb-value.critical) {
+    animation: low-hp 900ms ease-in-out infinite;
+}
+
+@keyframes low-hp {
+    50% {
+        filter: brightness(1.4) drop-shadow(0 0 4px rgba(255, 0, 0, 0.8));
+    }
+}
+
+.icon-hp {
+    background-image: url('ui/sprites/staticons-6.png');
+}
+
+.icon-prayer {
+    background-image: url('ui/sprites/staticons-4.png');
+}
+
+/* tab column: the 13 tab icons and Settings on stone slabs, the open one on the 2004 red stone, in a framed column of
+   rough stone (the same bevel as the panel's frame) */
+#hud-tabs {
+    --row: 36px;
+    --tab-w: 34px;
+    box-sizing: border-box;
+    padding: 2px;
+    display: grid;
+    grid-template-columns: var(--tab-w) var(--tab-w);
+    grid-auto-rows: var(--row);
+    align-content: start;
+    border: 2px solid;
+    border-color: rgba(150, 132, 106, 0.75) rgba(14, 12, 9, 0.75) rgba(14, 12, 9, 0.75) rgba(150, 132, 106, 0.75);
+    border-radius: 5px;
+    outline: 1px solid var(--stone-edge);
+    box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.5), 0 3px 14px rgba(0, 0, 0, 0.55);
+}
+
+#hud-tabs > .tab,
+#hud-tabs > #btn-settings {
+    position: relative;
+    width: var(--tab-w);
+    height: var(--row);
+    border: 0;
+    border-image: none;
+    padding: 0;
+}
+
+/* the slab: the red stone's shape in grey stone (the tab stones of the 2004 interface are one shape) */
+#hud-tabs > .tab::before,
+#hud-tabs > #btn-settings::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 30px;
+    height: min(37px, calc(var(--row) - 2px));
+    transform: translate(-50%, -50%);
+    background: url('ui/sprites/redstone2.png') center / 100% 100% no-repeat;
+    filter: saturate(0) sepia(0.5) brightness(1.65);
+    image-rendering: pixelated;
+}
+
+#hud-tabs > .tab.selected::before {
+    filter: none;
+}
+
+#hud-tabs > .tab::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 30px;
+    height: 30px;
+    transform: translate(-50%, -50%);
+    background: var(--icon) center / 30px 30px no-repeat;
+    image-rendering: pixelated;
+}
+
+#hud-tabs > .tab.unavailable::after {
+    opacity: 0;
+}
+
+#hud-tabs > .tab.unavailable {
+    pointer-events: none;
+}
+
+#hud-tabs > .tab.flashing::after {
+    animation: tab-flash 400ms steps(1) infinite;
+}
+
+#hud-tabs > .tab.pressed::before,
+#hud-tabs > #btn-settings.pressed::before {
+    filter: saturate(0) sepia(0.5) brightness(2);
+}
+
+#hud-tabs > .tab.selected.pressed::before {
+    filter: brightness(1.2);
+}
+
+#hud-tabs > #btn-settings .icon {
+    position: relative;
+    width: 24px;
+    height: 24px;
+}
+
+@keyframes tab-flash {
+    50% {
+        opacity: 0;
+    }
+}
+
+/* side panel: the client's 190x261 sidebar (at 5/6, hud.js PANEL) in a stone frame, sliding out from the tab column */
+.stone-frame {
+    position: absolute;
+    box-sizing: border-box;
+    border: 3px solid;
+    border-color: var(--stone-light) var(--stone-dark) var(--stone-dark) var(--stone-light);
+    outline: 1px solid var(--stone-edge);
+    background: var(--stone-dark);
+    box-shadow: 0 3px 14px rgba(0, 0, 0, 0.6);
+}
+
+/* (the rough stone shows through the bevel) */
+#hud-panel,
+#hud-chat-box {
+    border-color: rgba(150, 132, 106, 0.75) rgba(14, 12, 9, 0.75) rgba(14, 12, 9, 0.75) rgba(150, 132, 106, 0.75);
+}
+
+#hud-panel {
+    border-radius: 4px;
+    animation: panel-in 150ms ease-out;
+}
+
+/* the panel and the chatbox are drawn at whole device pixels per game pixel: crisp, whatever the world's scaling */
+#hud-panel .surface,
+#hud-chat-box .surface {
+    image-rendering: pixelated;
+}
+
+#hud-panel .surface {
+    position: static;
+    width: 100%;
+    height: 100%;
+}
+
+/* the inventory while tap-to-drop is on (the chat bar's drop button): a red frame, as OSRS mobile marks it */
+#hud-panel.drop-mode {
+    border-color: rgba(214, 48, 26, 0.9) rgba(96, 10, 4, 0.9) rgba(96, 10, 4, 0.9) rgba(214, 48, 26, 0.9);
+    outline-color: #2a0502;
+    box-shadow: 0 0 7px rgba(255, 30, 0, 0.5), 0 3px 14px rgba(0, 0, 0, 0.6);
+}
+
+#hud-panel.drop-mode::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    box-shadow: inset 0 0 0 1px rgba(255, 40, 16, 0.85);
+    pointer-events: none;
+}
+
+@keyframes panel-in {
+    from {
+        translate: 28px 0;
+        opacity: 0;
+    }
+}
+
+/* chat: the chatbox above the chat buttons, the 2004 filter buttons beside them while it is open */
+#hud-chat-box {
+    border-radius: 3px;
+    transform-origin: left bottom;
+    animation: chat-in 130ms ease-out;
+}
+
+#hud-chat-box .surface {
+    position: static;
+    width: 479px;
+    height: 96px;
+}
+
+@keyframes chat-in {
+    from {
+        translate: 0 16px;
+        opacity: 0;
+    }
+}
+
+#hud-chat-bar {
+    display: flex;
+    gap: 3px;
+}
+
+#hud-chat-bar > .stone-btn,
+#hud-chat-bar > .orb {
+    position: relative;
+    width: 44px;
+    height: 38px;
+    flex: none;
+    border-width: 4px;
+    border-image-slice: 4 fill;
+    border-image-width: 4px;
+}
+
+#hud-chat-bar > #btn-secondary .icon {
+    width: 19px;
+    height: 22px;
+}
+
+#hud-chat-modes {
+    display: flex;
+    gap: 3px;
+    flex: 1 1 auto;
+    min-width: 0;
+    animation: chat-in 130ms ease-out;
+}
+
+.chat-mode {
+    height: 38px;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    flex-direction: column;
+    gap: 0;
+    border-width: 4px;
+    border-image-slice: 4 fill;
+    border-image-width: 4px;
+    font: 16px/12px var(--font-small);
+    white-space: nowrap;
+}
+
+.chat-mode .chat-label {
+    color: var(--white);
+}
+
+/* where the bar is narrow, the short labels: "Public" (hud.js fitChatModes) */
+#hud-chat-modes.short .label-more {
+    display: none;
+}
+
+.chat-value.on {
+    color: var(--green);
+}
+
+.chat-value.friends {
+    color: var(--yellow);
+}
+
+.chat-value.off {
+    color: var(--red);
+}
+
+.chat-value.hide {
+    color: var(--cyan);
+}
+
+/* a dialogue's answers in the chatbox's place: the chatbox's parchment, the quill font, finger-sized rows */
+#hud-dialog {
+    display: flex;
+    flex-direction: column;
+    background: #c8b48c url('ui/sprites/chatback.png') center / 100% 100%;
+    border-radius: 3px;
+    animation: chat-in 130ms ease-out;
+}
+
+.dialog-title {
+    flex: none;
+    height: 24px;
+    padding-top: 4px;
+    box-sizing: border-box;
+    text-align: center;
+    font: 16px/16px var(--font-quill);
+    color: #800000;
+}
+
+#hud-dialog-options {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    padding: 0 6px 4px;
+}
+
+.dialog-option {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 40px;
+    touch-action: pan-y;
+    font: 16px/16px var(--font-quill);
+    color: #000;
+    white-space: pre;
+    border-top: 1px solid rgba(80, 60, 30, 0.35);
+}
+
+.dialog-option.pressed {
+    color: #ffffff;
+    background: rgba(120, 80, 30, 0.35);
+}
+
+/* the game holds the chatbox open (dialogue, prompt, typed chat) */
+#btn-chat-toggle.forced {
+    opacity: 0.45;
+}
+
+/* Tutorial Island's instructions are put away: the chat button glows until they are shown again */
+#btn-chat-toggle.glow {
+    animation: chat-glow 1100ms ease-in-out infinite;
+}
+
+@keyframes chat-glow {
+    50% {
+        filter: brightness(1.45) drop-shadow(0 0 4px rgba(255, 255, 0, 0.7));
+    }
+}
+
+/* the newest chat lines over the world while the chatbox is closed, on a faint shade; taps go through to the world, and
+   they fade away a while after the last new line */
+#hud-ui > #hud-chat-lines {
+    pointer-events: none;
+}
+
+#hud-chat-lines {
+    padding: 1px 24px 1px 4px;
+    font: 16px/14px var(--font-plain);
+    text-shadow: var(--shadow);
+    white-space: nowrap;
+    overflow: hidden;
+    background: linear-gradient(to right, rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.22) 60%, rgba(0, 0, 0, 0));
+    border-radius: 2px;
+    transition: opacity 250ms ease;
+}
+
+#hud-chat-lines:empty {
+    display: none;
+}
+
+#hud-chat-lines.faded {
+    opacity: 0;
+    transition: opacity 1200ms ease;
+}
+
+.chat-line {
+    overflow: hidden;
+    text-overflow: clip;
+}
+
+.chat-line.game .msg {
+    color: var(--white);
+}
+
+.chat-line.public .who {
+    color: var(--white);
+}
+
+.chat-line.public .msg {
+    color: #9eb7ff;
+}
+
+.chat-line.private-from,
+.chat-line.private-to,
+.chat-line.private-info {
+    color: var(--cyan);
+}
+
+.chat-line.trade {
+    color: #ff7cff;
+}
+
+.chat-line.duel {
+    color: #ff9040;
+}
+
+.crown {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    margin-right: 1px;
+    vertical-align: -1px;
+    background: center / 13px 13px no-repeat;
+    image-rendering: pixelated;
+}
+
+.crown-1 {
+    background-image: url('ui/sprites/mod_icons-0.png');
+}
+
+.crown-2 {
+    background-image: url('ui/sprites/mod_icons-1.png');
+}
+
+/* optional camera buttons: a pad of the character designer's arrow stones */
+#hud-camera {
+    display: grid;
+    grid-template-columns: repeat(3, 44px);
+    grid-template-rows: repeat(3, 40px);
+    grid-template-areas: '. up .' 'left . right' '. down .';
+    gap: 2px;
+}
+
+#hud-camera > .cam-btn {
+    width: 44px;
+    height: 40px;
+    border: 0;
+    border-image: none;
+    background: url('ui/sprites/leftarrow.png') center / 45px 36px no-repeat;
+    image-rendering: pixelated;
+}
+
+#hud-camera > .cam-btn .icon {
+    display: none;
+}
+
+#hud-camera > .cam-btn[data-hold='1'] {
+    grid-area: left;
+}
+
+#hud-camera > .cam-btn[data-hold='2'] {
+    grid-area: right;
+    background-image: url('ui/sprites/rightarrow.png');
+}
+
+#hud-camera > .cam-btn[data-hold='3'] {
+    grid-area: up;
+    rotate: 90deg;
+}
+
+#hud-camera > .cam-btn[data-hold='4'] {
+    grid-area: down;
+    rotate: -90deg;
+}
+
+#hud-camera > .cam-btn.pressed {
+    filter: brightness(1.35);
+}
+
+/* ---------- the options menu for fingers (menu.js) ---------- */
+
+#menu-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+}
+
+/* the 2004 menu: brown with a black title bar and a black-edged list, in the bold font; finger-sized rows */
+#menu {
+    --row: 34px;
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    min-width: 150px;
+    max-width: calc(100vw - 24px);
+    padding: 1px;
+    background: var(--menu);
+    box-shadow: 0 0 0 1px var(--stone-edge), 0 6px 20px rgba(0, 0, 0, 0.65);
+}
+
+#menu.opening {
+    animation: menu-in 110ms ease-out;
+}
+
+@keyframes menu-in {
+    from {
+        scale: 0.9;
+        opacity: 0;
+    }
+}
+
+.menu-title {
+    flex: none;
+    height: 20px;
+    padding: 2px 8px 0 4px;
+    box-sizing: border-box;
+    background: #000;
+    font: 16px/16px var(--font-bold);
+    color: var(--menu);
+    white-space: nowrap;
+}
+
+#menu-options {
+    margin-top: 1px;
+    border: 1px solid #000;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+}
+
+.menu-option {
+    display: flex;
+    align-items: center;
+    height: var(--row);
+    padding: 0 12px 0 4px;
+    font: 16px/16px var(--font-bold);
+    color: var(--white);
+    text-shadow: var(--shadow);
+    white-space: pre; /* the spaces between colour-tagged parts (each part is its own span) */
+}
+
+.menu-option + .menu-option {
+    box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.3);
+}
+
+.menu-option .base {
+    color: var(--white);
+}
+
+.menu-option.active {
+    background: #71675a;
+}
+
+.menu-option.active .base {
+    color: var(--yellow);
+}
+
+/* a mouse or trackpad highlights the option under it, as in the 2004 menu */
+@media (hover: hover) and (pointer: fine) {
+    .menu-option:hover {
+        background: #71675a;
+    }
+
+    .menu-option:hover .base {
+        color: var(--yellow);
+    }
+}
+
+/* ---------- the action label (menu.js label()): one row of the menu's look, fading out ---------- */
+
+#label-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 39;
+}
+
+#action-label {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    max-width: calc(100vw - 24px);
+    height: 32px;
+    padding: 0 10px 0 6px;
+    background: var(--menu);
+    border: 1px solid #000;
+    box-shadow: 0 0 0 1px var(--stone-edge), 0 4px 14px rgba(0, 0, 0, 0.6);
+    font: 16px/16px var(--font-bold);
+    color: var(--white);
+    text-shadow: var(--shadow);
+    white-space: pre; /* the spaces between colour-tagged parts (each part is its own span) */
+    opacity: 0;
+}
+
+#action-label .base {
+    color: var(--white);
+}
+
+/* in quickly, held a moment to read, then fading out to the end of the second */
+#action-label.fading {
+    animation: action-label-fade 1000ms linear forwards;
+}
+
+@keyframes action-label-fade {
+    0% {
+        opacity: 0;
+        scale: 0.92;
+    }
+    8% {
+        opacity: 1;
+        scale: 1;
+    }
+    30% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+    }
+}
+
+/* ---------- the long-press ring ---------- */
+
+#press-ring {
+    --fill-ms: 260ms;
+    position: absolute;
+    width: 64px;
+    height: 64px;
+    margin: -32px 0 0 -32px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 35;
+    background: conic-gradient(var(--yellow) var(--fill, 0deg), rgba(0, 0, 0, 0) 0);
+    -webkit-mask: radial-gradient(circle, transparent 26px, #000 27px, #000 31px, transparent 32px);
+    mask: radial-gradient(circle, transparent 26px, #000 27px, #000 31px, transparent 32px);
+    filter: drop-shadow(0 0 1px #000);
+    opacity: 0.9;
+}
+
+#press-ring.filling {
+    animation: press-fill var(--fill-ms) linear forwards;
+}
+
+@property --fill {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+}
+
+@keyframes press-fill {
+    to {
+        --fill: 360deg;
+    }
+}
+
+/* ---------- classic layout rails (also the title screen's buttons) ---------- */
+
+.rail {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.rail > button {
+    pointer-events: auto;
+    position: relative;
+    width: 52px;
+    height: 52px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    border-style: solid;
+    border-width: 5px;
+    border-image: url('ui/sprites/miscgraphics-0.png') 5 fill / 5px stretch;
+    border-radius: 0;
+    background: none;
+    grid-row: auto;
+}
+
+.rail > button.active {
+    border-image-source: url('ui/sprites/miscgraphics-9.png');
+}
+
+.rail > button.pressed {
+    filter: brightness(1.25);
+}
+
+.rail > button .icon-up,
+.rail > button .icon-down {
+    width: 24px;
+    height: 24px;
+}
+
+/* Run in a rail: the energy under its icon */
+.rail > .orb {
+    flex-direction: column;
+}
+
+.rail > .orb .orb-value {
+    position: absolute;
+    left: -2px;
+    right: -2px;
+    bottom: -4px;
+    font: 16px/12px var(--font-small);
+    color: var(--yellow);
+    text-align: center;
+    text-shadow: var(--shadow);
+}
+
+.rail > .orb .orb-value:empty {
+    display: none;
+}
+
+.rail > #btn-run .icon-run {
+    margin-top: -8px;
+}
+
+/* Controls hidden: only Settings is left, small and out of the way in the bottom corner. */
+.rail.minimal {
+    justify-content: flex-end;
+    padding-bottom: 10px;
+}
+
+.rail.minimal > button {
+    width: 40px;
+    height: 40px;
+    opacity: 0.7;
+}
+
+.rail.overlay-mode > button {
+    opacity: 0.85;
+}
+
+/* the title screen: only Settings, in the top right corner over the brick wall */
+.rail.title {
+    justify-content: flex-start;
+    padding-top: 8px;
+    bottom: auto;
+}
+
+.rail.title > button {
+    width: 44px;
+    height: 44px;
+    opacity: 0.92;
+}
+
+/* the title screen's own buttons under the titlebox: Continue as <name>, Characters, or the first-run hint */
+#title-actions {
+    position: absolute;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+}
+
+#title-actions .title-btn {
+    height: 33px;
+    min-width: 0;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+#btn-continue .continue-label {
+    color: #c8c8c8;
+    font: 16px/16px var(--font-plain);
+}
+
+#btn-continue #continue-name {
+    color: var(--yellow);
+}
+
+#title-hint {
+    font: 16px/16px var(--font-bold);
+    color: var(--yellow);
+    text-shadow: var(--shadow);
+    white-space: nowrap;
+}
+
+.characters-panel {
+    width: min(420px, 100%);
+}
+
+.characters-where {
+    padding: 0 16px 12px;
+    font: 16px/14px var(--font-small);
+    color: #c8b89a;
+    text-shadow: var(--shadow);
+}
+
+.characters-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 16px 16px;
+    overflow-y: auto;
+    touch-action: pan-y;
+}
+
+.characters-list .title-btn.character {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 44px;
+    touch-action: pan-y;
+}
+
+.character-name {
+    color: var(--yellow);
+}
+
+.character-when {
+    font: 16px/16px var(--font-small);
+    color: #c8c8c8;
+}
+
+/* ---------- status line ---------- */
+
+#status-pill {
+    position: absolute;
+    left: 50%;
+    top: calc(28px + var(--safe-top)); /* in game: under the game's own top-left text line */
+    transform: translateX(-50%);
+    max-width: 70vw;
+    padding: 5px 10px 4px;
+    background: rgba(0, 0, 0, 0.75);
+    border: 1px solid var(--menu);
+    font: 16px/16px var(--font-plain);
+    color: var(--yellow);
+    text-shadow: var(--shadow);
+    text-align: center;
+    pointer-events: none;
+    z-index: 30;
+}
+
+/* ---------- overlays ---------- */
+
+.overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: calc(10px + var(--safe-top)) calc(12px + var(--safe-right)) calc(10px + var(--safe-bottom)) calc(12px + var(--safe-left));
+    box-sizing: border-box;
+    z-index: 50;
+}
+
+/* On a large screen (host.js layout(): html.ui-zoomed and --ui-zoom, ×1.5 or ×2 on an iPad) the options menu's layer
+   and the overlays are laid out at the viewport's size divided by the zoom and scaled up as a whole, like the HUD
+   (menu.js places the menu in the layer's own px). A transform, not CSS zoom: WebKit's zoom, and its page zoom alike,
+   leave the text of anything that sets its own font at 1x in a zoomed box. */
+html.ui-zoomed #menu-layer,
+html.ui-zoomed #label-layer,
+html.ui-zoomed .overlay {
+    inset: auto;
+    left: 0;
+    top: 0;
+    width: calc(100% / var(--ui-zoom));
+    height: calc(100% / var(--ui-zoom));
+    transform: scale(var(--ui-zoom));
+    transform-origin: 0 0;
+}
+
+/* The crisp pixel snap at a fractional device pixel ratio (host.js snapZoom: Android's 2.625 → ×8/7, 3 device px a HUD
+   px; html.ui-snapped, never on an iPhone or iPad). A scale transform does not make it crisp in Android System WebView:
+   Chromium lays the box out at the page's scale (2.625 device px a CSS px, box edges rounded there), then draws it 8/7
+   larger, so the 2004 sprites, the bitmap fonts, the stone and the borders land between device px and smear (measured
+   on the emulator with WebView 145, android/test/crisp.mjs; a compositing layer of its own, will-change, changes
+   nothing). CSS zoom lays the box out at its final scale instead, 3 device px a HUD px, every edge on a whole device
+   px: crisp (a 1px border is 3 device px, the 2px loader border 6). (Desktop Chrome's emulated pixel ratio is no guide
+   here: it lays the page out in CSS px and scales the result, so there the transform looks crisp and the zoom soft; a
+   phone's WebView lays out in device px.) The layers keep will-change: transform, so they stay
+   stacking contexts and containing blocks as the transformed layers are; DOM geometry reads the same either way (offset
+   and client sizes in HUD px, getBoundingClientRect in CSS px). hud.js sets #hud-ui's zoom itself. */
+html.ui-snapped #menu-layer,
+html.ui-snapped #label-layer,
+html.ui-snapped .overlay {
+    width: 100%;
+    height: 100%;
+    transform: none;
+    zoom: var(--ui-zoom);
+}
+
+html.ui-snapped #hud-ui,
+html.ui-snapped #menu-layer,
+html.ui-snapped #label-layer,
+html.ui-snapped .overlay {
+    will-change: transform;
+}
+
+/* loading: the 2004 loader, a red bar on black under the logo */
+#loading {
+    background: #000;
+    transition: opacity 350ms ease;
+}
+
+#loading.fade {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.loading-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.loading-logo {
+    width: 444px;
+    height: 142px;
+    max-width: 80vw;
+    background: url('ui/sprites/logo.png') center / contain no-repeat;
+    image-rendering: pixelated;
+}
+
+.loading-bar {
+    position: relative;
+    margin-top: 18px;
+    width: 304px;
+    height: 34px;
+    box-sizing: border-box;
+    border: 2px solid #8c1111;
+    background: #000;
+}
+
+.loading-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0%;
+    background: #8c1111;
+    transition: width 200ms ease;
+}
+
+.loading-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font: 16px/16px var(--font-bold);
+    color: var(--white);
+    text-shadow: var(--shadow);
+    white-space: nowrap;
+}
+
+.loading-sub {
+    margin-top: 12px;
+    font: 16px/12px var(--font-small);
+    color: #75a9a9;
+}
+
+/* error: the 2004 "unable to continue" screen */
+#error {
+    background: #000;
+}
+
+.error-panel {
+    max-width: 520px;
+    text-align: center;
+}
+
+.error-title {
+    font: 32px/32px var(--font-bold);
+    color: var(--yellow);
+    text-shadow: 2px 2px 0 #000;
+}
+
+.error-text {
+    margin-top: 12px;
+    font: 16px/18px var(--font-plain);
+    color: var(--white);
+    white-space: pre-wrap;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+.panel-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 16px;
+}
+
+/* settings: a stone sheet over the safe area, the categories down the left (the Game Options tab's buttons) and the
+   chosen one's rows on the right; a category that does not fit scrolls on its own */
+#settings,
+#characters,
+#confirm,
+#howto,
+#licences {
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.settings-panel {
+    width: min(560px, 100%);
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-sizing: border-box;
+    background: #463d32 url('ui/sprites/tradebacking.png');
+    border: 2px solid;
+    border-color: var(--stone-light) var(--stone-dark) var(--stone-dark) var(--stone-light);
+    outline: 1px solid var(--stone-edge);
+    box-shadow: 0 6px 30px rgba(0, 0, 0, 0.7);
+}
+
+/* as tall as the screen allows whichever category is shown, so that the sheet keeps its size from one to the next */
+#settings .settings-panel {
+    width: min(760px, 100%);
+    height: min(100%, 440px);
+}
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    flex: none;
+    min-height: 40px;
+    padding: 4px 12px;
+    box-sizing: border-box;
+    border-bottom: 2px solid var(--stone-dark);
+}
+
+.panel-title {
+    font: 16px/16px var(--font-bold);
+    color: var(--orange);
+    text-shadow: var(--shadow);
+}
+
+/* a 2004 slate button at the top right */
+.close-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.panel-header .close-btn.title-btn,
+.panel-header .close-btn {
+    min-width: 84px;
+    height: 34px;
+    padding: 0 12px;
+    border-style: solid;
+    border-width: 6px;
+    border-image: url('ui/sprites/titlebutton.png') 6 fill / 6px stretch;
+    font: 16px/16px var(--font-bold);
+    color: var(--white);
+    text-shadow: var(--shadow);
+}
+
+.close-btn:active {
+    filter: brightness(1.2);
+}
+
+/* the same at the top left (Settings' Help, and Save now while in the world) */
+.header-start {
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    gap: 6px;
+}
+
+.header-start .close-btn {
+    position: static;
+    transform: none;
+}
+
+.settings-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+
+.settings-nav {
+    flex: none;
+    width: 150px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px;
+    box-sizing: border-box;
+    border-right: 2px solid var(--stone-dark);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+}
+
+/* the Game Options tab's grey button, red for the category shown; 36 px tall, less on a screen too short for all eight
+   (the sheet's height is the HUD layer's, which on Android is not the viewport's: a media query cannot tell) */
+.settings-nav button {
+    position: relative;
+    flex: 0 1 36px;
+    min-height: 28px;
+    box-sizing: border-box;
+    padding: 0 10px;
+    border-style: solid;
+    border-width: 4px;
+    border-image: url('ui/sprites/miscgraphics3-0.png') 4 fill / 4px stretch;
+    font: 16px/16px var(--font-plain);
+    color: var(--white);
+    text-shadow: var(--shadow);
+    text-align: left;
+    touch-action: pan-y;
+}
+
+.settings-nav button.on {
+    border-image-source: url('ui/sprites/miscgraphics3-1.png');
+    color: var(--yellow);
+}
+
+/* a world setting changed: World waits for the restart that applies it */
+.settings-nav button.needed::after {
+    content: '';
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    margin-top: -3px;
+    background: var(--yellow);
+    box-shadow: 1px 1px 0 #000;
+}
+
+.settings-pane {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    padding: 2px 16px 10px;
+}
+
+/* a drag that starts on a button still scrolls a list that has to scroll (taps still click) */
+.settings-pane button,
+.characters-list button {
+    touch-action: pan-y;
+}
+
+.group-label {
+    margin: 10px 0 2px;
+    font: 16px/16px var(--font-bold);
+    color: var(--orange);
+    text-shadow: var(--shadow);
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 35px;
+    font: 16px/16px var(--font-plain);
+    color: var(--yellow);
+    text-shadow: var(--shadow);
+    white-space: nowrap;
+}
+
+.settings-section .row,
+.margins-rows .row {
+    min-height: 44px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+}
+
+.seg {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+/* the Game Options tab's buttons: grey, red when chosen */
+.seg button {
+    box-sizing: border-box;
+    min-width: 46px;
+    height: 31px;
+    padding: 0 7px;
+    border-style: solid;
+    border-width: 4px;
+    border-image: url('ui/sprites/miscgraphics3-0.png') 4 fill / 4px stretch;
+    font: 16px/16px var(--font-plain);
+    color: var(--white);
+    text-shadow: var(--shadow);
+}
+
+.seg button.on {
+    border-image-source: url('ui/sprites/miscgraphics3-1.png');
+    color: var(--yellow);
+}
+
+.settings-section .seg button:disabled {
+    color: #8c8c8c;
+}
+
+/* XP rate (six choices) and Bots (eight: Off 25 ... 1000): each button as wide as its words, so that the row fits beside
+   the categories on the smallest phone */
+.seg[data-setting="xpRate"],
+.seg[data-setting="bots"] {
+    gap: 3px;
+}
+
+.seg[data-setting="xpRate"] button,
+.seg[data-setting="bots"] button {
+    min-width: 38px;
+    padding: 0 5px;
+}
+
+/* World's Restart (it says "Restart to apply" when one of its settings changed) */
+#settings-restart {
+    flex: none;
+    height: 34px;
+    min-width: 0;
+    padding: 0 12px;
+    border-width: 5px;
+    border-image-width: 5px;
+}
+
+#settings-restart.needed {
+    border-image-source: url('ui/sprites/miscgraphics-9.png');
+    border-image-slice: 5 fill;
+    color: var(--yellow);
+}
+
+.section-intro,
+.section-note {
+    font: 16px/14px var(--font-small);
+    color: #c8b89a;
+    text-shadow: var(--shadow);
+}
+
+.section-intro {
+    margin: 8px 0 4px;
+}
+
+.section-note {
+    margin-top: 10px;
+}
+
+/* About: the version line's detail (the commits it was built from) may wrap */
+#about {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.about-text {
+    line-height: 16px;
+}
+
+/* a short screen (an iPhone in landscape, 410 px tall at most): the sheet goes nearer the top and bottom edges */
+@media (max-height: 410px) {
+    #settings,
+    #licences {
+        padding-top: calc(4px + var(--safe-top));
+        padding-bottom: calc(4px + var(--safe-bottom));
+    }
+}
+
+/* a shorter one (an iPhone with Display Zoom: 320 px tall): the categories and rows a little tighter, so that the
+   categories still fit without scrolling */
+@media (max-height: 340px) {
+    .settings-nav {
+        gap: 3px;
+        padding: 6px 8px;
+    }
+
+    .settings-section .row {
+        min-height: 38px;
+    }
+}
+
+/* a narrow screen (an iPhone SE with Display Zoom: 568 px wide): narrower categories and Bots' buttons, so that its
+   eight choices still fit one row */
+@media (max-width: 600px) {
+    .settings-nav {
+        width: 128px;
+    }
+
+    .settings-pane {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+
+    .seg[data-setting="bots"] {
+        gap: 2px;
+    }
+
+    .seg[data-setting="bots"] button {
+        min-width: 0;
+        padding: 0 4px;
+    }
+}
+
+/* Saved data (host.js savedData): the characters, the world, Delete everything */
+.data-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 44px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+}
+
+.data-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.data-name {
+    font: 16px/16px var(--font-bold);
+    color: var(--yellow);
+    text-shadow: var(--shadow);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-detail {
+    font: 16px/14px var(--font-small);
+    color: #c8c8c8;
+    text-shadow: var(--shadow);
+}
+
+/* the Game Options tab's grey button, its words in the game's warning red */
+.data-btn {
+    flex: none;
+    box-sizing: border-box;
+    min-width: 76px;
+    height: 34px;
+    padding: 0 10px;
+    border-style: solid;
+    border-width: 4px;
+    border-image: url('ui/sprites/miscgraphics3-0.png') 4 fill / 4px stretch;
+    font: 16px/16px var(--font-plain);
+    color: #ff4040;
+    text-shadow: var(--shadow);
+}
+
+.data-btn:active {
+    filter: brightness(1.2);
+}
+
+.data-btn:disabled {
+    color: #8c8c8c;
+    filter: none;
+}
+
+.savedata-all {
+    display: flex;
+    justify-content: center;
+    margin-top: 12px;
+}
+
+.savedata-message {
+    margin-top: 10px;
+    font: 16px/16px var(--font-plain);
+    color: var(--yellow);
+    text-shadow: var(--shadow);
+    text-align: center;
+}
+
+/* Bot chat (host.js botChat): Think first while Rules or Claude online writes the replies: greyed out (no use there),
+   its choice still shown */
+#botchat-think.unused .data-name,
+#botchat-think.unused .data-detail {
+    color: #8c8c8c;
+}
+
+#botchat-think.unused .seg {
+    opacity: 0.5;
+}
+
+/* Tap options: a key to the four choices */
+.tapoptions-key {
+    margin-top: 10px;
+    font: 16px/14px var(--font-small);
+    color: #c8b89a;
+    text-shadow: var(--shadow);
+}
+
+.tapoptions-key div + div {
+    margin-top: 3px;
+}
+
+.tapoptions-key b {
+    font-weight: normal;
+    color: #ffff00;
+}
+
+/* the test's answer may be a whole chat line: it wraps */
+#botchat-test-result {
+    overflow-wrap: anywhere;
+}
+
+.data-btns {
+    display: flex;
+    gap: 6px;
+    flex: none;
+}
+
+/* a button that deletes nothing: white words */
+.data-btn.plain {
+    color: var(--white);
+}
+
+.data-btn.plain:disabled {
+    color: #8c8c8c;
+}
+
+/* "Are you sure?" over Saved data and Bot chat */
+#confirm {
+    z-index: 51;
+}
+
+.confirm-panel {
+    width: min(440px, 100%);
+}
+
+.confirm-text {
+    padding: 12px 18px 0;
+    overflow-y: auto;
+    font: 16px/18px var(--font-plain);
+    color: var(--white);
+    text-shadow: var(--shadow);
+    white-space: pre-line;
+}
+
+#confirm .panel-actions {
+    margin: 14px 0 14px;
+}
+
+#confirm .title-btn {
+    min-width: 120px;
+    height: 38px;
+}
+
+.title-btn.danger {
+    color: #ff4040;
+}
+
+/* Settings › About › Licences: licenses.txt over Settings, as tall as the screen, scrolling on its own */
+#licences {
+    z-index: 51;
+}
+
+/* Settings › Display › Screen margins: over the game with Settings put aside and a lighter backdrop, so that the HUD can
+   be seen moving around the box */
+#margins {
+    z-index: 51;
+    background: rgba(0, 0, 0, 0.25);
+}
+
+#settings.aside {
+    visibility: hidden;
+}
+
+.margins-panel {
+    width: min(480px, 100%);
+}
+
+.margins-rows {
+    padding: 2px 16px 12px;
+}
+
+.margins-rows .section-note {
+    margin-top: 10px;
+}
+
+.licences-panel {
+    width: min(760px, 100%);
+    height: 100%;
+}
+
+.licences-text {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 8px 16px 12px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    font: 16px/15px var(--font-small);
+    color: var(--white);
+    text-shadow: var(--shadow);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    outline: none;
+}
+
+/* how to play: the gestures, one per row */
+.howto-panel {
+    width: min(540px, 100%);
+}
+
+.howto-rows {
+    padding: 8px 18px 4px;
+    overflow-y: auto;
+    touch-action: pan-y;
+}
+
+.howto-row {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    min-height: 30px;
+    font: 16px/18px var(--font-plain);
+    color: var(--white);
+    text-shadow: var(--shadow);
+}
+
+.howto-key {
+    flex: none;
+    width: 74px;
+    font: 16px/18px var(--font-bold);
+    color: var(--yellow);
+}
+
+#howto .panel-actions {
+    margin: 8px 0 12px;
+}
+
+/* ---------- the World map (worldmap.js): a sheet filling the safe area, the map in an iframe (mapview.html) ---------- */
+
+#worldmap {
+    background: rgba(0, 0, 0, 0.55);
+}
+
+#worldmap .worldmap-panel {
+    width: 100%;
+    height: 100%;
+}
+
+.worldmap-header {
+    justify-content: space-between;
+    gap: 8px;
+    padding: 3px 4px 3px 8px;
+}
+
+.worldmap-end {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#worldmap-close {
+    min-width: 84px;
+    height: 34px;
+    padding: 0 12px;
+}
+
+#worldmap-close:active {
+    filter: brightness(1.2);
+}
+
+#worldmap-me {
+    width: 40px;
+    height: 34px;
+}
+
+.icon-you {
+    width: 22px;
+    height: 22px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9.2' fill='none' stroke='%23000' stroke-width='4.6'/%3E%3Ccircle cx='12' cy='12' r='9.2' fill='none' stroke='%23ff0000' stroke-width='2.4'/%3E%3Ccircle cx='12' cy='12' r='4.6' fill='%23fff' stroke='%23000' stroke-width='1.4'/%3E%3C/svg%3E");
+    image-rendering: auto;
+}
+
+/* the map and, over its left side, the Key */
+.worldmap-body {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: #000;
+}
+
+#worldmap-frame {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+}
+
+.worldmap-keys {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 186px;
+    box-sizing: border-box;
+    padding: 3px 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    background: #463d32 url('ui/sprites/tradebacking.png');
+    border-right: 2px solid var(--stone-dark);
+    box-shadow: 1px 0 0 var(--stone-edge), 4px 0 12px rgba(0, 0, 0, 0.5);
+}
+
+/* one kind of icon: the applet's Key rows (bold white, yellow while its icons flash), finger-tall */
+.worldmap-key-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 30px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    font: 16px/16px var(--font-bold);
+    color: var(--white);
+    text-shadow: var(--shadow);
+    text-align: left;
+    white-space: nowrap;
+    touch-action: pan-y;
+}
+
+.worldmap-key-row.on {
+    color: var(--yellow);
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.worldmap-key-row:active {
+    color: #bbaaaa;
+}
+
+.worldmap-key-icon {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    background: center / 15px 15px no-repeat;
+    image-rendering: pixelated;
+}
+
+/* Native text input fallback (desktop browsers only). */
+#lc-text-input {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    border: 0;
+    padding: 0;
+}

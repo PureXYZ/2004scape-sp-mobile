@@ -1,0 +1,196 @@
+ios: landing menu
+
+A touch acts on what was under the finger when it landed. The minimenu (what a tap does, what a long-press opens)
+was rebuilt every frame from the finger's position, so a long-press opened what was there 0.4 s later: a walking
+NPC had often left the spot, and while the player walks the camera follows it and the ground slides under a held
+finger. Now the first frame drawn after pointerdown builds the minimenu and later frames keep it (holdsLandingMenu)
+while the finger can still tap or long-press (held within the slop, no camera turn, drag or scroll), and after it
+lifts until its tap's click has been handled. Its NPC and player options name the NPC or player, so they follow one
+that walked off. That frame also finds the ground tile under the finger (renderAll's click pick, cancelled before it
+walks: World.cancelMousePicking), and its "Walk here" walks there (menuGroundX/Z, walkToMenuGround), from a tap or
+from the long-press menu however long it stays open. The tooltip shows the kept minimenu. A change of the open
+windows, tab, use or target mode or map drops it, and the tap acts on what is there then. Touch screens only.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 7716cfb..aa929a1 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -566,6 +566,10 @@ export class Client extends GameShell {
+     private pendingContinue: number = -1; // custom (ios): a "Click here to continue" to press (see hudContinue)
+     private hostMenus: boolean = false; // custom (ios): the host shows the open menu itself (see setHostMenus)
+     private pendingMenuChoice: { serial: number; option: number } | null = null; // custom (ios): see hudMenuSelect
++    // custom (ios): the tile its "Walk here" walks to, absolute (-1: the tile under that point at the click, as upstream).
++    // Set for a touch's landing minimenu (see holdsLandingMenu).
++    private menuGroundX: number = -1;
++    private menuGroundZ: number = -1;
+     private menuParamB: Int32Array = new Int32Array(500);
+     private menuParamC: Int32Array = new Int32Array(500);
+     private menuAction: Int32Array = new Int32Array(500);
+@@ -2732,6 +2736,8 @@ export class Client extends GameShell {
+         this.menuOption[0] = 'Cancel';
+         this.menuAction[0] = MiniMenuAction.CANCEL;
+         this.menuNumEntries = 1;
++        this.menuGroundX = -1; // custom (ios)
++        this.menuGroundZ = -1;
+ 
+         if (this.pointerOutsideSurface) {
+             // custom (ios): a drag that left its surface points into another area's virtual coordinates: no options there
+@@ -4472,8 +4478,24 @@ export class Client extends GameShell {
+         Model.mouseX = this.mouseX - this.viewportX; // custom (ios): viewport-local
+         Model.mouseY = this.mouseY - this.viewportY;
+ 
++        // custom (ios): the frame that builds a touch's landing minimenu also finds the ground tile under the finger, for
++        // its "Walk here" (see holdsLandingMenu); not while a "Walk here" still waits for its own tile from this pick, or
++        // has one the next cycle walks to
++        const probe: boolean = this.landing === 'pending' && !this.isMenuOpen && !this.walkPicking && World.groundX === -1 && this.insideViewport(this.mouseX, this.mouseY);
++        if (probe) {
++            this.world?.updateMousePicking(Model.mouseX, Model.mouseY);
++        }
++
+         Pix2D.cls();
+         this.world?.renderAll(this.camX, this.camY, this.camZ, level, this.camYaw, this.camPitch);
++        if (probe) {
++            this.landingGroundX = World.groundX === -1 ? -1 : this.mapBuildBaseX + World.groundX;
++            this.landingGroundZ = World.groundX === -1 ? -1 : this.mapBuildBaseZ + World.groundZ;
++            World.groundX = -1; // (no walk there)
++            World.groundZ = -1;
++            this.world?.cancelMousePicking();
++        }
++        this.walkPicking = false;
+         this.world?.removeSprites();
+         this.entityOverlays();
+         this.coordArrow();
+@@ -5096,7 +5118,17 @@ export class Client extends GameShell {
+         this.getSpecialArea();
+ 
+         if (!this.isMenuOpen) {
+-            this.buildMinimenu();
++            // custom (ios): a touch keeps the minimenu of where it landed (see holdsLandingMenu)
++            if (!this.holdsLandingMenu()) {
++                this.buildMinimenu();
++
++                if (this.landing === 'pending') {
++                    this.landing = 'held';
++                    this.landingScreen = this.landingScreenKey();
++                    this.menuGroundX = this.landingGroundX;
++                    this.menuGroundZ = this.landingGroundZ;
++                }
++            }
+             // custom (ios): on a touch screen the pointer only "hovers" while a finger is down, so the tooltip shows
+             // what is under it then and is not left behind after the finger lifts. A use or target mode that a tap
+             // selected keeps its prompt there ("Use Tinderbox with...", "Cast Wind Strike on...", never the option last
+@@ -9588,7 +9620,8 @@ export class Client extends GameShell {
+             }
+         }
+ 
+-        if (action === MiniMenuAction.WALK) {
++        if (action === MiniMenuAction.WALK && !this.walkToMenuGround()) {
++            this.walkPicking = true; // custom (ios)
+             if (this.isMenuOpen) {
+                 this.world?.updateMousePicking(b - this.viewportX, c - this.viewportY);
+             } else {
+@@ -12056,6 +12089,15 @@ export class Client extends GameShell {
+     // custom (ios): taps wait for a frame drawn at the finger's position (see tapClick)
+     private touchDownDrawCycle: number = 0;
+     private pendingTap: { x: number; y: number; button: number } | null = null;
++    // custom (ios): a touch acts on what was under the finger when it landed (see holdsLandingMenu): 'pending' until the
++    // first frame drawn after pointerdown builds that minimenu, then 'held' while the touch can still tap or long-press.
++    // The open windows it was built for (landingScreenKey), and the ground tile under the finger in that frame, absolute
++    // (-1: none, e.g. the finger is not on the world).
++    private landing: 'none' | 'pending' | 'held' = 'none';
++    private landingScreen: string = '';
++    private landingGroundX: number = -1;
++    private landingGroundZ: number = -1;
++    private walkPicking: boolean = false; // custom (ios): a "Walk here" asked the next renderAll for its tile (doAction)
+     // custom (ios): drag-to-scroll (see beginTouchScroll): the scrolled layer or the chat history
+     private touchScroll: IfType | 'chat' | null = null;
+     private touchScrollY: number = 0;
+@@ -12690,6 +12732,12 @@ export class Client extends GameShell {
+             this.touchDownDrawCycle = Client.drawCycle;
+             this.pendingTap = null;
+ 
++            // custom (ios): the next frame keeps the minimenu under the finger (see holdsLandingMenu); not while a menu is
++            // open, where a tap picks from it or closes it
++            this.landing = this.isMenuOpen ? 'none' : 'pending';
++            this.landingGroundX = -1;
++            this.landingGroundZ = -1;
++
+             this.touchScroll = null;
+             // custom (ios): a touch stops a list that is still gliding. A tap on that list does nothing else, as on a
+             // native list (it was meant to stop the list, and the row under the finger was still moving); a tap
+@@ -12838,6 +12886,50 @@ export class Client extends GameShell {
+         }
+     }
+ 
++    // custom (ios): a finger acts on what was under it when it landed, not on what is there when its tap or long-press
++    // fires: in the 0.4 s of a long-press (or the 0.1 s of a tap) a walking NPC can leave the spot, and while the player
++    // walks the camera follows it, so the ground slides under the finger. The frame drawn after pointerdown builds the
++    // minimenu as usual (and finds the ground tile under the finger), and later frames keep that minimenu while the
++    // finger can still tap or long-press (held within the slop with no camera turn, drag or scroll), and after it lifts
++    // until its tap's click has been handled. Its NPC and player options name the NPC or player, not a place, so they
++    // follow one that walked off; its "Walk here" walks to the tile it landed on (walkToMenuGround). The tooltip shows
++    // that minimenu meanwhile. When the open windows change (a dialogue opens, the bank closes) it is dropped, and the
++    // tap acts on what is there now.
++    private holdsLandingMenu(): boolean {
++        if (this.landing !== 'held') {
++            return false;
++        }
++
++        const touching: boolean = this.pointerActive && !this.panning && !this.dragging && this.touchScroll === null && !this.exceedsGrabThreshold(TOUCH_SLOP);
++        const clicking: boolean = this.pendingTap !== null || this.nextMouseClickButton !== 0;
++        if ((touching || clicking) && this.landingScreenKey() === this.landingScreen) {
++            return true;
++        }
++
++        this.landing = 'none';
++        return false;
++    }
++
++    // custom (ios): the open windows, tab, use or target mode and map that a landing minimenu was built for
++    private landingScreenKey(): string {
++        return [this.mainModalId, this.sideModalId, this.chatModalId, this.activeIcon, this.sideIcon[this.activeIcon], this.useMode, this.targetMode, this.mapBuildBaseX, this.mapBuildBaseZ, this.minusedlevel].join();
++    }
++
++    // custom (ios): "Walk here" of a minimenu that knows its tile (a touch's landing minimenu, see holdsLandingMenu): the
++    // next cycle walks there, as when renderAll finds the tile under a click. False to pick the tile as upstream does.
++    private walkToMenuGround(): boolean {
++        const x: number = this.menuGroundX - this.mapBuildBaseX;
++        const z: number = this.menuGroundZ - this.mapBuildBaseZ;
++        if (this.menuGroundX === -1 || x < 0 || z < 0 || x >= 104 || z >= 104) {
++            return false;
++        }
++
++        this.world?.cancelMousePicking();
++        World.groundX = x;
++        World.groundZ = z;
++        return true;
++    }
++
+     // custom (ios): press `button` at (x, y) like a tap does; it is released after a client cycle has passed.
+     // `finger`: a finger on the game made it (false: the host's tapAt), see fingerClick.
+     private touchClick(x: number, y: number, button: number, finger: boolean = true): void {
+@@ -13174,6 +13266,7 @@ export class Client extends GameShell {
+         this.cancelLongPress();
+         this.longPressFired = false;
+         this.pendingTap = null;
++        this.landing = 'none';
+         this.touchScroll = null;
+         this.touchGlide = null; // custom (ios)
+         this.touchStoppedGlide = false;
+diff --git a/src/dash3d/World.ts b/src/dash3d/World.ts
+index 64fb1d8..adfb038 100644
+--- a/src/dash3d/World.ts
++++ b/src/dash3d/World.ts
+@@ -952,6 +952,12 @@ export default class World {
+         World.groundZ = -1;
+     }
+ 
++    // custom (ios): stop looking for the ground tile under that point (renderAll leaves it on when it ends early); the
++    // client borrows this pick to find the tile under a finger without walking there (see Client.holdsLandingMenu)
++    cancelMousePicking(): void {
++        World.click = false;
++    }
++
+     renderAll(eyeX: number, eyeY: number, eyeZ: number, maxLevel: number, eyeYaw: number, eyePitch: number): void {
+         if (eyeX < 0) {
+             eyeX = 0;

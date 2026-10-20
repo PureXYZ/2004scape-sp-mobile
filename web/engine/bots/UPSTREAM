@@ -1,0 +1,27 @@
+Upstream:  https://github.com/2004sp/2004sp-progressive (Lost City Singleplayer Progressive)
+Commit:    aeadbc43114d70805dd16a98bf327439732d535a (2026-09-27; HEAD of the default branch `dev`)
+Based on:  LostCity revision 254 (this port targets revision 274)
+Authors:   attackishere, _mrsam, K-andy, callum
+Licence:   MIT (see LICENSE). Upstream has no LICENSE file; its README says "available under the same license as Lost
+           City" and its credits page (https://www.2004sp.cc/content/credits.md) "open source under the same licence as
+           Lost City", which is MIT. LICENSE quotes both.
+
+Vendored (as they are upstream at that commit; every change the port made to them is marked `port:`):
+  bundled/progressive/engine/src/engine/bot/**                         -> src/
+  bundled/progressive/engine/data/bot/chat_responses.json             -> data/chat_responses.json
+  bundled/progressive/engine/data/bot/bot_phrases.json                -> data/bot_phrases.json
+
+Changed by the port: the files under src/ (each change marked `port:`, listed in README.md). Removed:
+  src/bots.config.json        upstream's 100 accounts (sk1 ... soc12): data/names.json and src/port/BotRoster.ts
+Kept but not in the bundle (nothing the runtime reaches imports them; test/worker-safety.test.mjs checks it):
+  src/BotDatabase.ts, src/BotTask.ts, src/debug/BotDebugServer.ts
+
+Not vendored:
+  bundled/progressive/engine/data/bot/unwalkable_tiles.csv            (a dump of rev 254's blocked tiles; the port asks
+                                                                       the engine's own collision map instead)
+  the mod's changes outside the bot folder (World.ts, Player.ts chat AI, GameMap.ts, handlers, script opcodes,
+  content scripts): re-implemented for 274 as src/port/ modules, runtime hooks (web/engine/src/runtime/bots) and a
+  small content-script overlay (web/engine/bots/content); see README.md and docs/BOTS.md
+
+New in the port: src/port/**, data/names.json, test/**, tsconfig.json, README.md, LICENSE, this file.
+test/ref/Inventory254.ts is LostCity's rev 254 engine/src/engine/Inventory.ts (MIT), unmodified below its header.

@@ -1,0 +1,11 @@
+{
+    "general.description": "bots-2004: a modified version of Qwen3.5-0.8B (Qwen/Qwen3.5-0.8B, revision 2fc06364715b967f1860aea9cf38778875588b17), Apache License 2.0, Copyright 2026 Alibaba Cloud. Changed by PureXYZ in 2026: a LoRA fine-tuned on game chat lines, merged into the base weights, converted to GGUF and quantised to Q4_K_M with llama.cpp. Distributed under the Apache License 2.0. https://github.com/PureXYZ/2004scape-sp-mobile (THIRD_PARTY_NOTICES.md)",
+    "general.license": "apache-2.0",
+    "general.base_models": [
+        {
+            "name": "Qwen3.5 0.8B",
+            "organization": "Qwen",
+            "repo_url": "https://huggingface.co/Qwen/Qwen3.5-0.8B"
+        }
+    ]
+}

@@ -1,0 +1,31 @@
+bots: bots keep their items on death; a human who kills a bot gets coins (death.rs2)
+
+Progressive's bot hunks: a bot drops nothing when it dies; a bot killed by a human player in PvP
+drops 1-50,000 coins for its killer (a bot killed by another bot drops nothing). Humans' rules are
+unchanged.
+
+diff --git a/scripts/player/scripts/death.rs2 b/scripts/player/scripts/death.rs2
+index ff4ead7..d60f82d 100644
+--- a/scripts/player/scripts/death.rs2
++++ b/scripts/player/scripts/death.rs2
+@@ -45,6 +45,7 @@ healenergy(10000);
+ // todo: end poison timer ~player_end_poison
+ 
+ [proc,player_death_lose_items]
++if (p_isbot = 1) { return; }
+ if (staffmodlevel > 1 & map_live = true) { return; }
+ 
+ def_boolean $skulled = false;
+@@ -102,6 +103,12 @@ inv_clear(deathkeep);
+ 
+ [proc,pvp_death_lose_items]
+ ~pvp_death_message(.uid);
++if (p_isbot = 1) {
++    if (.p_isbot = 1) { return; }
++    def_int $coin_drop = calc(random(50000) + 1);
++    .obj_add(coord, coins, $coin_drop, ^lootdrop_duration);
++    return;
++}
+ if (staffmodlevel > 1 & map_live = true) { return; }
+ 
+ def_boolean $skulled = false;

@@ -1,0 +1,25 @@
+ios: head icons stack above the head
+
+A player's head icons stack up from the head in 274's order: the skull just above it, a protection prayer's icon
+over that, a player's hint arrow over them all. Upstream (as 274 did) drew each next icon 25 px lower than the one
+before, so a skulled player with a protection prayer had the prayer's icon on the face.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index aa929a1..521d6ee 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -4866,10 +4866,13 @@ export class Client extends GameShell {
+                     this.getOverlayPosEntity(entity, entity.height + 15);
+ 
+                     if (this.projectX > -1) {
++                        // custom (ios): the icons stack up from the head in 274's order, the skull just above it, a prayer's
++                        // icon over that, and a hint arrow over them all. Upstream drew each next icon 25 px lower: with a
++                        // skull, a protection prayer's icon sat on the face.
+                         for (let icon: number = 0; icon < 8; icon++) {
+                             if ((player.headicons & (0x1 << icon)) !== 0) {
+                                 this.headicons[icon]?.plotSprite(this.projectX - 12, this.projectY - y);
+-                                y -= 25;
++                                y += 25;
+                             }
+                         }
+                     }

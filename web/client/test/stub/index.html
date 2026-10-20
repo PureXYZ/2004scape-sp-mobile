@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>client test stub</title>
+    <!-- same viewport and canvas sizing the iOS host page uses (fit 765x503 into the viewport, letterboxed) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <link rel="icon" href="data:,">
+    <style>
+        html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+        body { display: flex; align-items: center; justify-content: center; }
+        #canvas {
+            display: block;
+            width: min(100vw, calc(100vh * 765 / 503));
+            height: min(100vh, calc(100vw * 503 / 765));
+            touch-action: none !important; /* beats GameShell's inline 'pinch-zoom' */
+            -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+            -webkit-tap-highlight-color: transparent; outline: none; image-rendering: pixelated;
+        }
+    </style>
+    <!-- before client.js: global WebSocket replacement, lcHost, spies (ARCHITECTURE.md §6) -->
+    <script src="stub/stub-host.js"></script>
+</head>
+<body>
+    <canvas id="canvas" width="765" height="503"></canvas>
+    <script type="module" src="stub/stub-boot.js"></script>
+</body>
+</html>

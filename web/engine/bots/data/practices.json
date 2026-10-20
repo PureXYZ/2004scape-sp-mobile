@@ -1,0 +1,171 @@
+{
+  "_doc": [
+    "port (the realism work, phase 2): short exchanges between two bots near a human (port/BotStage), 'bots talk to each other: short exchanges near the human'.",
+    "Each practice is 2-4 turns: 'a' opens, 'b' answers. A turn's lines are alternatives; 'lower'/'higher'/'same' follow a level compare, 'yes'/'no' a PK invite (b's answer: a PKer or a sociable bot of combat 40+ says yes), 'same'/'other' where both live; 'optional' is the chance the turn is said at all.",
+    "(the variety work, round 1, SAY-15) 'soon': a turn's lines that say the speaker leaves soon, said only with 5-15 minutes of its session left.",
+    "Slots: {skill}, {a}, {b} (their levels in it), {next} (a level to race to), {item}, {price} (b's view: port/BotPrices), {question}/{answer} (a newbie's question, a veteran's answer from its state: port/BotAnswers), {a_age} {a_g} {a_region} / {b_age} {b_g} {b_region} (their personas and bodies).",
+    "Every line, its slots filled, passes the 274 word filter and chat codec (test/chat-filter.test.mjs). The words are the period's: lower case, u/ur/r, no apostrophes, nothing after November 2004."
+  ],
+  "skills": ["wc", "mining", "fishing", "cooking", "att", "str", "def", "range", "magic", "prayer", "smithing", "fm", "crafting", "cb", "total"],
+  "items": {
+    "free": ["rune scim", "lobs", "coal", "nats", "yew logs", "addy plate", "mith ore", "iron ore", "swordies", "rune plate", "rune med", "steel bars", "big bones", "willow logs", "law runes", "ess", "rune 2h", "addy scim", "mith scim", "str pot"],
+    "members": ["dragon med", "dragon long", "sharks", "dragon sq", "rune kite"]
+  },
+  "newbieQuestions": ["how do i get to varrock", "how do i get to falador", "wheres the bank", "how do i make money", "where are the cows", "how do i fish", "how do i make a fire", "what does the cook want", "where do i get an egg", "how do i turn on run", "where can i sell stuff", "how do i bank", "where are the chickens", "how do i get to draynor", "what quest should i do"],
+  "practices": [
+    {
+      "id": "level",
+      "weight": 3,
+      "turns": [
+        { "by": "a", "lines": ["{skill} lvl?", "whats ur {skill}?", "what {skill} lvl r u", "{skill}?", "wats ur {skill} lvl", "whats ur {skill} lvl?"] },
+        { "by": "b", "lines": ["{b} u?", "{b}, u?", "{b} wbu", "im {b}, u?", "{b}"] },
+        { "by": "a", "lower": ["{a} :(", "{a} lol ur higher", "only {a}", "{a}, gj", "{a} lol"], "higher": ["{a} :)", "{a} lol", "{a}, beat u", "{a} haha", "{a}"], "same": ["same lol", "{a} too", "same, {a}", "lol same"] }
+      ]
+    },
+    {
+      "id": "price",
+      "weight": 2,
+      "turns": [
+        { "by": "a", "lines": ["pc on {item}?", "how much r {item} worth?", "how much is {item}", "{item} worth?", "whats {item} go for", "pc {item}?"] },
+        { "by": "b", "lines": ["like {price}", "{price}", "idk like {price}", "about {price} i think", "{price} ish", "around {price}"] },
+        { "by": "a", "optional": 0.5, "lines": ["k ty", "ty", "thats cheap", "dang", "k thx", "ok", "thats a lot lol"] }
+      ]
+    },
+    {
+      "id": "newbie",
+      "weight": 3,
+      "needs": "newbie",
+      "turns": [
+        { "by": "a", "lines": ["{question}"] },
+        { "by": "b", "lines": ["{answer}"] },
+        { "by": "a", "optional": 0.7, "lines": ["ty", "ok ty", "thx", "oh ok thanks", "kk ty", "ty!!", "ok"] }
+      ]
+    },
+    {
+      "id": "pk",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["wanna go pk?", "pk?", "wanna go wildy", "lets go pk", "wanna pk"] },
+        { "by": "b", "yes": ["k meet at edge", "sure", "ya lets go", "k bring food", "sure, edge?"], "no": ["nah", "nah im skilling", "no im too low", "maybe later", "nah busy", "no ty"] },
+        { "by": "a", "optional": 0.6, "yes": ["k", "k cya there", "lets go", "k 1 sec"], "no": ["k", "lol ok", "ur loss", "fine", "k nvm"] }
+      ]
+    },
+    {
+      "id": "asl",
+      "weight": 2,
+      "turns": [
+        { "by": "a", "lines": ["asl?", "asl", "asl lol"] },
+        { "by": "b", "lines": ["{b_age} {b_g} {b_region}", "{b_age} {b_g} {b_region} u?", "{b_age} {b_g} {b_region}, u?"] },
+        { "by": "a", "optional": 0.7, "lines": ["{a_age} {a_g} {a_region}", "{a_age} {a_g} {a_region} :)", "cool, {a_age} {a_g} {a_region}"] }
+      ]
+    },
+    {
+      "id": "from",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["where u from?", "where u from", "where do u live"] },
+        { "by": "b", "lines": ["{b_region}", "{b_region} u?", "{b_region}, u?"] },
+        { "by": "a", "optional": 0.8, "same": ["same!!", "same lol", "me too", "no way same"], "other": ["{a_region}", "cool, {a_region}", "{a_region} here", "{a_region} lol"] }
+      ]
+    },
+    {
+      "id": "race",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["wanna race to {next} {skill}", "race u to {next} {skill}", "first to {next} {skill}?"] },
+        { "by": "b", "lines": ["ur on", "lol no", "k", "u wish", "ok go"] },
+        { "by": "a", "optional": 0.5, "lines": ["lol", "go", "k", "lol ok"] }
+      ]
+    },
+    {
+      "id": "slow",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["this is so slow", "so slow lol", "this takes forever", "xp is so slow"] },
+        { "by": "b", "lines": ["ya", "lol ya", "ya tell me about it", "keep going lol"] },
+        { "by": "a", "optional": 0.4, "lines": ["lol", "ya"] }
+      ]
+    },
+    {
+      "id": "bored",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["im bored", "so bored", "bored lol"] },
+        { "by": "b", "lines": ["same", "same lol", "go do something then", "me too"] }
+      ]
+    },
+    {
+      "id": "lag",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["lag!!", "laggy", "so laggy today", "lag?"] },
+        { "by": "b", "lines": ["ya", "lag", "ya super laggy", "not for me"] }
+      ]
+    },
+    {
+      "id": "food",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["got any food?", "any food?", "u got food?"] },
+        { "by": "b", "lines": ["no sry", "nope", "go fish lol", "only shrimps"] },
+        { "by": "a", "optional": 0.5, "lines": ["k", "dang", "ok"] }
+      ]
+    },
+    {
+      "id": "later",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["u on later?", "u gonna be on later?", "on tmrw?"] },
+        { "by": "b", "lines": ["ya prob", "nah school", "maybe", "prob", "ya after dinner"] }
+      ]
+    },
+    {
+      "id": "halo",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["anyone play halo 2", "halo 2 is sick", "u got halo 2?"] },
+        { "by": "b", "lines": ["ya", "not yet", "ya its sick", "dont have it lol", "ya its so good"] }
+      ]
+    },
+    {
+      "id": "castlewars",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["castle wars next month!!", "cant wait for castle wars", "castle wars soon"] },
+        { "by": "b", "lines": ["ya cant wait", "finally", "whats castle wars", "ya"] }
+      ]
+    },
+    {
+      "id": "school",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["got school tmrw", "homework lol", "my mom says i gotta get off soon"], "soon": ["my mom says i gotta get off soon"] },
+        { "by": "b", "lines": ["lol same", "ya me too", "lol", "same"] }
+      ]
+    },
+    {
+      "id": "zezima",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["saw zezima once", "zezima is so high lvl", "zezima has like 99 everything"] },
+        { "by": "b", "lines": ["no way", "lol", "liar", "nice", "lucky"] }
+      ]
+    },
+    {
+      "id": "drops",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["any good drops?", "got anything good?", "get any drops?"] },
+        { "by": "b", "lines": ["nope", "just bones lol", "nah", "a few"] }
+      ]
+    },
+    {
+      "id": "gl",
+      "weight": 1,
+      "turns": [
+        { "by": "a", "lines": ["gl", "gl with it", "good luck"] },
+        { "by": "b", "lines": ["u too", "ty u too", "ty"] }
+      ]
+    }
+  ]
+}

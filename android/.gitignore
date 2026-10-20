@@ -1,0 +1,14 @@
+# Gradle and Android Studio output (docs/ANDROID.md §2: android/build holds the web bundle, the model and vendored
+# libraries too, all generated)
+build/
+.gradle/
+.cxx/
+.kotlin/
+.idea/
+*.iml
+# the SDK path on this Mac (Android Studio writes it; never shared)
+local.properties
+# the release key lives in ~/.android/2004scape, never here (docs/ANDROID.md §1 Signing)
+*.jks
+*.keystore
+keystore.properties

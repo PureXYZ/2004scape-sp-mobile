@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- :llm, the bots' chat model (docs/ARCHITECTURE.md §7.1). Merged into the app's manifest. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Claude online only (Settings › Bot chat): the game itself never touches the network (docs/ANDROID.md §3.2). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

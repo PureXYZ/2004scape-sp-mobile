@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only (this file replaces src/main's): as the release config, no cleartext anywhere, except to 127.0.0.1,
+  where the tests' stand-in for the Claude Messages API listens on the Mac (web/test/lm/mock-claude.mjs, reached through
+  `adb reverse tcp:<port> tcp:<port>`; the debug action lm-endpoint points Claude online at it). Only native Claude online
+  can use it: the page's router answers every request to another host 403 (docs/ANDROID.md §3.2), so the page cannot
+  reach 127.0.0.1 either. Release builds keep src/main's config: HTTPS only.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

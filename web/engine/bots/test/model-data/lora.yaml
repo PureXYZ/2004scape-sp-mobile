@@ -1,0 +1,29 @@
+# The 2004 LoRA's training settings (the realism work, phase 7, Track L: the research), for train.py
+# (mlx-lm 0.32.0's `lora` command with the chunked gated delta rule and the reply-only loss). The model, the data and
+# the adapters' folder come on the command line (build-model.sh). 2,850 training examples (3,000 written, 150 kept for
+# the valid loss), one example a micro-batch, an optimizer step every 4.
+train: true
+fine_tune_type: lora
+optimizer: adamw
+seed: 7
+num_layers: -1              # every block (24)
+batch_size: 1
+grad_accumulation_steps: 4  # an effective batch of 4
+iters: 8550                 # 3 epochs of 2,850 (2,137 optimizer steps)
+val_batches: -1             # the whole valid set
+learning_rate: 1.0e-4
+lr_schedule:
+  name: cosine_decay
+  warmup: 50                # optimizer steps
+  warmup_init: 1.0e-6
+  arguments: [1.0e-4, 2086, 1.0e-6]   # (2,137 steps less the warmup's 51)
+steps_per_report: 150
+steps_per_eval: 2850        # the valid loss after each epoch
+save_every: 2850            # the adapters after each epoch
+max_seq_length: 1024
+grad_checkpoint: false
+mask_prompt: true
+lora_parameters:
+  rank: 16
+  scale: 2.0                # alpha 32 / rank 16
+  dropout: 0.05

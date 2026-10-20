@@ -1,0 +1,1238 @@
+ios: mobile layout (area canvases, a full-screen viewport, HUD API)
+
+For the mobile HUD (ios/web/host): in game, the viewport, minimap, side panel and chat can each draw into their own
+canvas, placed and scaled by the host page (setSurfaceLayout). The classic single-canvas layout stays the default
+(no layout set) and is unchanged.
+
+- PixMap can blit into another canvas (retarget, `own`: draws at that canvas's origin).
+- The 3D viewport can be any size from 512x334 up (Pix3D clipping, World.resetVisCalc and areaGame follow it). It
+  lives on its own island of the virtual coordinate space (x 1024+), so it never overlaps the minimap, tabs, side
+  panel or chat, which keep their classic virtual rects and every hit test written for them. Only the viewport's own
+  "4, 4, 512, 334" sites take the new rect.
+- The host says how much of the viewport its HUD covers (setViewportInsets): the main modal is centred in the rest
+  (one that does not fit starts at its left edge and runs on under the HUD on the right, never into the left inset
+  with the notch), the main overlay keeps its right edge on it (overlay content is right-aligned), world menus stay
+  inside it when they fit, and the tooltip, split private chat, system update timer, multizone icon (with the
+  overlay) and "Connection lost" / "Loading" texts stay inside it.
+- Input: every surface is bound to the same pointer handlers as the canvas and maps its CSS box onto its virtual
+  rect (frozen per touch, with pointer capture). A drag that leaves its surface never clicks or hovers whatever lies
+  at those coordinates in another area, and a touch whose surface was hidden under it ends without a click.
+  cancelPointer() / cancelPointerOn() end a gesture when the host hides a surface under a finger.
+- Menus: the "moved away from the menu" close test includes the point the menu was opened at, and a long-press
+  release picks an option only after the finger slid to it (the menu, kept on screen or clear of the HUD, can open
+  with an option such as Cancel under a resting finger; in classic that happened at the viewport's bottom edge).
+- In the mobile layout a tap on the compass faces north, as in later clients.
+- HUD API: tapAt (host controls click like a tap there: the tab column and chat mode buttons tap the classic tabs and
+  buttons), hudState (tab, tab availability, flashing tab, modals, chat state, chat modes, run, reconnecting),
+  hudChatLines (the chatbox's newest lines with its filters, for the compact chat) and hudSetRun (the Player controls
+  Walk / Run buttons; refused while a window is open, because their script closes it). `reconnecting` is set while
+  lostCon logs in again (ingame is false meanwhile).
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index a8e3523..fdf46fc 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -81,6 +81,64 @@ const LONG_PRESS_MS = 450; // default for lcHost.settings.longPressMs
+ const CAMERA_YAW_PER_PX = 4; // orbitCameraYaw units (2048 per turn) per CSS px of horizontal drag
+ const CAMERA_PITCH_PER_PX = 2; // orbitCameraPitch units (range 128..383) per CSS px of vertical drag
+ 
++// custom (ios): in the surface layout the 3D viewport is wider than 512 and lives on its own "island" of the virtual
++// coordinate space, right of the classic 765x503 canvas, so it never overlaps the minimap, tabs, side panel or chat,
++// which keep their classic coordinates (and every hit test written for them).
++const VIEWPORT_ISLAND_X = 1024;
++
++// custom (ios): the classic virtual rects of the areas the surface layout shows as separate elements
++const MAP_RECT = { x: 550, y: 4, w: 172, h: 156 };
++const SIDE_RECT = { x: 553, y: 205, w: 190, h: 261 };
++const CHAT_RECT = { x: 17, y: 357, w: 479, h: 96 };
++
++export interface ViewportInsets {
++    left?: number;
++    top?: number;
++    right?: number;
++    bottom?: number;
++}
++
++export interface SurfaceLayout {
++    game: HTMLCanvasElement; // the 3D viewport, width x height game px
++    map: HTMLCanvasElement; // areaMap, 172x156
++    side: HTMLCanvasElement; // areaSide, 190x261
++    chat: HTMLCanvasElement; // areaChat, 479x96
++    width: number;
++    height: number;
++    insets?: ViewportInsets | null; // see setViewportInsets
++}
++
++export interface HudState {
++    ingame: boolean;
++    activeTab: number;
++    tabs: boolean[];
++    flashingTab: number;
++    sideModal: boolean;
++    mainModal: boolean;
++    chatModal: boolean; // a dialogue or a "click to continue" message fills the chatbox
++    tutorialChat: boolean; // Tutorial Island's instructions fill the chatbox
++    chatInput: boolean; // the chatbox asks for an amount or a name
++    chatTyping: boolean; // a chat message is being typed (its line is in the chatbox)
++    chatModes: number[]; // public (0 on, 1 friends, 2 off, 3 hide), private, trade (0 on, 1 friends, 2 off)
++    runEnergy: number;
++    running: boolean;
++    runExists: boolean; // the Player controls tab exists (after Tutorial Island's run lesson)
++    runAvailable: boolean; // ...and no window is open, so the run mode can be switched
++    reconnecting: boolean; // the connection dropped and the client is logging in again (ingame is false meanwhile)
++    menuOpen: boolean;
++    menuArea: number;
++}
++
++export interface HudChatLine {
++    kind: 'game' | 'public' | 'private-from' | 'private-to' | 'private-info' | 'trade' | 'duel';
++    sender: string;
++    text: string;
++    mod: number; // 1 silver crown, 2 gold crown
++}
++
++// custom (ios): option_run, set by the Walk / Run buttons of the Player controls tab
++const RUN_VARP = 173;
++
+ const MAX_PLAYER_COUNT = 2048;
+ const LOCAL_PLAYER_INDEX = 2047;
+ 
+@@ -436,6 +494,8 @@ export class Client extends GameShell {
+     private menuY: number = 0;
+     private menuWidth: number = 0;
+     private menuHeight: number = 0;
++    private menuAnchorX: number = 0; // custom (ios): where the open menu was opened, area-local (see mouseLoop)
++    private menuAnchorY: number = 0;
+     private menuParamB: Int32Array = new Int32Array(500);
+     private menuParamC: Int32Array = new Int32Array(500);
+     private menuAction: Int32Array = new Int32Array(500);
+@@ -1226,7 +1286,7 @@ export class Client extends GameShell {
+             Pix3D.setClipping(190, 261);
+             this.sideScanline = Pix3D.scanline;
+ 
+-            Pix3D.setClipping(512, 334);
++            Pix3D.setClipping(this.viewportWidth, this.viewportHeight); // custom (ios): classic 512x334
+             this.gameScanline = Pix3D.scanline;
+ 
+             const distance: Int32Array = new Int32Array(9);
+@@ -1237,7 +1297,8 @@ export class Client extends GameShell {
+                 distance[x] = (offset * sin) >> 16;
+             }
+ 
+-            World.resetVisCalc(distance, 500, 800, 512, 334);
++            this.visDistance = distance; // custom (ios): resetVisCalc runs again when the viewport changes size
++            World.resetVisCalc(distance, 500, 800, this.viewportWidth, this.viewportHeight);
+             WordFilter.unpack(wordenc);
+ 
+             if (!this.mouseTrackingInterval) {
+@@ -2061,15 +2122,16 @@ export class Client extends GameShell {
+         this.imageTitle7 = null;
+         this.imageTitle8 = null;
+ 
+-        this.areaChat = new PixMap(479, 96);
++        // custom (ios): with a surface layout these areas draw into their own canvases (see setSurfaceLayout)
++        this.areaChat = new PixMap(479, 96, ...this.surfaceTarget('chat'));
+ 
+-        this.areaMap = new PixMap(172, 156);
++        this.areaMap = new PixMap(172, 156, ...this.surfaceTarget('map'));
+         Pix2D.cls();
+         this.mapback?.plotSprite(0, 0);
+ 
+-        this.areaSide = new PixMap(190, 261);
++        this.areaSide = new PixMap(190, 261, ...this.surfaceTarget('side'));
+ 
+-        this.areaGame = new PixMap(512, 334);
++        this.areaGame = new PixMap(this.viewportWidth, this.viewportHeight, ...this.surfaceTarget('game'));
+         Pix2D.cls();
+ 
+         this.areaBackbase1 = new PixMap(496, 50);
+@@ -2537,10 +2599,13 @@ export class Client extends GameShell {
+         }
+ 
+         this.areaGame?.setPixels();
+-        this.p12?.centreString('Connection lost', 257, 144, Colour.BLACK);
+-        this.p12?.centreString('Connection lost', 256, 143, Colour.WHITE);
+-        this.p12?.centreString('Please wait - attempting to reestablish', 257, 159, Colour.BLACK);
+-        this.p12?.centreString('Please wait - attempting to reestablish', 256, 158, Colour.WHITE);
++        // custom (ios): classic centre 256, 167 of the 512x334 viewport
++        const cx: number = this.freeCentreX;
++        const cy: number = this.freeCentreY;
++        this.p12?.centreString('Connection lost', cx + 1, cy - 23, Colour.BLACK);
++        this.p12?.centreString('Connection lost', cx, cy - 24, Colour.WHITE);
++        this.p12?.centreString('Please wait - attempting to reestablish', cx + 1, cy - 8, Colour.BLACK);
++        this.p12?.centreString('Please wait - attempting to reestablish', cx, cy - 9, Colour.WHITE);
+         this.areaGame?.draw(4, 4);
+ 
+         this.minimapState = 0;
+@@ -2549,7 +2614,12 @@ export class Client extends GameShell {
+         const oldStream = this.stream;
+ 
+         this.ingame = false;
+-        await this.login(this.loginUser, this.loginPass, true);
++        this.reconnecting = true; // custom (ios): see hudState
++        try {
++            await this.login(this.loginUser, this.loginPass, true);
++        } finally {
++            this.reconnecting = false;
++        }
+         if (!this.ingame) {
+             await this.logout();
+         }
+@@ -2567,14 +2637,19 @@ export class Client extends GameShell {
+         this.menuAction[0] = MiniMenuAction.CANCEL;
+         this.menuNumEntries = 1;
+ 
++        if (this.pointerOutsideSurface) {
++            // custom (ios): a drag that left its surface points into another area's virtual coordinates: no options there
++            return;
++        }
++
+         this.addPrivateChatOptions();
+         this.lastOverComId = 0;
+ 
+-        if (this.mouseX > 4 && this.mouseY > 4 && this.mouseX < 516 && this.mouseY < 338) {
++        if (this.insideViewport(this.mouseX, this.mouseY)) {
+             if (this.mainModalId === -1) {
+                 this.addWorldOptions();
+             } else {
+-                this.addComponentOptions(IfType.list[this.mainModalId], this.mouseX, this.mouseY, 4, 4, 0);
++                this.addComponentOptions(IfType.list[this.mainModalId], this.mouseX, this.mouseY, this.viewportX + this.modalX, this.viewportY + this.modalY, 0);
+             }
+         }
+ 
+@@ -2670,9 +2745,9 @@ export class Client extends GameShell {
+                 }
+ 
+                 if ((type === 3 || type === 7) && (type === 7 || this.chatPrivateMode === 0 || (this.chatPrivateMode === 1 && this.isFriend(sender)))) {
+-                    const y: number = 329 - line * 13;
++                    const y: number = this.freeBottom - 5 - line * 13; // custom (ios): classic 329, see drawPrivateMessages
+ 
+-                    if (this.mouseX > 4 && this.mouseX < 516 && this.mouseY - 4 > y - 10 && this.mouseY - 4 <= y + 3) {
++                    if (this.mouseX > this.viewportX && this.mouseX < this.viewportX + this.viewportWidth && this.mouseY - this.viewportY > y - 10 && this.mouseY - this.viewportY <= y + 3) {
+                         if (this.staffmodlevel) {
+                             this.menuOption[this.menuNumEntries] = 'Report abuse @whi@' + sender;
+                             this.menuAction[this.menuNumEntries] = MiniMenuAction._PRIORITY + MiniMenuAction.ABUSE_REPORT;
+@@ -2787,6 +2862,19 @@ export class Client extends GameShell {
+     }
+ 
+     minimapLoop(): void {
++        // custom (ios): in the mobile layout a tap on the compass turns the camera to face north, as in later clients
++        // (rev 274 has no handler for it). The compass is the 33 px circle in the minimap's top-left corner.
++        if (this.surfaceLayout && this.mouseClickButton === 1) {
++            const dx: number = this.mouseClickX - MAP_RECT.x - 16;
++            const dy: number = this.mouseClickY - MAP_RECT.y - 16;
++            if (dx * dx + dy * dy <= 17 * 17) {
++                this.orbitCameraYaw = 0;
++                this.orbitCameraYawVelocity = 0;
++                this.sendCamera = true;
++                return;
++            }
++        }
++
+         if (this.minimapState !== 0 || this.mouseClickButton !== 1 || !this.localPlayer) {
+             return;
+         }
+@@ -3993,7 +4081,7 @@ export class Client extends GameShell {
+         if (this.chatModalId === -1) {
+             this.chatInterface.scrollPos = this.chatScrollHeight - this.chatScrollPos - 77;
+ 
+-            if (this.mouseX > 448 && this.mouseX < 560 && this.mouseY > 332) {
++            if (this.mouseX > 448 && this.mouseX < 560 && this.mouseY > 332 && !this.pointerOutsideSurface) {
+                 this.doScrollbar(this.mouseX - 17, this.mouseY - 357, this.chatScrollHeight, 77, false, 463, 0, this.chatInterface);
+             }
+ 
+@@ -4283,8 +4371,8 @@ export class Client extends GameShell {
+         const cycle = Pix3D.cycle;
+         Model.mouseCheck = true;
+         Model.pickedCount = 0;
+-        Model.mouseX = this.mouseX - 4;
+-        Model.mouseY = this.mouseY - 4;
++        Model.mouseX = this.mouseX - this.viewportX; // custom (ios): viewport-local
++        Model.mouseY = this.mouseY - this.viewportY;
+ 
+         Pix2D.cls();
+         this.world?.renderAll(this.camX, this.camY, this.camZ, level, this.camYaw, this.camPitch);
+@@ -4814,7 +4902,7 @@ export class Client extends GameShell {
+                 } else if (this.chatEffect[i] === 2) {
+                     const w: number = this.b12?.stringWid(message) ?? 0;
+                     const offsetX: number = ((150 - this.chatTimer[i]) * (w + 100)) / 150;
+-                    Pix2D.setClipping(this.projectX - 50, 0, this.projectX + 50, 334);
++                    Pix2D.setClipping(this.projectX - 50, 0, this.projectX + 50, this.viewportHeight); // custom (ios): classic 334
+                     this.b12?.drawString(message, this.projectX + 50 - offsetX, this.projectY + 1, Colour.BLACK);
+                     this.b12?.drawString(message, this.projectX + 50 - offsetX, this.projectY, colour);
+                     Pix2D.resetClipping();
+@@ -4883,9 +4971,9 @@ export class Client extends GameShell {
+         this.drawPrivateMessages();
+ 
+         if (this.crossMode === 1) {
+-            this.cross[(this.crossCycle / 100) | 0]?.plotSprite(this.crossX - 8 - 4, this.crossY - 8 - 4);
++            this.cross[(this.crossCycle / 100) | 0]?.plotSprite(this.crossX - 8 - this.viewportX, this.crossY - 8 - this.viewportY);
+         } else if (this.crossMode === 2) {
+-            this.cross[((this.crossCycle / 100) | 0) + 4]?.plotSprite(this.crossX - 8 - 4, this.crossY - 8 - 4);
++            this.cross[((this.crossCycle / 100) | 0) + 4]?.plotSprite(this.crossX - 8 - this.viewportX, this.crossY - 8 - this.viewportY);
+ 
+             Client.cyclelogic5++;
+             if (Client.cyclelogic5 > 57) {
+@@ -4895,14 +4983,16 @@ export class Client extends GameShell {
+             }
+         }
+ 
++        // custom (ios): classic (0, 0); in a larger viewport the overlay keeps to the bottom right and the modal is
++        // centred, both within the part the host's HUD leaves free (placeViewportContent)
+         if (this.mainOverlayId !== -1) {
+             this.animateInterface(this.mainOverlayId, this.worldUpdateNum);
+-            this.drawInterface(IfType.list[this.mainOverlayId], 0, 0, 0);
++            this.drawInterface(IfType.list[this.mainOverlayId], this.overlayX, this.overlayY, 0);
+         }
+ 
+         if (this.mainModalId !== -1) {
+             this.animateInterface(this.mainModalId, this.worldUpdateNum);
+-            this.drawInterface(IfType.list[this.mainModalId], 0, 0, 0);
++            this.drawInterface(IfType.list[this.mainModalId], this.modalX, this.modalY, 0);
+         }
+ 
+         this.getSpecialArea();
+@@ -4915,13 +5005,13 @@ export class Client extends GameShell {
+         }
+ 
+         if (this.inMultizone === 1) {
+-            this.headicons[1]?.plotSprite(472, 296);
++            this.headicons[1]?.plotSprite(this.overlayX + 472, this.overlayY + 296); // custom (ios): classic 472, 296, with the overlay
+         }
+ 
+         // custom: taken from later client
+         if (this.showFps) {
+-            const x: number = 507;
+-            let y: number = 20;
++            const x: number = this.freeRight - 5; // custom (ios): classic 507, 20
++            let y: number = this.freeTop + 20;
+ 
+             let colour: number = Colour.YELLOW;
+             if (this.fps < 15) {
+@@ -4948,10 +5038,11 @@ export class Client extends GameShell {
+             const minutes: number = (seconds / 60) | 0;
+             seconds %= 60;
+ 
++            // custom (ios): classic 4, 329
+             if (seconds < 10) {
+-                this.p12?.drawString('System update in: ' + minutes + ':0' + seconds, 4, 329, Colour.YELLOW);
++                this.p12?.drawString('System update in: ' + minutes + ':0' + seconds, this.freeLeft + 4, this.freeBottom - 5, Colour.YELLOW);
+             } else {
+-                this.p12?.drawString('System update in: ' + minutes + ':' + seconds, 4, 329, Colour.YELLOW);
++                this.p12?.drawString('System update in: ' + minutes + ':' + seconds, this.freeLeft + 4, this.freeBottom - 5, Colour.YELLOW);
+             }
+         }
+     }
+@@ -4986,11 +5077,11 @@ export class Client extends GameShell {
+             }
+ 
+             if ((type == 3 || type == 7) && (type == 7 || this.chatPrivateMode == 0 || (this.chatPrivateMode == 1 && this.isFriend(sender)))) {
+-                const y = 329 - lineOffset * 13;
+-                let x = 4;
++                const y = this.freeBottom - 5 - lineOffset * 13; // custom (ios): classic 329
++                let x = this.freeLeft + 4; // custom (ios): classic 4
+ 
+-                font?.drawString('From', 4, y, Colour.BLACK);
+-                font?.drawString('From', 4, y - 1, Colour.CYAN);
++                font?.drawString('From', this.freeLeft + 4, y, Colour.BLACK);
++                font?.drawString('From', this.freeLeft + 4, y - 1, Colour.CYAN);
+                 x += font?.stringWid('From ') ?? 0;
+ 
+                 if (modlevel == 1) {
+@@ -5009,20 +5100,20 @@ export class Client extends GameShell {
+                     return;
+                 }
+             } else if (type === 5 && this.chatPrivateMode < 2) {
+-                const y = 329 - lineOffset * 13;
++                const y = this.freeBottom - 5 - lineOffset * 13; // custom (ios): classic 329
+ 
+-                font?.drawString(this.chatText[i], 4, y, Colour.BLACK);
+-                font?.drawString(this.chatText[i], 4, y - 1, Colour.CYAN);
++                font?.drawString(this.chatText[i], this.freeLeft + 4, y, Colour.BLACK);
++                font?.drawString(this.chatText[i], this.freeLeft + 4, y - 1, Colour.CYAN);
+ 
+                 lineOffset++;
+                 if (lineOffset >= 5) {
+                     return;
+                 }
+             } else if (type === 6 && this.chatPrivateMode < 2) {
+-                const y = 329 - lineOffset * 13;
++                const y = this.freeBottom - 5 - lineOffset * 13; // custom (ios): classic 329
+ 
+-                font?.drawString('To ' + sender + ': ' + this.chatText[i], 4, y, Colour.BLACK);
+-                font?.drawString('To ' + sender + ': ' + this.chatText[i], 4, y - 1, Colour.CYAN);
++                font?.drawString('To ' + sender + ': ' + this.chatText[i], this.freeLeft + 4, y, Colour.BLACK);
++                font?.drawString('To ' + sender + ': ' + this.chatText[i], this.freeLeft + 4, y - 1, Colour.CYAN);
+ 
+                 lineOffset++;
+                 if (lineOffset >= 5) {
+@@ -5121,8 +5212,8 @@ export class Client extends GameShell {
+     private checkMinimap(): void {
+         if (Client.lowMem && this.sceneState === 2 && ClientBuild.minusedlevel !== this.minusedlevel) {
+             this.areaGame?.setPixels();
+-            this.p12?.centreString('Loading - please wait.', 257, 151, Colour.BLACK);
+-            this.p12?.centreString('Loading - please wait.', 256, 150, Colour.WHITE);
++            this.p12?.centreString('Loading - please wait.', this.freeCentreX + 1, this.freeCentreY - 16, Colour.BLACK); // custom (ios): classic 257, 151
++            this.p12?.centreString('Loading - please wait.', this.freeCentreX, this.freeCentreY - 17, Colour.WHITE);
+             this.areaGame?.draw(4, 4);
+             this.sceneState = 1;
+             this.sceneLoadStartTime = performance.now();
+@@ -6878,8 +6969,8 @@ export class Client extends GameShell {
+                 this.sceneLoadStartTime = performance.now();
+ 
+                 this.areaGame?.setPixels();
+-                this.p12?.centreString('Loading - please wait.', 257, 151, Colour.BLACK);
+-                this.p12?.centreString('Loading - please wait.', 256, 150, Colour.WHITE);
++                this.p12?.centreString('Loading - please wait.', this.freeCentreX + 1, this.freeCentreY - 16, Colour.BLACK); // custom (ios): classic 257, 151
++                this.p12?.centreString('Loading - please wait.', this.freeCentreX, this.freeCentreY - 17, Colour.WHITE);
+                 this.areaGame?.draw(4, 4);
+ 
+                 let regions = 0;
+@@ -8325,8 +8416,8 @@ export class Client extends GameShell {
+                 let clickY: number = this.mouseClickY;
+ 
+                 if (this.menuArea === 0) {
+-                    clickX -= 4;
+-                    clickY -= 4;
++                    clickX -= this.viewportX;
++                    clickY -= this.viewportY;
+                 } else if (this.menuArea === 1) {
+                     clickX -= 553;
+                     clickY -= 205;
+@@ -8359,8 +8450,8 @@ export class Client extends GameShell {
+                 let y: number = this.mouseY;
+ 
+                 if (this.menuArea === 0) {
+-                    x -= 4;
+-                    y -= 4;
++                    x -= this.viewportX;
++                    y -= this.viewportY;
+                 } else if (this.menuArea === 1) {
+                     x -= 553;
+                     y -= 205;
+@@ -8369,7 +8460,13 @@ export class Client extends GameShell {
+                     y -= 357;
+                 }
+ 
+-                if (x < this.menuX - 10 || x > this.menuX + this.menuWidth + 10 || y < this.menuY - 10 || y > this.menuY + this.menuHeight + 10) {
++                // custom (ios): the box includes the point the menu was opened at. Classic clamping always keeps that
++                // point inside the menu, but a menu kept clear of the HUD can open beside a finger that has not moved.
++                const left: number = Math.min(this.menuX, this.menuAnchorX);
++                const right: number = Math.max(this.menuX + this.menuWidth, this.menuAnchorX);
++                const top: number = Math.min(this.menuY, this.menuAnchorY);
++                const bottom: number = Math.max(this.menuY + this.menuHeight, this.menuAnchorY);
++                if (x < left - 10 || x > right + 10 || y < top - 10 || y > bottom + 10) {
+                     this.isMenuOpen = false;
+ 
+                     if (this.menuArea === 1) {
+@@ -8444,8 +8541,8 @@ export class Client extends GameShell {
+         let mouseX: number = this.mouseX;
+         let mouseY: number = this.mouseY;
+         if (this.menuArea === 0) {
+-            mouseX -= 4;
+-            mouseY -= 4;
++            mouseX -= this.viewportX;
++            mouseY -= this.viewportY;
+         } else if (this.menuArea === 1) {
+             mouseX -= 553;
+             mouseY -= 205;
+@@ -8484,7 +8581,7 @@ export class Client extends GameShell {
+             tooltip = tooltip + '@whi@ / ' + (this.menuNumEntries - 2) + ' more options';
+         }
+ 
+-        this.b12?.drawStringAntiMacro(tooltip, 4, 15, Colour.WHITE, true, (Client.loopCycle / 1000) | 0);
++        this.b12?.drawStringAntiMacro(tooltip, this.freeLeft + 4, this.freeTop + 15, Colour.WHITE, true, (Client.loopCycle / 1000) | 0); // custom (ios): classic 4, 15
+     }
+ 
+     private openMenu(): void {
+@@ -8506,21 +8603,30 @@ export class Client extends GameShell {
+         let x: number;
+         let y: number;
+ 
+-        if (this.mouseClickX > 4 && this.mouseClickY > 4 && this.mouseClickX < 516 && this.mouseClickY < 338) {
+-            x = this.mouseClickX - ((width / 2) | 0) - 4;
+-            if (x + width > 512) {
+-                x = 512 - width;
++        if (this.insideViewport(this.mouseClickX, this.mouseClickY)) {
++            // custom (ios): kept inside the part of the viewport the HUD leaves free when it fits there (classic: the
++            // whole 512x334), so no option is drawn under a HUD control
++            const fitsX: boolean = width <= this.freeRight - this.freeLeft;
++            const fitsY: boolean = height <= this.freeBottom - this.freeTop;
++            const minX: number = fitsX ? this.freeLeft : 0;
++            const maxX: number = fitsX ? this.freeRight : this.viewportWidth;
++            const minY: number = fitsY ? this.freeTop : 0;
++            const maxY: number = fitsY ? this.freeBottom : this.viewportHeight;
++
++            x = this.mouseClickX - ((width / 2) | 0) - this.viewportX;
++            if (x + width > maxX) {
++                x = maxX - width;
+             }
+-            if (x < 0) {
+-                x = 0;
++            if (x < minX) {
++                x = minX;
+             }
+ 
+-            y = this.mouseClickY - 4;
+-            if (y + height > 334) {
+-                y = 334 - height;
++            y = this.mouseClickY - this.viewportY;
++            if (y + height > maxY) {
++                y = maxY - height;
+             }
+-            if (y < 0) {
+-                y = 0;
++            if (y < minY) {
++                y = minY;
+             }
+ 
+             this.isMenuOpen = true;
+@@ -8529,6 +8635,8 @@ export class Client extends GameShell {
+             this.menuY = y;
+             this.menuWidth = width;
+             this.menuHeight = this.menuNumEntries * 15 + 22;
++            this.menuAnchorX = this.mouseClickX - this.viewportX; // custom (ios): see mouseLoop
++            this.menuAnchorY = this.mouseClickY - this.viewportY;
+         }
+ 
+         // the sidebar/tabs area
+@@ -8548,6 +8656,8 @@ export class Client extends GameShell {
+             }
+ 
+             this.isMenuOpen = true;
++            this.menuAnchorX = this.mouseClickX - 553; // custom (ios): see mouseLoop
++            this.menuAnchorY = this.mouseClickY - 205;
+             this.menuArea = 1;
+             this.menuX = x;
+             this.menuY = y;
+@@ -8572,6 +8682,8 @@ export class Client extends GameShell {
+             }
+ 
+             this.isMenuOpen = true;
++            this.menuAnchorX = this.mouseClickX - 17; // custom (ios): see mouseLoop
++            this.menuAnchorY = this.mouseClickY - 357;
+             this.menuArea = 2;
+             this.menuX = x;
+             this.menuY = y;
+@@ -9264,9 +9376,9 @@ export class Client extends GameShell {
+ 
+         if (action === MiniMenuAction.WALK) {
+             if (this.isMenuOpen) {
+-                this.world?.updateMousePicking(b - 4, c - 4);
++                this.world?.updateMousePicking(b - this.viewportX, c - this.viewportY);
+             } else {
+-                this.world?.updateMousePicking(this.mouseClickX - 4, this.mouseClickY - 4);
++                this.world?.updateMousePicking(this.mouseClickX - this.viewportX, this.mouseClickY - this.viewportY);
+             }
+         }
+ 
+@@ -11688,6 +11800,292 @@ export class Client extends GameShell {
+     private touchStartX: number = 0;
+     private touchStartY: number = 0;
+ 
++    // custom (ios): the 3D viewport's rect in the virtual coordinate space. Classic: (4, 4) 512x334 on the canvas. With a
++    // surface layout: (VIEWPORT_ISLAND_X, 4) width x height, drawn into its own canvas.
++    private viewportX: number = 4;
++    private viewportY: number = 4;
++    private viewportWidth: number = 512;
++    private viewportHeight: number = 334;
++    // custom (ios): the part of the viewport the host's HUD leaves uncovered (viewport px, right/bottom exclusive): the
++    // main modal is centred in it, the main overlay keeps to its bottom right, and the viewport texts (tooltip, split
++    // private chat, system update, multizone icon) keep inside it. Classic: the whole 512x334.
++    private freeLeft: number = 0;
++    private freeTop: number = 0;
++    private freeRight: number = 512;
++    private freeBottom: number = 334;
++    private modalX: number = 0;
++    private modalY: number = 0;
++    private overlayX: number = 0;
++    private overlayY: number = 0;
++    private visDistance: Int32Array | null = null;
++    private surfaceLayout: SurfaceLayout | null = null;
++    private reconnecting: boolean = false; // custom (ios): lostCon is logging in again
++
++    private get freeCentreX(): number {
++        return (this.freeLeft + this.freeRight) >> 1;
++    }
++
++    private get freeCentreY(): number {
++        return (this.freeTop + this.freeBottom) >> 1;
++    }
++
++    // custom (ios): host API. Show the in-game areas on separate canvases (null: the classic canvas). The viewport is
++    // rendered at width x height (at least 512x334) and lives on its own island of the virtual coordinate space; the
++    // minimap, side panel and chat keep their classic virtual rects, so every hit test written for them still applies.
++    // Call again whenever the size or the HUD insets change; it is cheap unless the size changes (World.resetVisCalc).
++    public setSurfaceLayout(layout: SurfaceLayout | null): void {
++        const old: SurfaceLayout | null = this.surfaceLayout;
++        if (old && (!layout || old.game !== layout.game || old.map !== layout.map || old.side !== layout.side || old.chat !== layout.chat)) {
++            for (const el of [old.game, old.map, old.side, old.chat]) {
++                this.setInputSurface(el, null);
++            }
++        }
++
++        this.surfaceLayout = layout;
++
++        const width: number = layout ? Math.max(512, layout.width | 0) : 512;
++        const height: number = layout ? Math.max(334, layout.height | 0) : 334;
++        const resized: boolean = width !== this.viewportWidth || height !== this.viewportHeight;
++        this.viewportX = layout ? VIEWPORT_ISLAND_X : 4;
++        this.viewportY = 4;
++        this.viewportWidth = width;
++        this.viewportHeight = height;
++
++        if (layout) {
++            Client.sizeSurface(layout.game, width, height);
++            Client.sizeSurface(layout.map, MAP_RECT.w, MAP_RECT.h);
++            Client.sizeSurface(layout.side, SIDE_RECT.w, SIDE_RECT.h);
++            Client.sizeSurface(layout.chat, CHAT_RECT.w, CHAT_RECT.h);
++
++            this.setInputSurface(layout.game, { x: VIEWPORT_ISLAND_X, y: 4, w: width, h: height });
++            this.setInputSurface(layout.map, MAP_RECT);
++            this.setInputSurface(layout.side, SIDE_RECT);
++            this.setInputSurface(layout.chat, CHAT_RECT);
++        }
++
++        if (resized) {
++            // the 3D projection centre, scanlines and the per-angle tile visibility all depend on the viewport size
++            Pix3D.setClipping(width, height);
++            this.gameScanline = Pix3D.scanline;
++            if (this.visDistance) {
++                World.resetVisCalc(this.visDistance, 500, 800, width, height);
++            }
++        }
++
++        if (this.areaGame) {
++            if (resized) {
++                // becomes the Pix2D target, which is where gameDrawMain expects it between frames
++                this.areaGame = new PixMap(width, height, ...this.surfaceTarget('game'));
++                Pix2D.cls();
++            } else {
++                this.areaGame.retarget(...this.surfaceTarget('game'));
++            }
++        }
++        this.areaMap?.retarget(...this.surfaceTarget('map'));
++        this.areaSide?.retarget(...this.surfaceTarget('side'));
++        this.areaChat?.retarget(...this.surfaceTarget('chat'));
++
++        this.setViewportInsets(layout?.insets ?? null);
++        this.redrawFrame = true;
++    }
++
++    // custom (ios): host API. How much of each viewport edge the HUD covers (viewport px), see freeLeft.
++    public setViewportInsets(insets: ViewportInsets | null): void {
++        const w: number = this.viewportWidth;
++        const h: number = this.viewportHeight;
++        const inset = (value: number | undefined, max: number): number => Math.min(Math.max(0, Math.round(value ?? 0) | 0), max);
++
++        this.freeLeft = inset(insets?.left, w);
++        this.freeTop = inset(insets?.top, h);
++        this.freeRight = Math.max(this.freeLeft, w - inset(insets?.right, w));
++        this.freeBottom = Math.max(this.freeTop, h - inset(insets?.bottom, h));
++
++        const clamp = (value: number, max: number): number => Math.min(Math.max(0, value), Math.max(0, max));
++        // a window that does not fit in the free part starts at its left edge and runs on under the HUD on the right
++        // (the side panel) instead of into the left inset (the notch)
++        const freeWidth: number = this.freeRight - this.freeLeft;
++        this.modalX = clamp(freeWidth < 512 ? this.freeLeft : this.freeLeft + ((freeWidth - 512) >> 1), w - 512);
++        this.modalY = clamp(this.freeTop + ((this.freeBottom - this.freeTop - 334) >> 1), h - 334);
++        // the overlay's content keeps to its right edge (wilderness level, skull, agility arena, Mort'ton, draughts),
++        // so its right edge follows the free part even if that puts its (empty) left end off screen; its top stays
++        // on screen, because some overlays keep to the top (agility arena, Mort'ton)
++        this.overlayX = Math.min(this.freeRight - 512, w - 512);
++        this.overlayY = clamp(this.freeBottom - 334, h - 334);
++    }
++
++    private static sizeSurface(el: HTMLCanvasElement, width: number, height: number): void {
++        if (el.width !== width) {
++            el.width = width;
++        }
++        if (el.height !== height) {
++            el.height = height;
++        }
++    }
++
++    // custom (ios): where an area blits: its own canvas in a surface layout, otherwise the classic canvas
++    private surfaceTarget(area: 'game' | 'map' | 'side' | 'chat'): [CanvasRenderingContext2D, boolean] {
++        const ctx: CanvasRenderingContext2D | null = this.surfaceLayout?.[area].getContext('2d', { alpha: false }) ?? null;
++        return ctx ? [ctx, true] : [canvas2d, false];
++    }
++
++    // custom (ios): host API. What the HUD shows, read once per frame by the host. Tab indices are the classic ones
++    // (0-6 top row, 7 unused, 8-13 bottom row); `tabs[i]` is false while tab i has no interface (Tutorial Island).
++    public hudState(): HudState {
++        return {
++            ingame: this.ingame,
++            activeTab: this.activeIcon,
++            tabs: this.sideIcon.map((id: number): boolean => id !== -1),
++            flashingTab: this.tutFlashIcon,
++            sideModal: this.sideModalId !== -1,
++            mainModal: this.mainModalId !== -1,
++            chatModal: this.chatModalId !== -1 || this.tutComMessage !== null,
++            tutorialChat: this.tutComId !== -1,
++            chatInput: this.socialInputOpen || this.dialogInputOpen,
++            chatTyping: this.chatInput.length > 0,
++            chatModes: [this.chatPublicMode, this.chatPrivateMode, this.chatTradeMode],
++            runEnergy: this.runenergy,
++            running: this.var[RUN_VARP] === 1,
++            runExists: this.runButton(1) !== -1,
++            runAvailable: this.runButton(1) !== -1 && !this.interfaceOpen(),
++            reconnecting: this.reconnecting,
++            menuOpen: this.isMenuOpen,
++            menuArea: this.menuArea
++        };
++    }
++
++    // custom (ios): host API. The newest chat lines the chatbox would show (newest first, at most `max`), with the same
++    // filters as drawChat, for the HUD's compact chat.
++    public hudChatLines(max: number): HudChatLine[] {
++        const lines: HudChatLine[] = [];
++
++        for (let i: number = 0; i < 100 && lines.length < max; i++) {
++            const text: string | null = this.chatText[i];
++            if (!text) {
++                continue;
++            }
++
++            const type: number = this.chatType[i];
++            let sender: string = this.chatUsername[i] ?? '';
++            let mod: number = 0;
++            if (sender.startsWith('@cr1@')) {
++                sender = sender.substring(5);
++                mod = 1;
++            } else if (sender.startsWith('@cr2@')) {
++                sender = sender.substring(5);
++                mod = 2;
++            }
++
++            const friendOk = (mode: number): boolean => mode === 0 || (mode === 1 && this.isFriend(sender));
++
++            if (type === 0) {
++                lines.push({ kind: 'game', sender: '', text, mod });
++            } else if ((type === 1 || type === 2) && (type === 1 || friendOk(this.chatPublicMode))) {
++                lines.push({ kind: 'public', sender, text, mod });
++            } else if ((type === 3 || type === 7) && this.splitPrivateChat === 0 && (type === 7 || friendOk(this.chatPrivateMode))) {
++                lines.push({ kind: 'private-from', sender, text, mod });
++            } else if (type === 4 && friendOk(this.chatTradeMode)) {
++                lines.push({ kind: 'trade', sender, text, mod });
++            } else if (type === 5 && this.splitPrivateChat === 0 && this.chatPrivateMode < 2) {
++                lines.push({ kind: 'private-info', sender: '', text, mod });
++            } else if (type === 6 && this.splitPrivateChat === 0 && this.chatPrivateMode < 2) {
++                lines.push({ kind: 'private-to', sender, text, mod });
++            } else if (type === 8 && friendOk(this.chatTradeMode)) {
++                lines.push({ kind: 'duel', sender, text, mod });
++            }
++        }
++
++        return lines;
++    }
++
++    // custom (ios): host API. Switch run mode exactly like the Walk / Run buttons of the Player controls tab (an
++    // IF_BUTTON for that button, plus the same optimistic varp update as doAction's SELECT_BUTTON). False when that
++    // tab is not available yet (Tutorial Island), so there is nothing to press.
++    public hudSetRun(run: boolean): boolean {
++        if (!this.ingame || this.interfaceOpen()) {
++            // the buttons' script starts with if_close: pressing one would close the bank, shop, trade or dialogue
++            return false;
++        }
++
++        const comId: number = this.runButton(run ? 1 : 0);
++        if (comId === -1) {
++            return false;
++        }
++
++        this.out.p1Enc(ClientProt.IF_BUTTON);
++        this.out.p2(comId);
++
++        const com: IfType = IfType.list[comId];
++        if (com.scripts && com.scripts[0] && com.scripts[0][0] === 5) {
++            const varp: number = com.scripts[0][1];
++            if (com.scriptOperand && this.var[varp] !== com.scriptOperand[0]) {
++                this.var[varp] = com.scriptOperand[0];
++                this.clientVar(varp);
++                this.redrawSide = true;
++            }
++        }
++
++        return true;
++    }
++
++    // custom (ios): a window the server opened (main, side or chat modal): run cannot be switched without closing it
++    private interfaceOpen(): boolean {
++        return this.mainModalId !== -1 || this.sideModalId !== -1 || this.chatModalId !== -1;
++    }
++
++    // custom (ios): the Player controls tab's select button that sets the run varp to `value` (0 walk, 1 run), or -1
++    private runButton(value: number): number {
++        const layer: number = this.sideIcon[12];
++        if (layer === -1 || !IfType.list[layer]) {
++            return -1;
++        }
++
++        const pending: number[] = [layer];
++        for (let guard: number = 0; pending.length > 0 && guard < 512; guard++) {
++            const id: number = pending.pop()!;
++            const com: IfType | undefined = IfType.list[id];
++            if (!com) {
++                continue;
++            }
++
++            const script: Uint16Array | null | undefined = com.scripts?.[0];
++            if (script && script[0] === 5 && script[1] === RUN_VARP && com.scriptOperand?.[0] === value) {
++                return id;
++            }
++
++            if (com.children) {
++                pending.push(...com.children);
++            }
++        }
++
++        return -1;
++    }
++
++    // custom (ios): host API. A click at virtual (x, y) for host controls (the tab column, chat mode buttons) and tests:
++    // the pointer moves there and the minimenu is rebuilt for that point, so the click does exactly what a tap there does
++    // (a tab at its classic position: iconLoop, plus mouseLoop's "Cancel" and the spell-target exemption of the tab row).
++    public tapAt(x: number, y: number, button: number = 1): void {
++        if (this.pointerActive) {
++            // a finger still on a surface (pan, drag, long-press timer) must not act on the point it no longer owns
++            this.cancelPointer();
++        }
++
++        this.idleTimer = performance.now();
++        this.mouseX = x;
++        this.mouseY = y;
++        this.pointerOutsideSurface = false;
++
++        if (this.ingame && !this.isMenuOpen) {
++            this.buildMinimenu();
++        }
++
++        this.touchClick(x, y, button);
++    }
++
++    // custom (ios): the classic 4 < x < 516 && 4 < y < 338
++    private insideViewport(x: number, y: number): boolean {
++        return x > this.viewportX && y > this.viewportY && x < this.viewportX + this.viewportWidth && y < this.viewportY + this.viewportHeight;
++    }
++
+     override pointerDown(x: number, y: number, e: PointerEvent) {
+         if (MobileKeyboard.isWithinCanvasKeyboard(x, y) && !this.exceedsGrabThreshold(20)) {
+             MobileKeyboard.captureMouseDown(x, y);
+@@ -11755,11 +12153,13 @@ export class Client extends GameShell {
+             this.cancelLongPress();
+ 
+             if (this.longPressFired) {
+-                // custom (ios): the menu opened while holding. Releasing over one of its options picks it
+-                // (press-drag-release); releasing anywhere else leaves it open for a tap.
++                // custom (ios): the menu opened while holding. Releasing over one of its options after sliding to it
++                // picks it (press-drag-release); releasing anywhere else leaves it open for a tap. A finger that did not
++                // move picks nothing, even when the menu opened under it (it is kept on screen, or clear of the HUD,
++                // and can then cover the finger with an option such as Cancel).
+                 this.longPressFired = false;
+ 
+-                if (this.isMenuOpen && this.menuOptionAt(x, y) !== -1) {
++                if (this.isMenuOpen && this.exceedsGrabThreshold(TOUCH_SLOP) && this.menuOptionAt(x, y) !== -1) {
+                     this.touchClick(x, y, 1);
+                 }
+             } else if (this.touchScroll !== null) {
+@@ -11777,6 +12177,10 @@ export class Client extends GameShell {
+                 // (custom (ios): no arrow keys to release, the camera follows the finger directly)
+                 this.panning = false;
+                 return;
++            } else if (this.pointerOutsideSurface) {
++                // custom (ios): the finger slid off the surface it touched (e.g. off the minimap): the release point is
++                // another area's virtual coordinates (the side panel lies below the minimap there), so no tap at all
++                return;
+             } else {
+                 // custom (ios): a tap on an input area (re)shows the keyboard even when it is already up, so the host
+                 // can switch context (upstream hid it when you tapped from the username to the password field);
+@@ -11886,8 +12290,8 @@ export class Client extends GameShell {
+     // custom (ios): the open menu's option under (x, y) using mouseLoop()'s hit test, or -1
+     private menuOptionAt(x: number, y: number): number {
+         if (this.menuArea === 0) {
+-            x -= 4;
+-            y -= 4;
++            x -= this.viewportX;
++            y -= this.viewportY;
+         } else if (this.menuArea === 1) {
+             x -= 553;
+             y -= 205;
+@@ -11938,9 +12342,9 @@ export class Client extends GameShell {
+         const y0: number = this.touchStartY;
+         let target: IfType | 'chat' | null = null;
+ 
+-        if (x0 > 4 && y0 > 4 && x0 < 516 && y0 < 338) {
++        if (this.insideViewport(x0, y0)) {
+             if (this.mainModalId !== -1) {
+-                target = this.scrollLayerAt(IfType.list[this.mainModalId], x0, y0, 4, 4, 0);
++                target = this.scrollLayerAt(IfType.list[this.mainModalId], x0, y0, this.viewportX + this.modalX, this.viewportY + this.modalY, 0);
+             }
+         } else if (x0 > 553 && y0 > 205 && x0 < 743 && y0 < 466) {
+             const id: number = this.sideModalId !== -1 ? this.sideModalId : this.sideIcon[this.activeIcon];
+@@ -12056,7 +12460,7 @@ export class Client extends GameShell {
+         }
+     }
+ 
+-    override pointerCancel(e: PointerEvent) {
++    override pointerCancel(e: PointerEvent | null) {
+         // custom (ios): a cancelled touch never clicks and leaves nothing held: end the drag emulation (an item
+         // drag is aborted rather than dropped where the finger happened to be) and the camera pan
+         super.pointerCancel(e);
+@@ -12131,11 +12535,14 @@ export class Client extends GameShell {
+                     // draw built at the current position, so rebuild that for the press point (no draw runs before
+                     // the mainloop that handles this press).
+                     if (!this.isMenuOpen) {
++                        const outside: boolean = this.pointerOutsideSurface;
++                        this.pointerOutsideSurface = false; // custom (ios): the press point is on the surface
+                         this.mouseX = this.touchStartX;
+                         this.mouseY = this.touchStartY;
+                         this.buildMinimenu();
+                         this.mouseX = x;
+                         this.mouseY = y;
++                        this.pointerOutsideSurface = outside;
+                     }
+                     this.nextMouseClickX = this.touchStartX;
+                     this.nextMouseClickY = this.touchStartY;
+@@ -12213,10 +12620,10 @@ export class Client extends GameShell {
+     }
+ 
+     private insideGame() {
+-        const x1: number = 4;
+-        const y1: number = 4;
+-        const x2: number = x1 + 512;
+-        const y2: number = y1 + 334;
++        const x1: number = this.viewportX; // custom (ios): classic 4, 4, 512x334
++        const y1: number = this.viewportY;
++        const x2: number = x1 + this.viewportWidth;
++        const y2: number = y1 + this.viewportHeight;
+         return this.ingame && this.mouseX >= x1 && this.mouseX <= x2 && this.mouseY >= y1 && this.mouseY <= y2;
+     }
+ 
+@@ -12265,8 +12672,8 @@ export class Client extends GameShell {
+             return false;
+         }
+ 
+-        const x1: number = 87;
+-        const y1: number = 119;
++        const x1: number = this.viewportX + this.modalX + 83; // custom (ios): classic 87, 119 (the modal at the viewport's 0,0)
++        const y1: number = this.viewportY + this.modalY + 115;
+         const x2: number = x1 + 348;
+         const y2: number = y1 + 37;
+         return this.mouseX >= x1 && this.mouseX <= x2 && this.mouseY >= y1 && this.mouseY <= y2;
+diff --git a/src/client/GameShell.ts b/src/client/GameShell.ts
+index 880f18c..c2a444f 100644
+--- a/src/client/GameShell.ts
++++ b/src/client/GameShell.ts
+@@ -6,6 +6,25 @@ import PixMap from '#/graphics/PixMap.js';
+ 
+ import { sleep } from '#/util/JsUtil.js';
+ 
++// custom (ios): a rect of the client's virtual coordinate space (the classic 765x503 layout, plus the viewport island)
++export interface InputRect {
++    x: number;
++    y: number;
++    w: number;
++    h: number;
++}
++
++// custom (ios): the mapping of a touch/pen gesture on a surface, frozen at pointerdown
++interface SurfaceGesture {
++    el: HTMLElement;
++    pointerId: number;
++    left: number;
++    top: number;
++    scaleX: number;
++    scaleY: number;
++    rect: InputRect;
++}
++
+ export default abstract class GameShell {
+     protected state: number = 0;
+     protected deltime: number = 20;
+@@ -51,6 +70,29 @@ export default abstract class GameShell {
+         e.preventDefault();
+     };
+ 
++    /// custom (ios): multi-surface input. In-game screen areas may be drawn into their own elements ("surfaces"), each
++    /// placed and scaled by CSS. A surface maps its CSS box linearly onto a rect of the virtual coordinate space, so every
++    /// pointer reaches the game as mouseX/mouseY in that one space. The classic canvas keeps its own mapping (getMousePos).
++    private readonly surfaces: Map<HTMLElement, InputRect> = new Map();
++    private surfaceGesture: SurfaceGesture | null = null;
++    // the last surface event mapped outside its own surface's rect (a captured drag that left it): another area's
++    // virtual coordinates, which must neither click nor hover (see Client). Always false for the classic canvas.
++    protected pointerOutsideSurface: boolean = false;
++    private readonly surfaceListeners: [string, (e: Event) => void, AddEventListenerOptions | undefined][] = [
++        ['pointerdown', (e: Event): void => this.onpointerdown(e as PointerEvent), undefined],
++        ['pointerup', (e: Event): void => this.onpointerup(e as PointerEvent), undefined],
++        ['pointermove', (e: Event): void => this.onpointermove(e as PointerEvent), undefined],
++        ['pointerenter', (e: Event): void => this.onpointerenter(e as PointerEvent), undefined],
++        ['pointerleave', (e: Event): void => this.onpointerleave(e as PointerEvent), undefined],
++        ['pointercancel', (e: Event): void => this.onpointercancel(e as PointerEvent), undefined],
++        ['lostpointercapture', (e: Event): void => this.onlostpointercapture(e as PointerEvent), undefined],
++        ['mousedown', (e: Event): void => this.onmousedown(e as MouseEvent), undefined],
++        ['mouseup', (e: Event): void => this.onmouseup(e as MouseEvent), undefined],
++        // no compatibility mouse events or click after a touch (the canvas does the same, see run())
++        ['touchend', (e: Event): void => e.preventDefault(), { passive: false }],
++        ['contextmenu', (e: Event): void => e.preventDefault(), undefined]
++    ];
++
+     protected async maininit() { }
+     protected mainquit() { }
+     protected async mainloop() { }
+@@ -251,6 +293,10 @@ export default abstract class GameShell {
+         window.onmouseup = null;
+         window.onmousemove = null;
+         window.oncontextmenu = null;
++
++        for (const el of [...this.surfaces.keys()]) {
++            this.setInputSurface(el, null); // custom (ios)
++        }
+     }
+ 
+     protected setFramerate(rate: number) {
+@@ -311,6 +357,11 @@ export default abstract class GameShell {
+             return;
+         }
+ 
++        if (e.currentTarget !== canvas) {
++            // custom (ios): a mouse press on a surface must not move keyboard focus off the canvas (focusCanvas)
++            e.preventDefault();
++        }
++
+         this.getMousePos(e);
+ 
+         this.mouseDown(this.absMouseX, this.absMouseY, e);
+@@ -345,6 +396,7 @@ export default abstract class GameShell {
+         }
+ 
+         this.focusCanvas();
++        this.beginSurfaceGesture(e); // custom (ios)
+         this.getMousePos(e);
+ 
+         this.pointerDown(this.absMouseX, this.absMouseY, e);
+@@ -373,7 +425,17 @@ export default abstract class GameShell {
+             return;
+         }
+ 
++        // custom (ios): the surface this touch started on was hidden under the finger (an element that is display:none
++        // keeps the pointer capture, so no lostpointercapture fires): its release is no tap, like a pointercancel
++        const gesture: SurfaceGesture | null = this.surfaceGesture;
++        if (gesture && gesture.pointerId === e.pointerId && gesture.el.getClientRects().length === 0) {
++            this.endSurfaceGesture(e.pointerId);
++            this.pointerCancel(e);
++            return;
++        }
++
+         this.getMousePos(e);
++        this.endSurfaceGesture(e.pointerId); // custom (ios)
+ 
+         this.pointerUp(this.absMouseX, this.absMouseY, e);
+     }
+@@ -445,12 +507,22 @@ export default abstract class GameShell {
+             return;
+         }
+ 
++        this.endSurfaceGesture(e.pointerId); // custom (ios)
+         this.pointerCancel(e);
+     }
+ 
++    // custom (ios): a surface lost the touch without a pointerup or pointercancel (the host removed it from the page
++    // mid-gesture; hiding it keeps the capture, see onpointerup): cancel the gesture. After a normal release
++    // canvasPointerId is already -1, so this does nothing.
++    private onlostpointercapture(e: PointerEvent) {
++        if (e.pointerType !== 'mouse' && e.pointerId === this.canvasPointerId) {
++            this.onpointercancel(e);
++        }
++    }
++
+     // custom (ios): the system took the gesture over (Control Center, a native gesture, a pinch...). Release
+-    // whatever the gesture holds and never turn it into a click.
+-    protected pointerCancel(_e: PointerEvent) {
++    // whatever the gesture holds and never turn it into a click. `null`: cancelled by the host (cancelPointer).
++    protected pointerCancel(_e: PointerEvent | null) {
+         this.nextMouseClickX = -1;
+         this.nextMouseClickY = -1;
+         this.nextMouseClickButton = 0;
+@@ -501,6 +573,7 @@ export default abstract class GameShell {
+ 
+     // custom (ios): give the canvas keyboard focus on touch as well, so a hardware keyboard types into the game,
+     // but never take focus away from a text field (the desktop keyboard fallback input).
++    // (Surfaces leave keyboard focus on the canvas too: it stays the keyboard target, so it must stay focusable.)
+     private focusCanvas(): void {
+         const active: Element | null = document.activeElement;
+         if (active !== canvas && !(active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
+@@ -508,6 +581,95 @@ export default abstract class GameShell {
+         }
+     }
+ 
++    // custom (ios): register `el` as an input surface showing the virtual rect `rect` (null: unregister). The same
++    // pointer/mouse handlers as the canvas are bound to it; registering again only updates the rect.
++    public setInputSurface(el: HTMLElement, rect: InputRect | null): void {
++        const known: boolean = this.surfaces.has(el);
++
++        if (!rect) {
++            if (known) {
++                if (this.surfaceGesture?.el === el) {
++                    this.cancelPointer();
++                }
++
++                this.surfaces.delete(el);
++                for (const [type, listener, options] of this.surfaceListeners) {
++                    el.removeEventListener(type, listener, options);
++                }
++            }
++            return;
++        }
++
++        this.surfaces.set(el, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
++
++        if (!known) {
++            el.style.touchAction = 'none';
++            for (const [type, listener, options] of this.surfaceListeners) {
++                el.addEventListener(type, listener, options);
++            }
++        }
++    }
++
++    // custom (ios): a touch or pen gesture is in progress (on the canvas or a surface)
++    protected get pointerActive(): boolean {
++        return this.canvasPointerId !== -1;
++    }
++
++    // custom (ios): end the gesture in progress like a pointercancel (no click, nothing left held), for the host when it
++    // hides or re-lays out a surface under a finger. The rest of that finger's events are ignored until it lifts.
++    public cancelPointer(): void {
++        if (this.canvasPointerId !== -1) {
++            this.ignoredCanvasPointers.add(this.canvasPointerId);
++            this.canvasPointerId = -1;
++        }
++
++        this.surfaceGesture = null;
++        this.pointerCancel(null);
++    }
++
++    // custom (ios): cancelPointer() if the touch in progress started on `el` (the host is about to hide that surface)
++    public cancelPointerOn(el: HTMLElement): void {
++        if (this.canvasPointerId !== -1 && this.surfaceGesture?.el === el) {
++            this.cancelPointer();
++        }
++    }
++
++    // custom (ios): a pointer went down on a surface: keep the gesture on it (explicit capture: WebKit captures touches
++    // implicitly, a mouse would otherwise switch surfaces mid-drag) and freeze its mapping for a touch or pen, so a
++    // surface that slides, resizes or hides under a resting finger cannot turn it into a drag.
++    private beginSurfaceGesture(e: PointerEvent): void {
++        this.surfaceGesture = null;
++
++        const el: EventTarget | null = e.currentTarget;
++        if (!(el instanceof HTMLElement) || el === canvas) {
++            return;
++        }
++
++        const rect: InputRect | undefined = this.surfaces.get(el);
++        if (!rect) {
++            return;
++        }
++
++        try {
++            el.setPointerCapture(e.pointerId);
++        } catch (_e) {
++            // the pointer is already gone
++        }
++
++        if (e.pointerType !== 'mouse') {
++            const box: DOMRect = el.getBoundingClientRect();
++            if (box.width > 0 && box.height > 0) {
++                this.surfaceGesture = { el, pointerId: e.pointerId, left: box.left, top: box.top, scaleX: rect.w / box.width, scaleY: rect.h / box.height, rect };
++            }
++        }
++    }
++
++    private endSurfaceGesture(pointerId: number): void {
++        if (this.surfaceGesture?.pointerId === pointerId) {
++            this.surfaceGesture = null;
++        }
++    }
++
+     protected windowMouseUp(e: MouseEvent) {
+     }
+ 
+@@ -676,6 +838,33 @@ export default abstract class GameShell {
+     }
+ 
+     private getMousePos(e: MouseEvent): void {
++        // custom (ios): an event on a surface maps onto that surface's virtual rect (CSS px in, game px out; the canvas
++        // backing size and devicePixelRatio do not matter). Not clamped: a captured drag that leaves its surface keeps
++        // moving in the surface's own coordinates, so deltas (drag-to-scroll, item drag) continue past its edge.
++        const target: EventTarget | null = e.currentTarget;
++        if (target instanceof HTMLElement && target !== canvas) {
++            const rect: InputRect | undefined = this.surfaces.get(target);
++            if (rect) {
++                let r: InputRect = rect;
++                const gesture: SurfaceGesture | null = this.surfaceGesture;
++                if (gesture && gesture.el === target && e instanceof PointerEvent && e.pointerId === gesture.pointerId) {
++                    r = gesture.rect;
++                    this.absMouseX = r.x + Math.floor((e.clientX - gesture.left) * gesture.scaleX);
++                    this.absMouseY = r.y + Math.floor((e.clientY - gesture.top) * gesture.scaleY);
++                } else {
++                    const box: DOMRect = target.getBoundingClientRect();
++                    if (box.width > 0 && box.height > 0) {
++                        this.absMouseX = r.x + Math.floor(((e.clientX - box.left) * r.w) / box.width);
++                        this.absMouseY = r.y + Math.floor(((e.clientY - box.top) * r.h) / box.height);
++                    }
++                }
++                this.pointerOutsideSurface = this.absMouseX < r.x || this.absMouseY < r.y || this.absMouseX >= r.x + r.w || this.absMouseY >= r.y + r.h;
++                return;
++            }
++        }
++
++        this.pointerOutsideSurface = false; // custom (ios)
++
+         const fixedWidth: number = this.sWid;
+         const fixedHeight: number = this.sHei;
+ 
+diff --git a/src/graphics/PixMap.ts b/src/graphics/PixMap.ts
+index aa32b32..9e26be1 100644
+--- a/src/graphics/PixMap.ts
++++ b/src/graphics/PixMap.ts
+@@ -7,15 +7,19 @@ export default class PixMap {
+     private readonly height: number;
+     private readonly img: ImageData;
+ 
+-    private readonly ctx: CanvasRenderingContext2D;
++    private ctx: CanvasRenderingContext2D;
+     private readonly paint: Uint32Array;
++    // custom (ios): true when this PixMap owns its canvas (a surface of the mobile layout): draw(x, y) then blits at
++    // the canvas origin, wherever the classic layout would have put it
++    private own: boolean = false;
+ 
+-    constructor(width: number, height: number, ctx: CanvasRenderingContext2D = canvas2d) {
++    constructor(width: number, height: number, ctx: CanvasRenderingContext2D = canvas2d, own: boolean = false) {
+         this.width = width;
+         this.height = height;
+         this.data = new Int32Array(width * height);
+ 
+         this.ctx = ctx;
++        this.own = own;
+         this.img = this.ctx.createImageData(width, height);
+         this.paint = new Uint32Array(this.img.data.buffer);
+ 
+@@ -26,9 +30,16 @@ export default class PixMap {
+         Pix2D.setPixels(this.data, this.width, this.height);
+     }
+ 
++    // custom (ios): blit to another canvas from now on (ImageData is not tied to a context). Does not change the Pix2D
++    // target, unlike the constructor.
++    retarget(ctx: CanvasRenderingContext2D = canvas2d, own: boolean = false): void {
++        this.ctx = ctx;
++        this.own = own;
++    }
++
+     draw(x: number, y: number): void {
+         this.prepareCanvas();
+-        this.ctx.putImageData(this.img, x, y);
++        this.ctx.putImageData(this.img, this.own ? 0 : x, this.own ? 0 : y);
+     }
+ 
+     private prepareCanvas(): void {

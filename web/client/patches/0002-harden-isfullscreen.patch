@@ -1,0 +1,22 @@
+ios: harden isFullScreen()
+
+GameShell picks its pointer mapping with `document.fullscreenElement !== null`. WKWebView exposes no
+Fullscreen API (today the property is null; if it were ever undefined, every tap would be mapped
+through the fullscreen letterbox branch and land ~160 game px off). Use !!document.fullscreenElement.
+(MobileKeyboard's copy of the check went away with the MobileKeyboard override.)
+
+diff --git a/src/client/GameShell.ts b/src/client/GameShell.ts
+index ebf7090..cb56cce 100644
+--- a/src/client/GameShell.ts
++++ b/src/client/GameShell.ts
+@@ -579,7 +579,9 @@ export default abstract class GameShell {
+     }
+ 
+     private isFullScreen() {
+-        return document.fullscreenElement !== null;
++        // custom (ios): WKWebView has no Fullscreen API. `undefined !== null` would wrongly pick the letterbox
++        // mapping below and offset every tap, so treat anything but an actual element as "not fullscreen".
++        return !!document.fullscreenElement;
+     }
+ 
+     private getMousePos(e: MouseEvent): void {

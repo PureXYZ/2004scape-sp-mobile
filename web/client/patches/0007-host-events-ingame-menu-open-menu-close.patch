@@ -1,0 +1,57 @@
+ios: host events (ingame, menu-open, menu-close)
+
+Optional notifications for the host page through lcHost.onClientEvent(name, detail), checked once per
+client cycle: 'ingame' (true/false on login/logout), 'menu-open' ({area, x, y, width, height,
+options[] top to bottom as drawn, colour tags included}) and 'menu-close'. Lets the host drive
+haptics, status reporting or a native menu picker without polling client internals.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 3d40b37..da914c1 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -4,7 +4,7 @@ import { stopMidi, setMidiVolume, playMidi } from '#3rdparty/tinymidipcm.js';
+ import ClientBuild from '#/client/ClientBuild.js';
+ import { ClientCode } from '#/client/ClientCode.js';
+ import GameShell from '#/client/GameShell.js';
+-import { lcHaptic, lcSetting, lcTakeSecondaryClick } from '#/client/LcHost.js';
++import { lcEvent, lcHaptic, lcSetting, lcTakeSecondaryClick } from '#/client/LcHost.js';
+ import { MiniMenuAction } from '#/client/MiniMenuAction.js';
+ import MobileKeyboard from '#/client/MobileKeyboard.js';
+ import MouseTracking from '#/client/MouseTracking.js';
+@@ -1276,6 +1276,36 @@ export class Client extends GameShell {
+         if (this.isMobile) {
+             this.syncMobileKeyboard(); // custom (ios)
+         }
++
++        this.syncHostEvents(); // custom (ios)
++    }
++
++    // custom (ios): report state changes to the host page (lcHost.onClientEvent, optional): 'ingame' (boolean),
++    // 'menu-open' ({ area, x, y, width, height, options: top to bottom as drawn, colour tags included }) and
++    // 'menu-close'. The menu is not rebuilt while it is open, so reading it one cycle late is exact.
++    private hostIngame: boolean = false;
++    private hostMenuOpen: boolean = false;
++
++    private syncHostEvents(): void {
++        if (this.ingame !== this.hostIngame) {
++            this.hostIngame = this.ingame;
++            lcEvent('ingame', this.ingame);
++        }
++
++        if (this.isMenuOpen !== this.hostMenuOpen) {
++            this.hostMenuOpen = this.isMenuOpen;
++
++            if (this.isMenuOpen) {
++                const options: string[] = [];
++                for (let i: number = this.menuNumEntries - 1; i >= 0; i--) {
++                    options.push(this.menuOption[i]);
++                }
++
++                lcEvent('menu-open', { area: this.menuArea, x: this.menuX, y: this.menuY, width: this.menuWidth, height: this.menuHeight, options });
++            } else {
++                lcEvent('menu-close');
++            }
++        }
+     }
+ 
+     override async mainredraw() {

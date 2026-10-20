@@ -1,0 +1,35 @@
+{
+    // Type-check only (esbuild does the build; web/engine/test/all.mjs runs tsc on it). The paths name the sibling
+    // ../Server, as a tsconfig cannot read LC_UPSTREAM_DIR: the tests check a copy whose paths point at the upstream
+    // folder scripts/lib/upstream.mjs resolves (derivedTsconfig), so an editor sees the sources only in that layout.
+    // Engine sources are type-checked through the imports; they need @types/node (Buffer in signatures).
+    // The bot library (bots/src, '#/engine/bot/*') comes in through the bots glue (src/entry-bots.ts, src/runtime/bots);
+    // test/fixtures/stub-bots/tsconfig.json checks the same glue against the test stub instead.
+    "compilerOptions": {
+        "target": "ES2022",
+        "lib": ["ESNext", "WebWorker"],
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "baseUrl": ".",
+        "paths": {
+            "#3rdparty/*": ["../../../Server/engine/src/3rdparty/*"],
+            "#/engine/bot/*": ["bots/src/*"],
+            "#/*": ["../../../Server/engine/src/*"],
+            "kleur": ["../../../Server/engine/node_modules/kleur"],
+            "@isaacs/ttlcache": ["../../../Server/engine/node_modules/@isaacs/ttlcache"],
+            "fflate": ["../../../Server/engine/node_modules/fflate"],
+            "node-forge": ["../../../Server/engine/node_modules/@types/node-forge"]
+        },
+        "types": ["node"],
+        "typeRoots": ["../../../Server/engine/node_modules/@types"],
+        "strict": true,
+        "noEmit": true,
+        "skipLibCheck": true,
+        "esModuleInterop": true,
+        "resolveJsonModule": true,
+        "allowJs": true,
+        "checkJs": false,
+        "allowUnreachableCode": true
+    },
+    "include": ["src/**/*.ts"]
+}

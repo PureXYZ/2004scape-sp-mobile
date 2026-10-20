@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <title>2004Scape</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="host.css">
+    <!-- Classic script on purpose: it must install the WebSocket replacement before client.js is evaluated. -->
+    <script src="host.js"></script>
+    <script src="hud.js"></script>
+    <script src="menu.js"></script>
+    <script src="worldmap.js"></script>
+</head>
+<body class="layout-classic phase-boot">
+    <!-- The client's own canvas: the title screen, the classic layout, and the target of every key event. -->
+    <canvas id="canvas" width="765" height="503" tabindex="-1"></canvas>
+
+    <!-- The mobile HUD (hud.js): in game the client draws the world, minimap, side panel and chat into these canvases. -->
+    <div id="hud" hidden>
+        <canvas id="surface-game" class="surface"></canvas>
+
+        <!-- everything over the world; zoomed as a whole on large screens (hud.js) -->
+        <div id="hud-ui">
+            <!-- bottom left: the newest chat lines, the chatbox when open, its buttons (the 2004 chat filters beside them
+                 while it is open; Report abuse has nobody to report in a world of one) -->
+            <div id="hud-chat-lines" aria-live="polite"></div>
+            <div id="hud-chat-box" class="stone-frame" hidden><canvas id="surface-chat" class="surface"></canvas></div>
+            <!-- a dialogue's answers as finger-sized rows, in the chatbox's place (hud.js) -->
+            <div id="hud-dialog" class="stone-frame" role="menu" hidden><div class="dialog-title">Select an Option</div><div id="hud-dialog-options"></div></div>
+            <div id="hud-chat-bar">
+                <!-- tap-to-drop (as on OSRS mobile: while on, a tap on an item in the inventory drops it); host.js puts the
+                     keyboard button after it -->
+                <button class="orb" id="btn-drop" aria-label="Tap to drop" aria-pressed="false"><span class="icon icon-drop"></span></button>
+                <button class="stone-btn hud-btn" id="btn-chat-toggle" aria-label="Chat"><span class="icon icon-chat"></span></button>
+                <div id="hud-chat-modes" hidden>
+                    <button class="stone-btn chat-mode" data-chat-mode="0" aria-label="Public chat"><span class="chat-label">Public<span class="label-more"> chat</span></span><span class="chat-value"></span></button>
+                    <button class="stone-btn chat-mode" data-chat-mode="1" aria-label="Private chat"><span class="chat-label">Private<span class="label-more"> chat</span></span><span class="chat-value"></span></button>
+                    <button class="stone-btn chat-mode" data-chat-mode="2" aria-label="Trade/duel"><span class="chat-label">Trade<span class="label-more">/duel</span></span><span class="chat-value"></span></button>
+                </div>
+            </div>
+
+            <!-- right: the side panel and the tab column -->
+            <div id="hud-panel" class="stone-frame" hidden><canvas id="surface-side" class="surface"></canvas></div>
+            <div id="hud-tabs" role="tablist">
+                <!-- classic tab indices: 0-6 the top row, 8-13 the bottom row (7 is unused); host.js adds Settings last -->
+                <button class="tab" data-tab="0" aria-label="Combat options"></button>
+                <button class="tab" data-tab="8" aria-label="Friends list"></button>
+                <button class="tab" data-tab="1" aria-label="Stats"></button>
+                <button class="tab" data-tab="9" aria-label="Ignore list"></button>
+                <button class="tab" data-tab="2" aria-label="Quest journal"></button>
+                <button class="tab" data-tab="10" aria-label="Logout"></button>
+                <button class="tab" data-tab="3" aria-label="Inventory"></button>
+                <button class="tab" data-tab="11" aria-label="Game options"></button>
+                <button class="tab" data-tab="4" aria-label="Worn equipment"></button>
+                <button class="tab" data-tab="12" aria-label="Player controls"></button>
+                <button class="tab" data-tab="5" aria-label="Prayer"></button>
+                <button class="tab" data-tab="13" aria-label="Music player"></button>
+                <button class="tab" data-tab="6" aria-label="Magic"></button>
+            </div>
+
+            <!-- top right: the minimap with its compass and zoom slider (a groove along the ring), the status orbs -->
+            <div id="hud-map">
+                <div id="hud-map-clip"><canvas id="surface-map" class="surface"></canvas></div>
+                <svg id="map-zoom-track" aria-hidden="true"><path class="groove"/><path class="groove-light"/><path class="groove-hit"/></svg>
+                <span class="zoom-mark" id="zoom-mark-in" aria-hidden="true">+</span>
+                <span class="zoom-mark" id="zoom-mark-out" aria-hidden="true">-</span>
+                <div id="map-zoom" role="slider" aria-label="Minimap zoom"><span class="icon icon-zoom"></span></div>
+            </div>
+            <button id="btn-compass" aria-label="Face north"><span class="compass-rose"></span></button>
+            <button id="btn-worldmap" aria-label="World map"><span class="icon icon-globe"></span></button>
+            <div id="hud-orbs">
+                <!-- host.js puts Run last -->
+                <button class="orb" id="orb-hp" aria-label="Hitpoints"><span class="icon icon-hp"></span><span class="orb-value" id="hp-value"></span></button>
+                <button class="orb" id="orb-prayer" aria-label="Prayer"><span class="icon icon-prayer"></span><span class="orb-value" id="prayer-value"></span></button>
+            </div>
+
+            <div id="hud-camera" hidden>
+                <button class="stone-btn cam-btn" data-hold="1" aria-label="Rotate camera left"><span class="icon icon-rotate-left"></span></button>
+                <button class="stone-btn cam-btn" data-hold="3" aria-label="Tilt camera up"><span class="icon icon-up"></span></button>
+                <button class="stone-btn cam-btn" data-hold="4" aria-label="Tilt camera down"><span class="icon icon-down"></span></button>
+                <button class="stone-btn cam-btn" data-hold="2" aria-label="Rotate camera right"><span class="icon icon-rotate-right"></span></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- The options menu for fingers (menu.js), in both layouts. -->
+    <div id="menu-layer" hidden>
+        <div id="menu" role="menu"><div class="menu-title">Choose Option</div><div id="menu-options"></div></div>
+    </div>
+
+    <!-- What a tap just did, beside it (menu.js label(), client patch 0020); never takes a touch. -->
+    <div id="label-layer" hidden aria-hidden="true"><div id="action-label"></div></div>
+
+    <!-- Feedback for a long-press in progress (host.js). -->
+    <div id="press-ring" hidden></div>
+
+    <!-- The classic layout's side rails (the right one also on the title screen). -->
+    <div id="rail-left" class="rail" hidden>
+        <button class="stone-btn rail-btn" data-hold="1" aria-label="Rotate camera left"><span class="icon icon-rotate-left"></span></button>
+        <button class="stone-btn rail-btn" data-hold="2" aria-label="Rotate camera right"><span class="icon icon-rotate-right"></span></button>
+        <button class="stone-btn rail-btn" data-hold="3" aria-label="Tilt camera up"><span class="icon icon-up"></span></button>
+        <button class="stone-btn rail-btn" data-hold="4" aria-label="Tilt camera down"><span class="icon icon-down"></span></button>
+    </div>
+    <!-- The buttons both layouts share: host.js placeSharedButtons() moves them between this rail (the title screen and
+         the classic layout) and the HUD (the chat bar, the orbs and the tab column; the options-menu button only in the
+         rail: the HUD's chat bar has the tap-to-drop button in its place). -->
+    <div id="rail-right" class="rail" hidden>
+        <button class="stone-btn rail-btn" id="btn-keyboard" aria-label="Keyboard"><span class="icon icon-keyboard"></span></button>
+        <button class="orb" id="btn-secondary" aria-label="Next tap opens the options menu"><span class="icon icon-menu"></span></button>
+        <button class="orb" id="btn-run" aria-label="Run"><span class="icon icon-run"></span><span class="run-label">Run</span><span class="orb-value" id="run-energy"></span></button>
+        <button class="orb" id="btn-settings" aria-label="Settings"><span class="icon icon-cog"></span></button>
+    </div>
+
+    <!-- The title screen's own buttons under the titlebox (host.js titleScreen). -->
+    <div id="title-actions" hidden>
+        <button class="title-btn" id="btn-continue"><span class="continue-label">Continue as</span><span id="continue-name"></span></button>
+        <button class="title-btn" id="btn-characters">Characters</button>
+        <div id="title-hint">Offline world: log in with any name to make a character</div>
+    </div>
+
+    <div id="status-pill" hidden></div>
+
+    <div id="loading" class="overlay">
+        <div class="loading-card">
+            <div class="loading-logo" role="img" aria-label="RuneScape"></div>
+            <div class="loading-bar"><div class="loading-fill" id="loading-fill"></div><div class="loading-text" id="loading-text">Loading - please wait.</div></div>
+            <div class="loading-sub">2004Scape · November 2004 · offline</div>
+        </div>
+    </div>
+
+    <div id="error" class="overlay" hidden>
+        <div class="error-panel">
+            <div class="error-title">Error - unable to continue!</div>
+            <div class="error-text" id="error-text"></div>
+            <div class="panel-actions"><button class="title-btn" id="error-restart">Restart</button></div>
+        </div>
+    </div>
+
+    <div id="characters" class="overlay" hidden>
+        <div class="settings-panel characters-panel" role="dialog" aria-label="Your characters">
+            <div class="panel-header">
+                <div class="panel-title">Your characters</div>
+                <button class="close-btn" id="characters-close" aria-label="Close">Close</button>
+            </div>
+            <div class="characters-list" id="characters-list"></div>
+            <div class="characters-where" id="characters-where"></div>
+        </div>
+    </div>
+
+    <!-- Settings (host.js settingsNav): a stone sheet with the categories down the left, like the Game Options tab's
+         buttons, and the chosen one's rows on the right (each category scrolls on its own if it has to). -->
+    <div id="settings" class="overlay" hidden>
+        <div class="settings-panel" role="dialog" aria-label="Settings">
+            <div class="panel-header">
+                <span class="header-start">
+                    <button class="title-btn close-btn" id="settings-howto">Help</button>
+                    <button class="title-btn close-btn" id="settings-save">Save now</button>
+                </span>
+                <div class="panel-title">Settings</div>
+                <button class="title-btn close-btn" id="settings-close" aria-label="Close">Close</button>
+            </div>
+            <div class="settings-body">
+                <div class="settings-nav" role="tablist" aria-label="Categories">
+                    <button role="tab" data-section="display" id="nav-display">Display</button>
+                    <button role="tab" data-section="sound" id="nav-sound">Sound</button>
+                    <button role="tab" data-section="controls" id="nav-controls">Controls</button>
+                    <button role="tab" data-section="tapoptions" id="nav-tapoptions">Tap options</button>
+                    <button role="tab" data-section="world" id="nav-world">World</button>
+                    <button role="tab" data-section="botchat" id="nav-botchat">Bot chat</button>
+                    <button role="tab" data-section="savedata" id="nav-savedata">Saved data</button>
+                    <button role="tab" data-section="about" id="nav-about">About</button>
+                </div>
+                <div class="settings-pane" id="settings-pane">
+                    <div class="settings-section" role="tabpanel" id="section-display" hidden>
+                        <div class="row"><span>Layout</span><div class="seg" data-setting="layout"><button data-value="mobile">Mobile</button><button data-value="classic">Classic</button></div></div>
+                        <div class="row"><span>Frame rate</span><div class="seg" data-setting="fps"><button data-value="30">30</button><button data-value="50">50</button></div></div>
+                        <div class="row"><span>World scaling</span><div class="seg" data-setting="smoothScaling"><button data-value="true">Smooth</button><button data-value="false">Pixel</button></div></div>
+                        <div class="row" data-layout="mobile"><span>Camera buttons</span><div class="seg" data-setting="cameraButtons"><button data-value="true">Show</button><button data-value="false">Hide</button></div></div>
+                        <div class="row" data-layout="classic"><span>Side buttons</span><div class="seg" data-setting="showControls"><button data-value="true">Show</button><button data-value="false">Hide</button></div></div>
+                        <div class="row"><span>Screen margins</span><button class="data-btn plain" id="margins-open">Adjust</button></div>
+                    </div>
+
+                    <div class="settings-section" role="tabpanel" id="section-sound" hidden>
+                        <div class="row" id="sound-row"><span>Silent switch</span><div class="seg" data-setting="soundMode"><button data-value="ambient">Mute</button><button data-value="playback">Play</button></div></div>
+                        <div class="row" id="vibration-row"><span>Vibration</span><div class="seg" data-setting="haptics"><button data-value="true">On</button><button data-value="false">Off</button></div></div>
+                        <div class="section-note" id="sound-note">Mute keeps the game quiet while the silent switch is on; Play plays it anyway.</div>
+                    </div>
+
+                    <div class="settings-section" role="tabpanel" id="section-controls" hidden>
+                        <div class="row"><span>Hold for menu</span><div class="seg" data-setting="longPressMs"><button data-value="300">Fast</button><button data-value="400">Normal</button><button data-value="600">Slow</button></div></div>
+                        <div class="row"><span>Camera drag</span><div class="seg" data-setting="cameraSensitivity"><button data-value="0.6">Slow</button><button data-value="1">Normal</button><button data-value="1.6">Fast</button></div></div>
+                        <div class="row"><span>Options menu</span><div class="seg" data-setting="largeMenus"><button data-value="true">Large</button><button data-value="false">Classic</button></div></div>
+                    </div>
+
+                    <!-- what a tap does with Attack (Client.setAttackOptions) -->
+                    <div class="settings-section" role="tabpanel" id="section-tapoptions" hidden>
+                        <div class="section-intro">What a tap does with Attack. A long-press still shows every option.</div>
+                        <div class="row"><span>NPCs</span><div class="seg" data-setting="npcAttack"><button data-value="tap">Tap</button><button data-value="level">By level</button><button data-value="hold">Hold</button><button data-value="hidden">Hidden</button></div></div>
+                        <div class="row"><span>Players</span><div class="seg" data-setting="playerAttack"><button data-value="tap">Tap</button><button data-value="level">By level</button><button data-value="hold">Hold</button><button data-value="hidden">Hidden</button></div></div>
+                        <div class="tapoptions-key">
+                            <div><b>Tap</b> attacks, whatever their level.</div>
+                            <div><b>By level</b> attacks only if their level is no higher than yours (2004).</div>
+                            <div><b>Hold</b> puts Attack in the long-press menu only: a tap walks there or talks.</div>
+                            <div><b>Hidden</b> takes Attack out of the menu.</div>
+                            <div>Players can be attacked in the Wilderness only.</div>
+                        </div>
+                    </div>
+
+                    <!-- Restart beside the settings it applies (it says "Restart to apply" when one of them changed) -->
+                    <div class="settings-section" role="tabpanel" id="section-world" hidden>
+                        <div class="data-row">
+                            <span class="data-text"><span class="data-detail">These apply after a restart.</span><span class="data-detail">More bots: a warmer phone and more battery use.</span></span>
+                            <button class="title-btn" id="settings-restart">Restart</button>
+                        </div>
+                        <div class="row"><span>World type</span><div class="seg" data-setting="members" data-restart><button data-value="true">Members</button><button data-value="false">Free</button></div></div>
+                        <div class="row"><span>XP rate</span><div class="seg" data-setting="xpRate" data-restart><button data-value="1">1×</button><button data-value="2">2×</button><button data-value="5">5×</button><button data-value="10">10×</button><button data-value="25">25×</button><button data-value="50">50×</button></div></div>
+                        <div class="row"><span>Jmod</span><div class="seg" data-setting="jmod" data-restart><button data-value="true">On</button><button data-value="false">Off</button></div></div>
+                        <div class="row"><span>Bots</span><div class="seg" data-setting="bots" data-restart><button data-value="0">Off</button><button data-value="25">25</button><button data-value="50">50</button><button data-value="100">100</button><button data-value="250">250</button><button data-value="500">500</button><button data-value="750">750</button><button data-value="1000">1000</button></div></div>
+                        <div class="row"><span>Detail</span><div class="seg" data-setting="lowMemory" data-restart><button data-value="false">High</button><button data-value="true">Low</button></div></div>
+                    </div>
+
+                    <!-- Bot chat (host.js botChat): who writes the bots' replies to you, the model in the app, the Claude key
+                         (typed into native's own secure box, docs/ARCHITECTURE.md §7.1). -->
+                    <div class="settings-section" role="tabpanel" id="section-botchat" hidden>
+                        <div class="section-intro">With a chat model the bots write their own replies when you talk to them. Trades, adverts and the rest stay as they are.</div>
+                        <div class="row"><span>Chat model</span><div class="seg" data-setting="botChat"><button data-value="rules">Rules</button><button data-value="local">On-device</button><button data-value="online">Claude online</button></div></div>
+                        <div class="data-row">
+                            <span class="data-text"><span class="data-name">On-device model</span><span class="data-detail" id="botchat-local"></span></span>
+                        </div>
+                        <!-- only for a model trained to write a short note before its reply, or not, as asked (native's status
+                             local.think 'option'); the request carries it (host.js lm.request); greyed out, with its hint
+                             (host.js botChat.render), unless the chat model is On-device -->
+                        <div class="data-row" id="botchat-think" hidden>
+                            <span class="data-text"><span class="data-name">Think first</span><span class="data-detail" id="botchat-think-hint"></span></span>
+                            <div class="seg" data-setting="botThink"><button data-value="false">Off</button><button data-value="true">On</button></div>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-text"><span class="data-name">Claude key</span><span class="data-detail" id="botchat-key"></span></span>
+                            <span class="data-btns"><button class="data-btn plain" id="botchat-key-set">Set key</button><button class="data-btn" id="botchat-key-remove" hidden>Remove</button></span>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-text"><span class="data-name">Test</span><span class="data-detail" id="botchat-test-result"></span></span>
+                            <button class="data-btn plain" id="botchat-test">Test</button>
+                        </div>
+                        <div class="section-note">While Claude online is on, the chat and the bot's state go to Anthropic.</div>
+                    </div>
+
+                    <!-- Saved data (host.js savedData): delete a character, reset the world (the bots), or both. -->
+                    <div class="settings-section" role="tabpanel" id="section-savedata" hidden>
+                        <div class="group-label">Characters</div>
+                        <div id="savedata-characters"></div>
+                        <div class="group-label">World</div>
+                        <div class="data-row">
+                            <span class="data-text"><span class="data-name">Bots</span><span class="data-detail" id="savedata-bots"></span></span>
+                            <button class="data-btn" id="savedata-reset">Reset world</button>
+                        </div>
+                        <div class="savedata-all"><button class="data-btn" id="savedata-everything">Delete everything</button></div>
+                        <div class="savedata-message" id="savedata-message" role="status" hidden></div>
+                        <div class="section-note" id="savedata-where"></div>
+                    </div>
+
+                    <!-- About (host.js about): the version, the disclaimer, the credits and the licences (licenses.txt, built
+                         from LICENSE and THIRD_PARTY_NOTICES.md by scripts/build-web.mjs) -->
+                    <div class="settings-section" role="tabpanel" id="section-about" hidden>
+                        <div class="data-row">
+                            <span class="data-text"><span class="data-name" id="about-version">2004Scape · Lost City 274</span><span class="data-detail" id="about"></span></span>
+                            <button class="data-btn plain" id="about-licences">Licences</button>
+                        </div>
+                        <div class="section-note about-text" id="about-disclaimer">2004Scape is an unofficial fan project. It is not affiliated with, endorsed by or connected to Jagex Ltd or the Lost City project. RuneScape is a registered trademark of Jagex Ltd. The game data the app is built from is the intellectual property of Jagex Ltd. This project is free: no ads, no payments, no accounts.</div>
+                        <div class="section-note about-text" id="about-credits">Built on Lost City (engine, client, content) and 2004SP Progressive (the bots' AI), with llama.cpp and Qwen3.5 (the on-device chat model). Most of this app's own code was written with Claude (Anthropic).</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Are you sure? (host.js confirmBox), over Settings (Saved data, Bot chat). -->
+    <div id="confirm" class="overlay" hidden>
+        <div class="settings-panel confirm-panel" role="alertdialog" aria-labelledby="confirm-title">
+            <div class="panel-header"><div class="panel-title" id="confirm-title"></div></div>
+            <div class="confirm-text" id="confirm-text"></div>
+            <div class="panel-actions">
+                <button class="title-btn" id="confirm-cancel">Cancel</button>
+                <button class="title-btn danger" id="confirm-ok"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings › About › Licences (host.js about): licenses.txt, over Settings. -->
+    <div id="licences" class="overlay" hidden>
+        <div class="settings-panel licences-panel" role="dialog" aria-label="Licences">
+            <div class="panel-header">
+                <div class="panel-title">Licences</div>
+                <button class="title-btn close-btn" id="licences-close" aria-label="Close">Close</button>
+            </div>
+            <pre class="licences-text" id="licences-text" tabindex="0"></pre>
+        </div>
+    </div>
+
+    <!-- Settings › Display › Screen margins (host.js margins): how far the HUD keeps from the screen's edges, applied at
+         once; Settings steps aside meanwhile, so the HUD can be seen moving around this box. -->
+    <div id="margins" class="overlay" hidden>
+        <div class="settings-panel margins-panel" role="dialog" aria-label="Screen margins">
+            <div class="panel-header">
+                <div class="panel-title">Screen margins</div>
+                <button class="title-btn close-btn" id="margins-close" aria-label="Back">Back</button>
+            </div>
+            <div class="margins-rows">
+                <div class="row"><span>Side</span><div class="seg" data-setting="safeSides"><button data-value="-1">None</button><button data-value="0">Auto</button><button data-value="16">+16</button><button data-value="32">+32</button></div></div>
+                <div class="row"><span>Top</span><div class="seg" data-setting="safeTop"><button data-value="-1">None</button><button data-value="0">Auto</button><button data-value="16">+16</button><button data-value="32">+32</button></div></div>
+                <div class="row"><span>Bottom</span><div class="seg" data-setting="safeBottom"><button data-value="-1">None</button><button data-value="0">Auto</button><button data-value="16">+16</button><button data-value="32">+32</button></div></div>
+                <div class="section-note">Auto keeps clear of the notch, the camera and curved edges. None goes right to the edge of the glass.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- The World map (worldmap.js): the 2004 map applet in an iframe (mapview.html), opened by the globe on the minimap. -->
+    <div id="worldmap" class="overlay" hidden>
+        <div class="settings-panel worldmap-panel" role="dialog" aria-label="World map">
+            <div class="panel-header worldmap-header">
+                <div class="seg">
+                    <button id="worldmap-key" aria-pressed="false">Key</button>
+                    <button id="worldmap-overview" aria-pressed="false">Overview</button>
+                </div>
+                <div class="seg" id="worldmap-area"><button data-area="0">Surface</button><button data-area="1">Underground</button></div>
+                <div class="worldmap-end">
+                    <button class="stone-btn" id="worldmap-me" aria-label="Centre on you"><span class="icon icon-you"></span></button>
+                    <button class="title-btn" id="worldmap-close" aria-label="Close">Close</button>
+                </div>
+            </div>
+            <div class="worldmap-body" id="worldmap-body">
+                <div class="worldmap-keys" id="worldmap-keys" hidden></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- How to play on a phone: once on the first visit to the world, and from Settings. -->
+    <div id="howto" class="overlay" hidden>
+        <div class="settings-panel howto-panel" role="dialog" aria-label="How to play">
+            <div class="panel-header"><div class="panel-title">Playing on a phone</div></div>
+            <div class="howto-rows">
+                <div class="howto-row"><span class="howto-key">Tap</span><span>Walk, talk, take, use: what the game's left click does</span></div>
+                <div class="howto-row"><span class="howto-key">Hold</span><span>The options menu. Slide onto an option and let go, or tap one</span></div>
+                <div class="howto-row"><span class="howto-key">Drag</span><span>Turn and tilt the camera</span></div>
+                <div class="howto-row"><span class="howto-key">Pinch</span><span>Zoom in and out</span></div>
+                <div class="howto-row"><span class="howto-key">Compass</span><span>Tap it to face north. Tap the map to walk there</span></div>
+                <div class="howto-row"><span class="howto-key">Lists</span><span>Drag up and down to scroll; drag an item to move it</span></div>
+            </div>
+            <div class="panel-actions"><button class="title-btn" id="howto-ok">OK</button></div>
+        </div>
+    </div>
+</body>
+</html>

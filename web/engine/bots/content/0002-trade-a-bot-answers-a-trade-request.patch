@@ -1,0 +1,42 @@
+bots: a trade request reaches the bot (trade.rs2)
+
+Progressive's bot hunks: when a player asks a bot to trade, the bot is told (stage 0); when a trade
+window of a bot closes, its trade state is reset (stage -1).
+Not carried over: Progressive's trailing-whitespace fix on the duel-arena `return;`, and its
+`.say("One moment please, <displayname>")` in [opplayer4,_]: every bot said it, also one whose task
+cannot trade. The bot library answers instead (BotTrade.onTradeRequest: it takes the request or
+declines).
+
+diff --git a/scripts/interface_trade/scripts/trade.rs2 b/scripts/interface_trade/scripts/trade.rs2
+index cc38e00..37a9acc 100644
+--- a/scripts/interface_trade/scripts/trade.rs2
++++ b/scripts/interface_trade/scripts/trade.rs2
+@@ -32,6 +32,9 @@ if (.busy = true) {
+     mes("<.displayname> is busy at the moment.");
+     return;
+ }
++if(.p_isbot = 1) {
++    .p_bot_interact_trade(uid, 0); //Begin (stage 0)
++}
+ 
+ // this message always sends, even if this player is responding to a trade request
+ mes("Sending trade offer...");
+@@ -241,12 +244,18 @@ while ($slot < .inv_size($inv)) {
+ inv_stoptransmit(trademain:inv);
+ inv_stoptransmit(trademain:otherinv);
+ inv_stoptransmit(tradeside:inv);
++if(p_isbot = 1) {
++    p_bot_interact_trade(null, -1); //reset
++}
+ 
+ ~moveallinv(tradeoffer, inv);
+ 
+ if (.finduid(%tradepartner) = true) {
+     .%tradepartner = null;
+     .if_close;
++    if(.p_isbot = 1) {
++        .p_bot_interact_trade(null, -1); //reset
++    }
+     if (%tradestatus ! 1 & .%tradestatus ! 1) {
+         .mes("Other player declined trade."); // osrs
+     }
