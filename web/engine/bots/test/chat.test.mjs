@@ -356,7 +356,8 @@ BotChat.tickTalk = () => {};
     check(`talk: "Hi ${a.displayName}": it answers, the other bot does not`, r.a.length === 1 && r.b.length === 0, JSON.stringify(r));
     r = withDice(1, () => talk(`Hi ${b.displayName}`));
     check(`talk: "Hi ${b.displayName}": it answers; ${a.displayName}, still in its conversation, leaves the line to it`, r.b.length === 1 && r.a.length === 0, JSON.stringify(r));
-    // three lines no intent understands, one after another: neither bot answers (all of TYPED for any late answer)
+    // three lines no intent understands, one after another (2026-10-26, never ignored: they were left unanswered): the
+    // bot talked with last nods to each ("ya", "k", "oh ok"), the other leaves them to it; never a "huh" to a statement
     const s0 = says.length;
     for (const line of ['What a nice day', 'Brb going to the bank', 'Ok i am back']) {
         BotChat.onPublicMessage(human, line);
@@ -364,7 +365,8 @@ BotChat.tickTalk = () => {};
     }
     tick(TYPED);
     const late = says.slice(s0).filter(s => s.who === a.username || s.who === b.username);
-    check('talk: "What a nice day", "Brb going to the bank", "Ok i am back" (no intent): neither bot answers', late.length === 0, JSON.stringify(late));
+    const nods = new Set(BOT_CHAT_LINES.noAnswer);
+    check(`talk: "What a nice day", "Brb going to the bank", "Ok i am back" (no intent): ${b.displayName}, talked with last, nods to each; ${a.displayName} leaves them`, late.length === 3 && late.every(s => s.who === b.username && nods.has(s.text) && !BOT_CHAT_LINES.confused.includes(s.text)), JSON.stringify(late));
     // both greeted again (a new conversation each), then a line for both
     withDice(1, () => talk(`Hi ${a.displayName}`, { until: [a] }));
     withDice(1, () => talk(`Hi ${b.displayName}`, { until: [b] }));
@@ -433,8 +435,8 @@ BotChat.tickTalk = () => {};
     check(`reply window: "hey" just after ${w.displayName} spoke to the human gets its answer`, saidBy(r, w).length === 1, show(r));
     tick(60);
     sim.botPlayer(w)._say('how long u been playing?', 'idle', human);
-    r = withDice(1, () => chat('brb going to the bank'));
-    check('reply window: a line it does not understand gets nothing', r.said.length === 0, show(r));
+    r = withDice(1, () => chat('brb going to the bank', { until: [w] }));
+    check('reply window: a line it does not understand gets its nod (2026-10-26, never ignored; it got nothing)', saidBy(r, w).length === 1 && BOT_CHAT_LINES.noAnswer.includes(saidBy(r, w)[0]) && !BOT_CHAT_LINES.confused.includes(saidBy(r, w)[0]), show(r));
     tick(60);
     sim.botPlayer(w)._say('good xp here', 'idle');
     r = withDice(1, () => chat('hey'));
@@ -540,18 +542,19 @@ BotChat.tickTalk = tickTalk;
         check('realism: a reply without the name reads whole ("Thanks, {name}" → "Thanks")', thanks === 'Thanks' || thanks === `Thanks, ${human.displayName}` || /^Thanks( |$)/.test(thanks), thanks);
     }
 
-    // ---- a named line nothing understands: "?" or "wat" now and then, else nothing ----
+    // ---- a named line nothing understands: always the persona's own no-answer (2026-10-26, never ignored: it was "?" or
+    // "wat" now and then, else nothing) ----
     {
         const c = pool[0];
         place(c, 1, 0);
         tick(2);
-        let r = withDice(0, () => chat(`${c.displayName} blorp the flarg`, { until: [c] }));
-        const said = r.said.filter(s => s.who === c.username && s.kind === 'reply').map(s => s.text);
-        check('realism: a named line nothing understands gets "?", "huh" or "wat" (the dice say yes)', said.length === 1 && BOT_CHAT_LINES.confused.includes(said[0]), show(r));
-        tick(60);
-        r = withDice(1, () => chat(`${c.displayName} blorp the flarg`));
-        check('realism: ... and nothing when the dice say no', r.said.filter(s => s.who === c.username && s.kind === 'reply').length === 0, show(r));
-        tick(60);
+        const noAnswer = new Set(BOT_CHAT_LINES.noAnswer);
+        for (const dice of [0, 1]) {
+            const r = withDice(dice, () => chat(`${c.displayName} blorp the flarg?`, { until: [c] }));
+            const said = r.said.filter(s => s.who === c.username && s.kind === 'reply').map(s => s.text);
+            check(`realism: a named question nothing understands gets the persona's "sry what?" or "idk tbh" (the dice at ${dice})`, said.length === 1 && noAnswer.has(said[0]), show(r));
+            tick(60);
+        }
         // the new intents, answered from its state
         const ask = (line, test, what) => {
             const res = withDice(1, () => chat(`${c.displayName} ${line}`, { until: [c] }));

@@ -20,7 +20,7 @@
 //                   {type:'bots-lm-mode', mode, local, online}
 //                       The player's choice (Settings › Bot chat) and what is there; until it comes, the rules alone.
 import type { EngineMessage, Post } from '../host.js';
-import { onModelReply, setModelChannel, setModelMode } from '#/engine/bot/port/BotModel.js';
+import { onModelReply, setModelChannel, setModelMode, setModelOutcomeLog } from '#/engine/bot/port/BotModel.js';
 import type { ModelModeMessage, ModelReplyMessage } from '#/engine/bot/port/BotModelTypes.js';
 import { botStore } from './store.js';
 
@@ -59,6 +59,8 @@ export function attachPage(hostPost: Post): void {
             console.error('[bots] posting a model request failed', e);
         }
     });
+    // (2026-10-26: what happened to each reply the model was to write, in the app's log: said, or which fallback and why)
+    setModelOutcomeLog(line => console.info(line));
     if (!pending) return;
     const msg = pending;
     pending = null;

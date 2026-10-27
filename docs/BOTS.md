@@ -83,8 +83,12 @@ Contents: [what they do](#1-what-the-bots-do) and [the design rules](#design-rul
 ### Talking to them
 
 - A bot answers when its whole name, its name without spaces, or a first name no other bot nearby has is in your line,
-  and for half a minute after that it answers what it understands without the name. Questions said to nobody get one
-  bot's answer from the crowd. Private messages are answered; friend bots sometimes message first.
+  and for half a minute after that it answers without the name. A line said to a bot is never left unanswered: what
+  nothing understands gets the model's words, or the bot's own "sry what?", "idk tbh" or "wat" to a question and "ya",
+  "k" or "oh ok" to anything else (an "ok", a "lol" or a "ty" needs no answer; talking with two bots at once, the one
+  you talked with last answers). A bot on a short break answers when it is back, sometimes with "sry was afk". Questions said
+  to nobody get one bot's answer from the crowd most of the time. Private messages are answered; friend bots sometimes
+  message first.
 - Every line a bot says goes through the game's word filter like a player's, is typed at a person's speed, and is
   hidden by your ignore list.
 - Unprompted, bots talk at their persona's rate in bursts with long quiet spells: lines that fit what they are doing
@@ -412,7 +416,16 @@ marketplace and trades, PK and fights, follow and team-up, the rude lines, emote
 levels, Hitpoints, place, activity, gear and pack, recent events, the lines heard near it and the PM thread, the
 human's line and the rules' own answer as a hint) and its two prompts. The bot stays at its keyboard until a deadline
 20 ticks after the decision plus its typing time. No usable answer by then: the rules' line. At most 3 requests are in
-flight; a newer reply of the same bot supersedes a waiting one.
+flight; a newer reply of the same bot supersedes a waiting one. A line the guard refuses, or an empty one, is asked for
+once more while the deadline leaves 4 ticks.
+
+**Never ignored** (2026-10-26, every mode): for a line said to the bot that nothing understands, the rules' line is the
+persona's way of having no answer (`NO_ANSWER` in `port/BotChat`: to a question a rude bot's "wat", a friendly one's
+"sry what?", a helpful one's "idk tbh", anyone else's "lol dunno"; to anything else its nod, "k", "oh ok", "ya"; a shrug
+for a question to nobody; "ya?" to its name alone), so a model that fails never leaves the human unanswered. In two
+conversations at once, a line nothing understands is answered by the bot the human talked with last. A line that asks for no answer (`wantsNoAnswer`: "ok", "lol", "ty",
+a smiley) gets none, and a model's now and then. Each settled reply is one line in the app's log
+(`setModelOutcomeLog`: said, or which fallback and why, and what was said).
 
 **The guard** (`port/BotModelGuard.guardReply`) refuses a model's line unless it is one line of the chat's characters
 within 80, passes the word filter, has no assistant talk, nothing after 2004 (slang included), never owns up to being a
@@ -421,8 +434,8 @@ neither the human nor the bot's own recent lines, uses the human's name at the p
 cannot know, says no "brb"/"afk"/"gtg", and has no markup. Every reason has a unit check in `test/model.test.mjs`.
 The accepted line then gets the persona's style (`port/BotStyle`).
 
-With no model chosen nothing in this path draws a random number, so a simulation without a model is the same world as
-before the model existed.
+With no model chosen nothing in the model's path draws a random number (the never-ignored replies and the crowd's
+shrug are the rules' own).
 
 ## 5. Changes from upstream (2004sp-progressive)
 

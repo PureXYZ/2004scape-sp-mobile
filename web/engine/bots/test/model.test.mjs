@@ -26,6 +26,11 @@
 //              conversation's state as the rules' (its 30 s from the reply; "follow me" stays the rules', with its
 //              Follow); the lines the rules left unanswered (a named line, a conversation's, a reply-window answer, a
 //              question to nobody) answered by the model; at most 3 in flight ('busy'); no channel: the rules' line
+//   ignored    (2026-10-26) never ignored: a line nothing understands with the model failing gets the persona's
+//              "sry what?"; a refused or empty line is asked for once more (once); a superseded "sry what?" is dropped;
+//              an "ok" gets nothing; a bot away answers a named line and a PM when back ("sry was afk" first); one log
+//              line per settled reply. With the rules alone: the no-answer line by name, in the conversation and by PM,
+//              "ya?" to the name alone, nothing to an "ok", one bot's shrug to a question to nobody
 //   no model   with the rules again, a while of chat asks nothing
 //
 //   node --expose-gc web/engine/bots/test/model.test.mjs
@@ -451,6 +456,154 @@ if (live.length >= 4) {
     }
     const planted = log().slice(pl0).filter(e => e.planted);
     check('the stub: its planted bad lines are all refused by the guard', planted.length >= 6 && planted.every(e => e.outcome === 'guard'), planted.map(e => `${e.planted}→${e.outcome}/${e.reason}: ${e.raw}`));
+    run(60);
+}
+
+// ---- (2026-10-26) the player never seems ignored ----
+const NO_ANSWER = new Set(lib.BOT_CHAT_LINES.noAnswer);
+const CALLED = new Set(lib.BOT_CHAT_LINES.called);
+const AFK_SORRY = new Set(lib.BOT_CHAT_LINES.afkSorry);
+/** ticks with the AFK tick of the chat (the check's world turns tickTalk off) */
+const runMissed = (ticks, until) => run(ticks, () => (BotChat.tickMissed(), until ? until() : false));
+if (live.length >= 4) {
+    const outcomes = [];
+    BotModelNs.setModelForTest('stub', { latencyTicks: 3, plantRate: 0 });
+    BotModelNs.setModelOutcomeLog(line => outcomes.push(line));
+    const l0 = log().length;
+    const b = live[0];
+
+    // a line nothing understands, the model failing: the persona's "sry what?" instead of nothing
+    BotModelNs.setModelChannel(msg => BotModelNs.onModelReply({ type: 'bots-lm-reply', id: msg.id, text: null, source: null, error: 'failed: test', ms: 5 }));
+    stage(b);
+    let r = withDice(0.99, () => ask(b, `${b.displayName} blorf quux zibble`));
+    check('never ignored: a named line nothing understands, the model failing: the persona\'s no-answer line, not nothing', r.entry?.outcome === 'error' && r.entry.candidate && r.said.length === 1 && NO_ANSWER.has(r.said[0].text) && r.said[0].text === r.entry.ruleText, { entry: r.entry, said: r.said });
+    ask(b, 'bye', 30);
+    run(60);
+
+    // a refused line is asked for once more; the second passes
+    let n = 0;
+    BotModelNs.setModelChannel(msg => BotModelNs.onModelReply({ type: 'bots-lm-reply', id: msg.id, text: n++ % 2 ? 'nah just chilling' : 'lol im a bot', source: 'local', ms: 5 }));
+    stage(b);
+    const g0 = BotModelNs.modelStats.retries;
+    r = ask(b, `${b.displayName} wyd`);
+    check('retry: a line the guard refuses is asked for once more, and the second is said', r.entry?.outcome === 'used' && r.entry.retried === 'confession' && BotModelNs.modelStats.retries === g0 + 1 && r.said.length === 1 && /chilling/.test(r.said[0].text), { entry: r.entry, said: r.said });
+    // an empty line too
+    n = 0;
+    BotModelNs.setModelChannel(msg => BotModelNs.onModelReply(n++ % 2 ? { type: 'bots-lm-reply', id: msg.id, text: 'not much u', source: 'local', ms: 5 } : { type: 'bots-lm-reply', id: msg.id, text: null, source: null, error: 'failed: empty', ms: 5 }));
+    run(5);
+    r = ask(b, 'how r u');
+    check('retry: an empty line is asked for once more', r.entry?.outcome === 'used' && r.entry.retried === 'empty' && r.said.length === 1, { entry: r.entry, said: r.said });
+    // a refused line twice: the fallback, once
+    BotModelNs.setModelChannel(msg => BotModelNs.onModelReply({ type: 'bots-lm-reply', id: msg.id, text: 'lol im a bot', source: 'local', ms: 5 }));
+    run(5);
+    const req0 = BotModelNs.modelStats.requests;
+    r = ask(b, 'whats ur total');
+    check('retry: only once; then the rules\' line', r.entry?.outcome === 'guard' && r.entry.retried === 'confession' && r.said.length === 1 && BotModelNs.modelStats.requests === req0 + 1, { entry: r.entry, said: r.said });
+    ask(b, 'bye', 30);
+    run(60);
+
+    // a newer line while a "sry what?" waits: the newer line's reply answers, the "sry what?" is never said
+    BotModelNs.setModelChannel(() => {});
+    stage(b);
+    const s0 = World.currentTick;
+    BotChat.onPublicMessage(human, `${b.displayName} blorf quux zibble`);
+    run(4);
+    const first = lastEntry(b);
+    BotChat.onPublicMessage(human, 'whats ur cb');
+    run(30);
+    check('never ignored: a "sry what?" superseded by a newer line is dropped (the newer line is answered)', first?.outcome === 'superseded' && first.ruleText !== null && !says.some(x => x.who === b.username && x.t >= s0 && x.text === first.ruleText) && repliesOf(b, s0).length === 1, { first, said: repliesOf(b, s0) });
+    BotChat.onPublicMessage(human, 'bye');
+    run(60);
+
+    // an "ok" by name: no "sry what?" (a model only now and then: here the die says no)
+    BotModelNs.setModelForTest('stub', { latencyTicks: 3, plantRate: 0 });
+    BotModelNs.setModelOutcomeLog(line => outcomes.push(line));
+    stage(b);
+    const e1 = log().length;
+    r = withDice(0.99, () => ask(b, `${b.displayName} ok`, 30));
+    check('never ignored: an "ok" asks for no answer (no request, nothing said, at the die\'s no)', r.said.length === 0 && log().length === e1, { said: r.said, log: log().slice(e1) });
+    run(60);
+
+    // a bot away when named: it answers when it is back ("sry was afk" first, here)
+    stage(b);
+    lib.setAwayForTest(b, true);
+    const a0 = World.currentTick;
+    BotChat.onPublicMessage(human, `${b.displayName} whats ur cb`);
+    runMissed(20);
+    const whileAway = repliesOf(b, a0).length + says.filter(x => x.who === b.username && x.t >= a0).length;
+    lib.setAwayForTest(b, false);
+    withDice(0, () => runMissed(1));
+    runMissed(45, () => {
+        const e = lastEntry(b);
+        return e && e.t >= a0 && e.outcome !== 'pending' && (e.outcome !== 'used' || e.saidAt !== undefined);
+    });
+    run(2);
+    const back = says.filter(x => x.who === b.username && x.t >= a0);
+    const sorry = !lib.isRude(lib.botPersona(b));
+    check('AFK: a named line said while the bot is away gets nothing then, its answer when it is back', whileAway === 0 && repliesOf(b, a0).length >= 1 && lastEntry(b)?.heard.includes('whats ur cb'), { whileAway, back });
+    check('AFK: "sry was afk" first (a bot that is not rude, at the die\'s yes)', !sorry || (back.length >= 2 && AFK_SORRY.has(back[0].text)), back);
+    ask(b, 'bye', 30);
+    run(60);
+
+    // a private message while away: answered by private message when it is back
+    const pb = live[1];
+    lib.setAwayForTest(pb, true);
+    const p0 = pms.length;
+    BotChat.onPrivateMessage(human, pb.username, 'wyd');
+    runMissed(20);
+    const pmWhileAway = pms.slice(p0).filter(m => m.from === pb.username).length;
+    lib.setAwayForTest(pb, false);
+    runMissed(60, () => pms.slice(p0).some(m => m.from === pb.username && !AFK_SORRY.has(m.text)));
+    check('AFK: a private message while away: nothing then, its answer by private message when back', pmWhileAway === 0 && pms.slice(p0).some(m => m.from === pb.username && !AFK_SORRY.has(m.text)), pms.slice(p0));
+    run(60);
+
+    // the app's log: one line per settled reply
+    const settled = log().slice(l0).filter(e => e.outcome !== 'pending');
+    check('the app\'s log: one line for each settled reply, with its outcome', outcomes.length === settled.length && outcomes.every(l => /^\[bots\] model #\d+ /.test(l)) && outcomes.some(l => /: error \(failed: test\) → "/.test(l)) && outcomes.some(l => /asked again after confession/.test(l)), { outcomes: outcomes.length, settled: settled.length, sample: outcomes.slice(0, 4) });
+    BotModelNs.setModelOutcomeLog(null);
+    BotModelNs.resetModelForTest();
+}
+
+// ---- (2026-10-26) never ignored with the rules alone (Settings › Bot chat › Rules) ----
+if (live.length >= 4) {
+    const b = live[2];
+    /** a line to the bot (public), then its replies after `wait` ticks */
+    const sayTo = (text, wait = 30) => {
+        const from = World.currentTick;
+        BotChat.onPublicMessage(human, text);
+        run(wait);
+        return repliesOf(b, from);
+    };
+    stage(b);
+    let said = withDice(0.99, () => sayTo(`${b.displayName} blorf quux zibble`));
+    check('rules: a named line nothing understands always gets the persona\'s no-answer line (no die)', said.length === 1 && NO_ANSWER.has(said[0].text), said);
+    said = sayTo('zorp flim flam');
+    check('rules: a line of the conversation nothing understands: the persona\'s no-answer line', said.length === 1 && NO_ANSWER.has(said[0].text), said);
+    said = sayTo('ok');
+    check('rules: an "ok" in the conversation gets nothing', said.length === 0, said);
+    sayTo('bye');
+    run(60);
+    stage(b);
+    said = sayTo(`${b.displayName}?`);
+    check('rules: the bot\'s name alone gets an answer to the call ("ya?", "wat")', said.length === 1 && CALLED.has(said[0].text), said);
+    sayTo('bye');
+    run(60);
+    const p0 = pms.length;
+    BotChat.onPrivateMessage(human, b.username, 'blorf quux zibble');
+    run(40);
+    check('rules: a private message nothing understands gets the no-answer line by private message', pms.slice(p0).some(m => m.from === b.username && NO_ANSWER.has(m.text)), pms.slice(p0));
+    run(60);
+    // a question to nobody nothing understands: one bot's shrug (at the crowd's chance: here yes)
+    for (const [i, o] of live.entries()) o.teleJump(3210 + (i % 3) * 2, 3426 + Math.floor(i / 3) * 3, 0);
+    sim.teleportHuman(3212, 3429, 0);
+    run(3);
+    const c0 = World.currentTick;
+    withDice(0, () => {
+        BotChat.onPublicMessage(human, 'does anyone know a good song');
+        run(40);
+    });
+    const crowd = says.filter(x => x.t >= c0 && x.kind === 'reply' && live.some(o => o.username === x.who));
+    check('rules: a question to nobody nothing understands gets one bot\'s shrug', crowd.length === 1 && NO_ANSWER.has(crowd[0].text), crowd);
     run(60);
 }
 

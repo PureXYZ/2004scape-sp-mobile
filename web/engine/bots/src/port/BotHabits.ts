@@ -209,6 +209,17 @@ function habitsOf(bot: Player): Habits {
     return h;
 }
 
+/**
+ * Tests only (test/model.test.mjs, 2026-10-26): the bot on a short break from now (true) until a test says it is back
+ * (false). Never called by the game.
+ */
+export function setAwayForTest(bot: Player, away: boolean): void {
+    const h = habitsOf(bot);
+    const now = World.currentTick;
+    if (away) h.spell = { kind: 'idle', start: now, until: Infinity, brb: false, hp: bot.levels[PlayerStat.HITPOINTS] };
+    else if (h.spell) endSpell(bot, h, now, 'done');
+}
+
 /** Is the bot on a short break (AFK)? It says nothing and answers nobody until it is back. (A linger is no break.) */
 export function isAway(bot: Player): boolean {
     const spell = habits.get(bot)?.spell;

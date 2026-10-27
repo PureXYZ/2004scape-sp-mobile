@@ -15,7 +15,8 @@
 //     MAX_IN_FLIGHT in the world (more fall back at once, 'busy'); its deadline (MODEL_DEADLINE_TICKS after the decision
 //     and the reply's extra ticks: then the rules' line at once); the answer (onModelReply, handled in the next tick,
 //     the world's time) through the guard, then the bot's own `use` (port/BotChat: the persona's style, typed from the
-//     decision) or its `fallback` with the reason;
+//     decision) or its `fallback` with the reason; (2026-10-26) a refused or empty line asked for once more first
+//     (retry), and every settled reply told to the app's log (setModelOutcomeLog);
 //   - the stats (modelStats: requests, used, fallbacks by reason, guard refusals by reason, latency in ticks, the lines
 //     the rules left unanswered, a log of every reply's story), read by humanlike's MD1-MD6;
 //   - a deterministic stub for tests and sims (setModelForTest: replies from the situation, a set latency in ticks, a
@@ -103,6 +104,11 @@ export const MODEL_DEADLINE_TICKS = 20;
 export const NATIVE_TIMEOUT_MS = 9000;
 /** requests in flight in the world at most; more fall back at once ('busy') */
 export const MAX_IN_FLIGHT = 3;
+/**
+ * (2026-10-26) a line the guard refuses, or an empty one, is asked for once more when this many ticks are left before the
+ * deadline (about 1 s a reply on the phone); then the fallback
+ */
+export const RETRY_MIN_TICKS = 4;
 
 /** the replies a model may write: to a human's line by its name, in the reply window, in its conversation, said to nobody (the crowd, a second bot), a private message */
 export const MODEL_VIAS: ReadonlySet<ReplyVia> = new Set<ReplyVia>(['named', 'window', 'conversation', 'crowd', 'second', 'private']);
@@ -156,10 +162,14 @@ export function wantsModel(req: ModelScopeRequest, rude = false): boolean {
     return modelAvailable() && inModelScope(req, rude);
 }
 
-/** §3: how often a line the rules left unanswered gets a model reply (with a model), by the way it came; the crowd's is its own chance */
+/**
+ * §3: how often a line the rules left unanswered gets a model reply (with a model), by the way it came; the crowd's is its
+ * own chance. (2026-10-26, the player never seems ignored: only a line that asks for no answer, an "ok" or a "lol"; any
+ * other is always answered, port/BotChat wantsNoAnswer)
+ */
 export const CANDIDATE_CHANCE = { conversation: 0.75, window: 0.6 } as const;
 
-/** a named line or a private message nothing understood: the persona's chance of a model reply, 0.55-0.9 from its helpfulness and friendliness */
+/** a named line or a private message nothing understood that asks for no answer (2026-10-26; any line before): the persona's chance of a model reply, 0.55-0.9 from its helpfulness and friendliness */
 export function unansweredChance(persona: { helpfulness: number; friendliness: number }): number {
     return Math.max(0.55, Math.min(0.9, 0.55 + 0.25 * persona.helpfulness + (0.1 * (persona.friendliness + 1)) / 2));
 }
@@ -184,6 +194,8 @@ export interface ModelLogEntry {
     outcome: 'pending' | 'used' | ModelFallback;
     /** the guard's reason, or native's error */
     reason?: string;
+    /** (2026-10-26) asked once more after this: the guard's reason, or 'empty' */
+    retried?: string;
     /** the stub's planted bad line: the reason the guard should give */
     planted?: string;
     /** the line said (styled) and its tick */
@@ -212,11 +224,12 @@ export interface ModelAsk {
     keepName: boolean;
     /** the guard passed: say `text` */
     use(text: string, entry: ModelLogEntry): void;
-    /** no model line: say the rules' line, or nothing */
-    fallback(reason: ModelFallback, entry: ModelLogEntry): void;
+    /** no model line: say the rules' line, or nothing; what it says (null: nothing) */
+    fallback(reason: ModelFallback, entry: ModelLogEntry): string | null;
 }
 
 interface Pending {
+    /** the request's id: a retry's is a new one */
     id: number;
     ask: ModelAsk;
     entry: ModelLogEntry;
@@ -243,6 +256,8 @@ export const modelStats = {
     guard: {} as Record<string, number>,
     /** answers that came after their deadline or supersede (dropped) */
     late: 0,
+    /** (2026-10-26) requests asked once more (a refused or empty line) */
+    retries: 0,
     /** ticks from each request to its answer */
     latency: [] as number[],
     /** lines the rules left unanswered: sent to the model, said in its words, by the way they came */
@@ -255,6 +270,29 @@ const LOG_MAX = 5000;
 
 function bump(counts: Record<string, number>, key: string): void {
     counts[key] = (counts[key] ?? 0) + 1;
+}
+
+// ── (2026-10-26) what happened to each reply, for the app's log ──────────────────────────────────────────────────
+
+/** Where a line about each settled reply goes (the runtime: the app's log); null in tests and sims. */
+let outcomeLog: ((line: string) => void) | null = null;
+
+/** The runtime (runtime/bots/page.ts): one line per reply the model was to write, once it is settled. */
+export function setModelOutcomeLog(fn: ((line: string) => void) | null): void {
+    outcomeLog = fn;
+}
+
+/** e.g. `[bots] model #12 Lumby Larry named "whats ur fav quest": said in 3 ticks "uhh dragon slayer"` */
+function logOutcome(entry: ModelLogEntry, said: string | null): void {
+    if (!outcomeLog) return;
+    const quote = (text: string): string => JSON.stringify(text.length > 48 ? `${text.slice(0, 47)}…` : text);
+    const how = entry.outcome === 'used' ? `said in ${(entry.replyAt ?? World.currentTick) - entry.t} ticks` : `${entry.outcome}${entry.reason ? ` (${entry.reason})` : ''}`;
+    const retried = entry.retried ? `, asked again after ${entry.retried}` : '';
+    try {
+        outcomeLog(`[bots] model #${entry.id} ${toDisplayName(entry.bot)} ${entry.via}${entry.candidate ? ' (not understood)' : ''} ${quote(entry.heard)}: ${how}${retried}${entry.outcome === 'used' ? '' : ' →'} ${said === null ? 'nothing' : quote(said)}`);
+    } catch {
+        // (a log line never stops a reply)
+    }
 }
 
 /** The bot's model reply still being written, if any. */
@@ -300,7 +338,8 @@ export function askModel(ask: ModelAsk): void {
         return;
     }
     scheduleInTicks(ask.deadline - World.currentTick, () => {
-        if (inFlight.get(id) === p) settle(p, 'deadline');
+        // (p.id: a retry's own)
+        if (inFlight.get(p.id) === p) settle(p, 'deadline');
     });
 }
 
@@ -324,11 +363,38 @@ function settle(p: Pending, reason: ModelFallback): void {
 function fallBack(ask: ModelAsk, entry: ModelLogEntry, reason: ModelFallback): void {
     bump(modelStats.fallbacks, reason);
     entry.outcome = reason;
+    let said: string | null = null;
     try {
-        ask.fallback(reason, entry);
+        said = ask.fallback(reason, entry);
     } catch (err) {
         console.error('[BotModel] a fallback failed', err);
     }
+    logOutcome(entry, said);
+}
+
+/**
+ * (2026-10-26) a line the guard refused, or an empty one: asked for once more, under a new id, when the deadline leaves
+ * time for it (RETRY_MIN_TICKS) and a model and the channel are still there. False: the fallback, as before.
+ */
+function retry(p: Pending, why: string): boolean {
+    const left = p.ask.deadline - World.currentTick;
+    if (p.entry.retried !== undefined || left < RETRY_MIN_TICKS || !channel || !modelAvailable()) return false;
+    p.entry.retried = why;
+    modelStats.retries++;
+    inFlight.delete(p.id);
+    p.id = ++nextId;
+    p.entry.id = p.id;
+    inFlight.set(p.id, p);
+    // (native's own timeout before the engine's deadline, as the first request's)
+    const timeoutMs = Math.max(1000, Math.min(NATIVE_TIMEOUT_MS, (left - 1) * 600));
+    const msg: ModelRequestMessage = { type: 'bots-lm', id: p.id, mode: mode === 'online' && present.online ? 'online' : 'local', local: p.ask.local, online: p.ask.online, maxChars: MAX_LINE, timeoutMs };
+    try {
+        channel(msg);
+    } catch (err) {
+        console.error('[BotModel] the request could not be sent again', err);
+        settle(p, 'channel');
+    }
+    return true;
 }
 
 /** The page's answer to a request (runtime/bots/page.ts): handled in the next tick (it came between ticks: the world's time, as everything a bot does). */
@@ -343,12 +409,15 @@ function handleReply(msg: ModelReplyMessage): void {
         modelStats.late++;
         return;
     }
-    remove(p);
     const now = World.currentTick;
     if (modelStats.latency.length < LOG_MAX) modelStats.latency.push(now - p.sentAt);
     p.entry.replyAt = now;
     p.entry.raw = typeof msg.text === 'string' ? msg.text : null;
+    // (2026-10-26: an empty line, as native words it or as it came, is asked for once more)
+    const empty = msg.error === 'failed: empty' || (typeof msg.text === 'string' && msg.text.trim() === '');
+    if (empty && retry(p, 'empty')) return;
     if (typeof msg.text !== 'string' || msg.text.trim() === '') {
+        remove(p);
         const error = typeof msg.error === 'string' && msg.error ? msg.error : 'failed';
         bump(modelStats.errors, error);
         p.entry.reason = error;
@@ -360,8 +429,12 @@ function handleReply(msg: ModelReplyMessage): void {
     if (!g.ok) {
         bump(modelStats.guard, g.reason ?? 'unknown');
         p.entry.reason = g.reason;
+        // (2026-10-26: a refused line is asked for once more; a second sample usually passes)
+        if (retry(p, g.reason ?? 'guard')) return;
+        remove(p);
         return fallBack(p.ask, p.entry, 'guard');
     }
+    remove(p);
     modelStats.used++;
     if (p.ask.candidate) modelStats.candidates.used++;
     p.entry.outcome = 'used';
@@ -370,6 +443,7 @@ function handleReply(msg: ModelReplyMessage): void {
     } catch (err) {
         console.error('[BotModel] saying a model reply failed', err);
     }
+    logOutcome(p.entry, g.text);
 }
 
 /** the display names of everyone in the world (the guard's (e)) */
@@ -513,7 +587,8 @@ function plantedLine(s: Situation, st: { planted: number }): [string, string] | 
             'name',
             () => {
                 const known = new Set([s.human.name, s.bot.name, ...s.facts.friendsNear, ...s.history.map(l => l.name)].map(n => n.toLowerCase()));
-                const other = onlineNames().find(n => n.length >= 4 && !known.has(n.toLowerCase()) && !/\d/.test(n) && !s.heard.text.toLowerCase().includes(n.toLowerCase()));
+                // (a name with a digit: the only kind the guard counts, port/BotModelGuard otherName)
+                const other = onlineNames().find(n => n.length >= 4 && !known.has(n.toLowerCase()) && /\d/.test(n) && !s.heard.text.toLowerCase().includes(n.toLowerCase()));
                 return other ? `ask ${other} lol` : null;
             }
         ],
@@ -549,6 +624,7 @@ export function resetModelForTest(): void {
     modelStats.errors = {};
     modelStats.guard = {};
     modelStats.late = 0;
+    modelStats.retries = 0;
     modelStats.latency = [];
     modelStats.candidates = { eligible: 0, requests: 0, used: 0, byVia: {} };
     modelStats.log = [];

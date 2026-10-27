@@ -37,7 +37,8 @@
 //       - a question or request said to nobody gets at most one bot's answer (floor control: by helpfulness and
 //         distance, not a busy bot nor one talking with someone else) and now and then a second bot's;
 //       - bots answer bots (onBotLine): a question, a level-up's gz and the leveller's ty, a hello, with chains of at
-//         most 3 lines and cooldowns per bot and per area; a bot that is away (port/BotHabits) hears nothing;
+//         most 3 lines and cooldowns per bot and per area; a bot that is away (port/BotHabits) hears nothing (a
+//         human's line by its name or PM: answered when it is back, 2026-10-26);
 //       - the marketplace answers in character: the vendor's private message ("i got lobs 160 ea, at varrock west
 //         bank") or its line when it is near; no game message and no hint arrow (upstream's mod feature, not 2004);
 //       - every reply text to a human is made by composeReply (the rules' intent, the bot's state and persona → a
@@ -51,9 +52,15 @@
 //     persona's style (port/BotStyle) and is said at max(its arrival + 1, the decision + the extra ticks + its typing
 //     time), one line at a time; with no usable answer by the deadline (20 ticks) the rules' line at once, or nothing
 //     where they had none; a newer reply of the bot's supersedes it. Lines the rules leave unanswered get a model reply
-//     now and then (a named line or a PM: the persona's chance; a conversation's line 0.75; a reply-window answer 0.6; a
-//     question to nobody: the crowd's chance, one responder), on chatDice. Without a model (every sim) nothing of this
-//     draws a die: the world is the rules' as before.
+//     (a question to nobody: the crowd's chance, one responder), on chatDice. Without a model (every sim) nothing of
+//     this draws a die.
+//   - 2026-10-26, the player never seems ignored (every mode): a line said to the bot that nothing understands (by name,
+//     in the reply window, in its conversation, by PM) is always answered: the model's words, else the persona's own
+//     "sry what?", "idk tbh", "wat" or "lol dunno" to a question, "ya", "k" or "oh ok" to the rest (NO_ANSWER; its name
+//     alone: "ya?"); one that asks for no answer ("ok", "lol", "ty": wantsNoAnswer) gets none, a model's now and then
+//     (the old chances); in two conversations at once, only the bot talked with last answers. A question to nobody:
+//     one bot's answer at 0.75-0.95, its shrug when nothing understands it. A bot that is away answers a line by its name
+//     or a PM when it is back (tickMissed), now and then "sry was afk" first.
 import InvType from '#/cache/config/InvType.js';
 import ObjType from '#/cache/config/ObjType.js';
 import { Inventory } from '#/engine/Inventory.js';
@@ -103,7 +110,7 @@ import { botConsole } from '#/engine/bot/port/BotLog.js';
 import { isRude } from '#/engine/bot/port/BotPersona.js';
 import { noteRudeReply, rudeReply, RUDE_LINES } from '#/engine/bot/port/BotRude.js';
 import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
-import { askModel, CANDIDATE_CHANCE, MODEL_DEADLINE_TICKS, modelAvailable, noteCandidate, noteComposed, supersedeModelReply, unansweredChance, wantsModel, type ModelLogEntry, type ModelScopeRequest } from '#/engine/bot/port/BotModel.js';
+import { askModel, CANDIDATE_CHANCE, MODEL_DEADLINE_TICKS, noteCandidate, noteComposed, supersedeModelReply, unansweredChance, wantsModel, type ModelLogEntry, type ModelScopeRequest } from '#/engine/bot/port/BotModel.js';
 import { notePrivateLine, notePublicLine } from '#/engine/bot/port/BotModelHistory.js';
 import { renderLocal, renderOnline, situationOf } from '#/engine/bot/port/BotModelPrompt.js';
 import { styleLine } from '#/engine/bot/port/BotStyle.js';
@@ -182,6 +189,36 @@ const LAUGH_CHANCE = 0.2;
 /** a named line no intent understands: a rude bot's, anyone else's (now and then; else nothing) */
 const CONFUSED_RUDE = ['wat', 'wut', 'wat?', 'what'];
 const CONFUSED = ['?', 'huh', 'huh?', '??', 'what?'];
+/**
+ * (2026-10-26, the player never seems ignored) a direct question nothing understands, or one a model could not word: the
+ * persona's own way of having no answer (port/BotChat mannerOf): a rude bot's "wat", a friendly one's "sry what?", a
+ * helpful one's "idk tbh", anyone else's "lol dunno"
+ */
+const NO_ANSWER = {
+    rude: ['wat', 'wut', 'wat?', 'what', 'idk lol', 'no idea'],
+    friendly: ['sry what?', 'huh?', 'what?', 'sorry?', 'wdym?', 'what u mean?'],
+    helpful: ['idk tbh', 'not sure sry', 'no idea sry', 'hmm not sure', 'idk sorry'],
+    chill: ['lol dunno', 'lol', 'idk lol', 'dunno', 'huh', '??']
+} as const;
+/** (2026-10-26) the same for a line that is no question ("what a nice day", "brb going to the bank"): its nod */
+const NO_ANSWER_STATEMENT = {
+    rude: ['k', 'ok', 'cool', 'and?', 'k lol', 'kk'],
+    friendly: ['ya :)', 'oh nice', 'haha ya', 'oh ok', 'ya', 'cool'],
+    helpful: ['ah ok', 'ya', 'oh ok', 'fair enough', 'ya true'],
+    chill: ['lol', 'ya', 'k', 'lol ya', 'ye']
+} as const;
+/** (2026-10-26) the same for a question said to nobody: a shrug, never a "what?" (it was not said to the bot) */
+const NO_ANSWER_CROWD = {
+    rude: ['idk', 'no idea', 'ask some1 else', 'dunno lol'],
+    friendly: ['not sure sry', 'no idea sorry', 'idk sorry'],
+    helpful: ['idk tbh', 'not sure', 'no idea sry', 'hmm not sure'],
+    chill: ['dunno lol', 'no clue', 'idk', 'no idea lol']
+} as const;
+/** (2026-10-26) the bot's name and nothing else ("kevin?"): it answers the call */
+const CALLED_RUDE = ['wat', 'what', 'wut', 'wat?'];
+const CALLED = ['ya?', 'yes?', '?', 'hm?', 'yea?', 'sup'];
+/** (2026-10-26) a line said to a bot that was away, answered when it is back: now and then this first */
+const AFK_SORRY = ['sry was afk', 'sorry afk', 'soz was afk', 'back, sry', 'sry afk', 'oh sry was afk'];
 /** the second bot's reaction to a crowd's answer: agreeing, laughing, rude */
 const SECOND_AGREE = ['ya', 'yep', 'what he said', 'ya that', 'true', 'yea'];
 const SECOND_LAUGH = ['lol', 'lmao', 'haha', 'rofl'];
@@ -265,6 +302,10 @@ export const BOT_CHAT_LINES = {
     doingSuffixes: DOING_SUFFIXES,
     dance: DANCE_REPLIES,
     confused: [...CONFUSED_RUDE, ...CONFUSED],
+    // (2026-10-26: a direct line with no answer, a question to nobody's shrug, a bare call, the AFK bot's sorry)
+    noAnswer: [...Object.values(NO_ANSWER).flat(), ...Object.values(NO_ANSWER_STATEMENT).flat(), ...Object.values(NO_ANSWER_CROWD).flat()],
+    called: [...CALLED_RUDE, ...CALLED],
+    afkSorry: AFK_SORRY,
     secondAgree: SECOND_AGREE,
     secondLaugh: SECOND_LAUGH,
     secondRude: SECOND_RUDE,
@@ -360,12 +401,17 @@ const HI_ANSWER_CHANCE = 0.3;
 const HI_ANSWER_MAX = 0.7;
 /** port: a friend bot's unasked private message: one about every this many ticks of play (uniform), 20-40 minutes */
 const OPENER_GAP: [number, number] = [2000, 4000];
-/** port (the realism work): a crowd's answer to a question said to nobody: its chance, by the bots in earshot */
-const CROWD_CHANCE: [number, number] = [0.4, 0.8];
+/**
+ * port (the realism work): a crowd's answer to a question said to nobody: its chance, by the bots in earshot (2026-10-26,
+ * the player never seems ignored: 0.75-0.95, was 0.4-0.8; a lone bot or two may still let it pass)
+ */
+const CROWD_CHANCE: [number, number] = [0.75, 0.95];
 /** port (the realism work): a second bot's reaction to the crowd's answer, 2-6 s after it, now and then */
 const SECOND_CHANCE = 0.3;
-/** port (the realism work): a named line no intent understands gets "?" or "wat" this often (else nothing) */
-const CONFUSED_CHANCE = 0.4;
+/** (2026-10-26) how long a line said to a bot that is away waits for its return (a break is at most 85 s) */
+const MISSED_TICKS = 300;
+/** (2026-10-26) how often a bot back from a break says sorry before it answers what it missed (not a rude bot) */
+const AFK_SORRY_CHANCE = 0.5;
 /**
  * port (the realism work): a rude bot's answer to a crowd is a rude one this often. (Phase 5a, Track F: a rude talker's,
  * port/BotPersona isRude, friendliness below -0.1, about 17 % of levelling bots; it was below -0.3, PKers only)
@@ -454,6 +500,13 @@ export const BotChat = {
         tickStage();
         // (variety round 2, S2: a death seen, a rare or status gear near, a level 90 passing, a bot's new kit: port/BotWitness)
         tickWitness();
+        // (2026-10-26: a bot back from a break answers what was said to it meanwhile)
+        tickMissed();
+    },
+
+    /** (2026-10-26) a bot back from a break answers what was said to it meanwhile (tickTalk does it; a test on its own) */
+    tickMissed(): void {
+        tickMissed();
     },
 
     /** Chat lines the bots said in reply (for tests and stats). */
@@ -663,10 +716,13 @@ function botChatCheck(human: Player, name: string, mes: string, bot: Player, lin
     if (isClientConnected(bot)) return;
     if (!bot.is_bot) return;
     if (human.slot === -1) return;
-    // port (the realism work): a bot on a short break (port/BotHabits) hears nothing
-    if (isAway(bot)) return;
-
     if (chebyshev(bot, human) > HEARING_DISTANCE) return;
+    // port (the realism work): a bot on a short break (port/BotHabits) hears nothing; (2026-10-26) a line by its name
+    // waits for its return (tickMissed)
+    if (isAway(bot)) {
+        if (isAddressingBot(mes, bot) || (!addressesAnotherBot(mes, bot) && callsByFirstName(mes, bot, human))) noteMissed(bot, human, mes, 'public');
+        return;
+    }
 
     const memory = memoryOf(bot);
     const now = World.currentTick;
@@ -710,21 +766,25 @@ function botChatCheck(human: Player, name: string, mes: string, bot: Player, lin
     const spoke = named || other ? null : lastSpokenTo(human, now, REPLY_WINDOW_TICKS);
     const talking = memory.lastSpeakerId === name && now - (memory.lastInteractionTime ?? 0) < CONVERSATION_TICKS;
     const windowed = spoke !== null && spoke.bot === bot && memory.answeredSpokeAt !== spoke.tick && !talking;
-    // (phase 7: a reply-window answer nothing understands that a model answers, rolled here: CANDIDATE_CHANCE.window)
+    // (phase 7: a reply-window answer nothing understands; 2026-10-26: always answered, the model's words or the
+    // persona's "sry what?", but an "ok" or a "lol" only now and then by a model, rolled here: CANDIDATE_CHANCE.window)
     let modelWindow = false;
     if (windowed) {
         const scratch = scratchMemory(memory);
         if (!matchesAny(cleanedLine, chatResponses.greetings.patterns) && processIntent(mes, scratch, bot, human) === null) {
             // (phase 7: an answer to its line that nothing understands: a model could answer it)
             noteCandidate({ bot, to: human, heard: mes, channel: 'public', via: 'window', greeted: false, intent: null });
-            if (!modelCandidate({ bot, via: 'window', intent: null }, CANDIDATE_CHANCE.window)) return;
-            modelWindow = true;
+            if (wantsNoAnswer(mes, bot)) {
+                if (!modelCandidate({ bot, via: 'window', intent: null }, CANDIDATE_CHANCE.window)) return;
+                modelWindow = true;
+            }
         }
         memory.answeredSpokeAt = spoke.tick;
     }
 
     if (named || windowed) {
         lineTaken.set(human, lineId);
+        lastPartner.set(human, bot);
         memory.lastSpeakerId = name;
         memory.lastInteractionTime = now;
         memory.state = 'engaged';
@@ -758,20 +818,26 @@ function botChatCheck(human: Player, name: string, mes: string, bot: Player, lin
 
     // CONTINUE CONVERSATION
     if (memory.lastSpeakerId === name && now - (memory.lastInteractionTime ?? 0) < CONVERSATION_TICKS) {
-        // port: a line that names another bot is for that one, and a line no intent matches gets no reply (upstream
-        // sent a filler such as "Can you say that another way?"); neither keeps the conversation open
+        // port: a line that names another bot is for that one (it does not keep the conversation open). Upstream sent a
+        // filler such as "Can you say that another way?" to a line no intent matches, the port nothing; 2026-10-26: the
+        // model's words or the persona's "sry what?", but an "ok" or a "lol" gets no reply (now and then a model's)
         if (addressesAnotherBot(mes, bot)) return;
         const intent = processIntent(withoutName(mes, bot), memory, bot, human);
-        // (phase 7: a line of the conversation nothing understands that a model answers, rolled here: CANDIDATE_CHANCE.conversation;
+        // (phase 7: an "ok" or a "lol" of the conversation that a model answers, rolled here: CANDIDATE_CHANCE.conversation;
         // the conversation goes on as with a line the rules understood)
         let modelLine = false;
         if (!intent) {
+            // (2026-10-26: in conversations with two bots at once, the one the human talked with last answers it)
+            if (lastPartner.get(human) !== bot) return;
             // (phase 7: a line of the conversation no intent matches: a model could answer it)
             noteCandidate({ bot, to: human, heard: mes, channel: 'public', via: 'conversation', greeted: false, intent: null });
-            if (!modelCandidate({ bot, via: 'conversation', intent: null }, CANDIDATE_CHANCE.conversation)) return;
-            modelLine = true;
+            if (wantsNoAnswer(mes, bot)) {
+                if (!modelCandidate({ bot, via: 'conversation', intent: null }, CANDIDATE_CHANCE.conversation)) return;
+                modelLine = true;
+            }
         }
         lineTaken.set(human, lineId);
+        lastPartner.set(human, bot);
 
         memory.context.push(mes);
         memory.lastMessage = mes;
@@ -793,6 +859,12 @@ function botChatCheck(human: Player, name: string, mes: string, bot: Player, lin
         if (reply.text || model) sayReply(req, reply, model, { to: human, kind: 'reply', emote: takeEmote(memory), count: true, talk: true, follow: intent?.follow ? human : null });
     }
 }
+
+/**
+ * (2026-10-26) the bot each human talked with last (a named line, the reply window, a turn of a conversation): a line
+ * nothing understands said in two conversations at once is that one's (one answer, not one from each)
+ */
+const lastPartner = new WeakMap<Player, Player>();
 
 /** port: the dice of these unasked answers (a test can load them) */
 export const chatDice = { roll: (): number => Math.random() };
@@ -929,9 +1001,10 @@ function crowdChance(crowd: Player[]): number {
 
 /**
  * port (the realism work): a question or request said to nobody (no bot took it: its name, its conversation, the reply
- * window): at most one bot answers it, by helpfulness and nearness, about half the time (0.4-0.8 by the crowd), and now
- * and then a second bot reacts 2-6 s later. A greeting to nobody now and then gets one "hi" back (at most one in 2
- * minutes for a human); a market request no vendor has, rarely a "nobody sells that here lol".
+ * window): at most one bot answers it, by helpfulness and nearness, most of the time (0.75-0.95 by the crowd; 0.4-0.8
+ * before 2026-10-26), its shrug when nothing understands it, and now and then a second bot reacts 2-6 s later. A
+ * greeting to nobody now and then gets one "hi" back (at most one in 2 minutes for a human); a market request no vendor
+ * has, rarely a "nobody sells that here lol".
  */
 function crowdAnswer(human: Player, name: string, mes: string, lineId: number, market: MarketOutcome): void {
     if (human.slot === -1 || lineTaken.get(human) === lineId) return;
@@ -969,12 +1042,13 @@ function crowdAnswer(human: Player, name: string, mes: string, lineId: number, m
         // (phase 7: a question to nobody the rules do not answer: a model could, by the nearest bot as the capture has it)
         if (!probe && isQuestionText(mes)) {
             noteCandidate({ bot: crowd[0], to: human, heard: mes, channel: 'public', via: 'crowd', greeted: false, intent: null });
-            // (phase 7: with a model, one bot answers it now and then, at the crowd's own chance; no second bot)
-            if (modelAvailable() && chatDice.roll() < crowdChance(crowd)) {
+            // (phase 7: one bot answers it at the crowd's own chance, no second bot: a model's words; 2026-10-26, with
+            // the rules too: its shrug, "idk tbh", also when the model has none)
+            if (chatDice.roll() < crowdChance(crowd)) {
                 const bot = pickResponder(crowd, human, p => 0.15 + p.helpfulness);
                 const req: ReplyRequest = { bot, to: human, heard: mes, channel: 'public', via: 'crowd', greeted: false, intent: null };
                 const reply = composeNoted(req);
-                if (modelWrites(req, reply, true)) sayReply(req, reply, true, { to: human, kind: 'reply', count: true, then: () => noteSpoke(bot, 'social', World.currentTick, human) });
+                sayReply(req, reply, modelWrites(req, reply), { to: human, kind: 'reply', count: true, then: () => noteSpoke(bot, 'social', World.currentTick, human) });
             }
         }
         return;
@@ -1518,15 +1592,65 @@ export function composeReply(req: ReplyRequest): string | null {
     return composeNoted(req).text;
 }
 
-/** the rules' reply, and whether it is one of phase 5a's rude lines (they stay the rules' with a model: port/BotModel) */
+/**
+ * the rules' reply, whether it is one of phase 5a's rude lines (they stay the rules' with a model: port/BotModel), and
+ * whether it is only the persona's way of having no answer (2026-10-26: NO_ANSWER)
+ */
 interface RulesReply {
     text: string | null;
     rude: boolean;
+    noAnswer: boolean;
 }
 
 /** a RulesReply (its fields shorthand: test/chat-filter.test.mjs follows the strings a line is made of by their names) */
-function rulesReply(text: string | null, rude = false): RulesReply {
-    return { text, rude };
+function rulesReply(text: string | null, rude = false, noAnswer = false): RulesReply {
+    return { text, rude, noAnswer };
+}
+
+/** (2026-10-26) the ways a line comes that are said to the bot (or to nobody near it): one nothing understands still gets a reply */
+const NO_ANSWER_VIAS: ReadonlySet<ReplyRequest['via']> = new Set<ReplyRequest['via']>(['named', 'window', 'conversation', 'private', 'crowd']);
+
+/** (2026-10-26) a word that asks for no answer: an "ok", a laugh, a thanks, a yes or a no */
+const ACK_WORD = /^(o?k+|okay|okie|lo+l|lmao+|rofl|(ha)+h?|(he)+h?|xd+|ty|thx|thanks|np|cool|nice|ya+|yea+h?|yep|yup|ye|yes|no+|nope|nah|oh+|ah+|o|sure|alright|aight|fair|true|same|gg|wo+w)$/;
+
+/**
+ * (2026-10-26, the player never seems ignored) a line nothing understands that asks for no answer: an "ok", a "lol", a
+ * "ty", a smiley or a "?" alone (a "sry what?" to it would be worse than nothing). The bot's name alone ("kevin?") is a
+ * call: it wants an answer.
+ */
+function wantsNoAnswer(mes: string, bot: Player): boolean {
+    const nameless = withoutName(mes, bot);
+    const text = nameless
+        .toLowerCase()
+        .replace(/thank (u|you)/g, 'ty')
+        .replace(/[:;=]-?[()dpo3]/g, ' ')
+        .replace(/[^a-z ]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!text) return nameless === mes.replace(/\s+/g, ' ').trim();
+    return text.split(' ').every(word => ACK_WORD.test(word));
+}
+
+/** (2026-10-26) the persona's manner of having no answer: rude, helpful, friendly, or laid back (about 17, 35, 20 and 30 %) */
+function mannerOf(persona: Persona): keyof typeof NO_ANSWER {
+    if (isRude(persona)) return 'rude';
+    if (persona.helpfulness >= 0.6) return 'helpful';
+    if (persona.friendliness >= 0.4) return 'friendly';
+    return 'chill';
+}
+
+/**
+ * (2026-10-26) the bot's line when it has no answer: to its name alone "ya?", to a question said to nobody its shrug, to
+ * a question "sry what?" or "idk tbh", to anything else its nod ("ya", "oh ok")
+ */
+function noAnswerLine(req: ReplyRequest, persona: Persona): string {
+    const manner = mannerOf(persona);
+    const heard = req.via === 'crowd' ? req.heard : withoutName(req.heard, req.bot);
+    if (req.via !== 'crowd' && !heard.replace(/[^a-z0-9]/gi, '')) return pickOf(manner === 'rude' ? CALLED_RUDE : CALLED);
+    // ("what a nice day", "what a noob": no question without its "?")
+    const question = isQuestionText(heard) && (heard.includes('?') || !/^what an? /i.test(heard.trim()));
+    const pool = req.via === 'crowd' ? NO_ANSWER_CROWD : question ? NO_ANSWER : NO_ANSWER_STATEMENT;
+    return pickSmart([...pool[manner]], memoryOf(req.bot), req.bot);
 }
 
 /** composeReply's rules, told to a capture's listeners (port/BotModel: every reply the rules composed; no dice, no effect) */
@@ -1541,9 +1665,10 @@ function composeRulesReply(req: ReplyRequest): RulesReply {
     const persona = botPersona(req.bot);
     const intent = req.intent;
     if (!intent) {
-        if ((req.via === 'named' || req.via === 'private') && chatDice.roll() < CONFUSED_CHANCE * (req.via === 'private' ? 0.5 : 1)) {
-            return rulesReply(pickOf(persona.friendliness < -0.2 ? CONFUSED_RUDE : CONFUSED));
-        }
+        // (2026-10-26, the player never seems ignored: was "?" or "wat" now and then to a named line or a PM, else
+        // nothing) a line said to the bot that nothing understands: the persona's "sry what?", "idk tbh", "lol dunno"; a
+        // question to nobody its shrug; an "ok" or a "lol" nothing
+        if (NO_ANSWER_VIAS.has(req.via) && !wantsNoAnswer(req.heard, req.bot)) return rulesReply(noAnswerLine(req, persona), false, true);
         return rulesReply(null);
     }
     if (req.via === 'market') return rulesReply(intent.text);
@@ -1585,13 +1710,13 @@ function composeRulesReply(req: ReplyRequest): RulesReply {
 
 /**
  * (phase 7) whether a model words this reply (spec §3): one in its scope (port/BotModel wantsModel: the vias, the
- * rules-only intents, not a rude line) with a model there; a named line or a private message nothing understood at the
- * persona's chance (else the rules' "?" or nothing, as before); a line the rules left unanswered elsewhere was rolled
- * where it came (`rolled`). Draws a die only with a model.
+ * rules-only intents, not a rude line) with a model there. A line nothing understood: always (2026-10-26, the player
+ * never seems ignored), but an "ok" or a "lol" (wantsNoAnswer) only now and then: by name or in a private message at the
+ * persona's chance, elsewhere rolled where it came (`rolled`). Draws a die only with a model.
  */
 function modelWrites(req: ReplyRequest, reply: RulesReply, rolled = false): boolean {
     if (!wantsModel(req, reply.rude)) return false;
-    if (req.intent || rolled) return true;
+    if (req.intent || rolled || !wantsNoAnswer(req.heard, req.bot)) return true;
     if (req.via === 'named' || req.via === 'private') return chatDice.roll() < unansweredChance(botPersona(req.bot));
     return false;
 }
@@ -1607,7 +1732,7 @@ function modelCandidate(req: ModelScopeRequest, chance: number): boolean {
  */
 function sayReply(req: ReplyRequest, reply: RulesReply, model: boolean, line: TypedLine, extra = 0): void {
     supersedeModelReply(req.bot);
-    if (model) requestModelReply(req, reply.text, line, extra);
+    if (model) requestModelReply(req, reply, line, extra);
     else if (reply.text) sayTyped(req.bot, reply.text, line, extra);
 }
 
@@ -1616,10 +1741,12 @@ function sayReply(req: ReplyRequest, reply: RulesReply, model: boolean, line: Ty
  * the bot is at its keyboard until the deadline (its typingUntil: no other line of its own meanwhile, as when it types
  * one); the model's line, through the guard and the persona's style, is said at max(the answer + 1, the decision + the
  * extra ticks + its typing time); a fallback says the rules' line timed the same way (at the deadline: at once), or
- * nothing where the rules had none or, superseded, when the conversation moved on.
+ * nothing where the rules had none or, superseded, when the conversation moved on or the rules' line was only a "sry
+ * what?" (the newer line's reply answers the human). The fallback returns what it says.
  */
-function requestModelReply(req: ReplyRequest, ruleText: string | null, line: TypedLine, extra: number): void {
+function requestModelReply(req: ReplyRequest, reply: RulesReply, line: TypedLine, extra: number): void {
     const bot = req.bot;
+    const ruleText = reply.text;
     const persona = botPersona(bot);
     const memory = memoryOf(bot);
     const now = World.currentTick;
@@ -1652,12 +1779,13 @@ function requestModelReply(req: ReplyRequest, ruleText: string | null, line: Typ
         },
         fallback: reason => {
             release();
-            if (ruleText === null || (reason === 'superseded' && movedOn(req))) return;
+            if (ruleText === null || (reason === 'superseded' && (reply.noAnswer || movedOn(req)))) return null;
             const t = World.currentTick;
             // (at once only at the engine's own deadline, when its typing time is spent; native's earlier 'timeout', an
             // error, the guard: typed from the decision, as the rules' own reply would have been: the review of the merge)
             const due = reason === 'deadline' ? t : Math.max(t + 1, start + extra + typingTicks(persona, ruleText, { busy }));
             sayTypedAt(bot, ruleText, line, due);
+            return ruleText;
         }
     });
 }
@@ -1762,14 +1890,16 @@ function uniformTicks([min, max]: [number, number]): number {
  * port: a private message to a bot gets an answer, as an addressed public line does: a greeting to a greeting and what
  * it understands at the start of a private conversation, then what it understands, for 3 minutes after the last
  * message. The realism work: it notices the message (a moment), then thinks and types the answer at its own speed,
- * each part of a long one typed in turn; no "Yes Casey?" in front; a bot that is away answers nothing. Upstream dropped
- * every private message but "come here".
+ * each part of a long one typed in turn; no "Yes Casey?" in front; a bot that is away answers when it is back
+ * (2026-10-26; it answered nothing). Upstream dropped every private message but "come here".
  */
 function answerPrivate(human: Player, targetName: string, text: string): void {
     const bot = World.getPlayerByUsername(targetName);
     if (!bot || !bot.is_bot || isClientConnected(bot) || !BotManager.isActiveBot(bot.username)) return;
     const mes = text.trim();
-    if (!mes || isAway(bot)) return;
+    if (!mes) return;
+    // (2026-10-26: a bot that is away answers when it is back: tickMissed)
+    if (isAway(bot)) return noteMissed(bot, human, mes, 'private');
     // (phase 7: the thread, for a model-written reply's situation)
     notePrivateLine(bot, human, mes, false);
     const memory = memoryOf(bot);
@@ -1797,6 +1927,48 @@ function answerPrivate(human: Player, targetName: string, text: string): void {
     // (it notices the message first: a few seconds; port/BotTiming)
     sayReply(req, reply, model, { to: human, kind: 'reply', pm: human }, 1 + reactionTicks(botPersona(bot), 'notice'));
     repliesSent++;
+}
+
+// ── (2026-10-26) a line said to a bot that was away ─────────────────────────────────────────────────────────────
+
+/** a line said to a bot on a short break (its name, or a private message): its last one, answered when it is back */
+interface MissedLine {
+    human: Player;
+    text: string;
+    channel: 'public' | 'private';
+    tick: number;
+}
+const missedLines = new Map<Player, MissedLine>();
+
+/** a line by its name or a private message reached the bot on its break (port/BotHabits isAway): it waits for its return */
+function noteMissed(bot: Player, human: Player, text: string, channel: 'public' | 'private'): void {
+    missedLines.set(bot, { human, text, channel, tick: World.currentTick });
+}
+
+/**
+ * (BotChat.tickTalk) a bot back from its break answers the last line said to it meanwhile, as if just heard: a public
+ * one while the human is still in earshot, a private message while the human is online; a line that asks for no answer
+ * ("ok", "lol") is left. Now and then "sry was afk" first (not a rude bot). One that logged out, or a line older than
+ * MISSED_TICKS, is dropped.
+ */
+function tickMissed(): void {
+    if (missedLines.size === 0) return;
+    const now = World.currentTick;
+    for (const [bot, missed] of missedLines) {
+        if (BotManager.botFor(bot) === null || missed.human.slot === -1 || now - missed.tick > MISSED_TICKS) {
+            missedLines.delete(bot);
+            continue;
+        }
+        if (isAway(bot)) continue;
+        missedLines.delete(bot);
+        const human = missed.human;
+        if (missed.channel === 'public' && chebyshev(bot, human) > HEARING_DISTANCE) continue;
+        if (!wantsNoAnswer(missed.text, bot) && !isRude(botPersona(bot)) && chatDice.roll() < AFK_SORRY_CHANCE) {
+            sayTyped(bot, pickOf(AFK_SORRY), { to: human, kind: 'reply', ...(missed.channel === 'private' ? { pm: human } : {}) });
+        }
+        if (missed.channel === 'private') answerPrivate(human, bot.username, missed.text);
+        else botChatCheck(human, speakerName(human), missed.text, bot, ++lineCount);
+    }
 }
 
 /**
