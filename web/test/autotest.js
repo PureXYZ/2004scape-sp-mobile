@@ -2011,7 +2011,7 @@
         document.getElementById('world-change').click();
         await waitFor(() => shown('worlds'), 3000);
         const rows = [...document.querySelectorAll('#worlds-list .world-row')].map(r => `${r.querySelector('.character-name').textContent} | ${r.querySelector('.character-when').textContent}`);
-        check('online: Settings › World "Play on Mac (127.0.0.1:…)", Change: the worlds, This phone first, Mac "Playing now"', /^Mac \(127\.0\.0\.1:\d+\)$/.test(playOn ?? '') && rows[0]?.startsWith('This phone') && /^Mac \| Playing now/.test(rows[1] ?? ''), JSON.stringify({ playOn, rows }));
+        check(`online: Settings › World "Play on Mac (${lcServerUrl.address(config.url)})", Change: the worlds, This phone first, Mac "Playing now"`, playOn === `Mac (${lcServerUrl.address(config.url)})` && rows[0]?.startsWith('This phone') && /^Mac \| Playing now/.test(rows[1] ?? ''), JSON.stringify({ playOn, rows }));
         nextOnlineStep('offline');
         document.querySelector('#worlds-list .world-row:nth-child(1) .title-btn').click();
         await sleep(30000);
