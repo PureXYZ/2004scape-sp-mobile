@@ -63,7 +63,8 @@ Contents: [what they do](#1-what-the-bots-do) and [the design rules](#design-rul
   range). Deep-Wilderness PKers hunt human players; Edgeville PKers fight anyone at the edge, other bots included. They
   eat, drink potions, use prayers (Edgeville PKers no protection prayers, by 2004 honour), switch to a special-attack
   weapon for the KO, PJ fights, and run or teleport out when losing. Bots keep their items when they die, and a player
-  who kills one in the Wilderness gets 1 to 50,000 coins.
+  who kills one in the Wilderness gets 1 to 50,000 coins. A bot's arrows in PvP are used up, never dropped (its kit is
+  given at every restock, so they would be free rune arrows on the ground).
 - **Social life.** Social bots are regulars of one hub each. Levelling bots hang out at Falador park, Varrock square or a
   bank now and then. Friend cliques log in, train, travel and leave together, and walk the map in matching capes. About
   once an hour of play a notable event happens where the bots are: a drop party (with cheap real items you can pick
@@ -134,10 +135,11 @@ host.js  init {node:{…}, bots:{count:N}} ─► boot.js ── N = 0 ──►
   `ScriptRunner.HANDLERS` entries (§4.3). The engine's script opcodes are never edited or renumbered.
 - **A content-script overlay.** Progressive changes three scripts: `trade.rs2` (a trade request to a bot reaches the
   bot), `death.rs2` (bots keep their items; a human killer gets coins) and `engine.rs2` (declares the two commands). Only
-  those hunks are kept, as patches in `web/engine/bots/content/` against the Content commit in its `BASE`, compiled at
-  build time with the engine's own script compiler, with the two commands at **explicit opcodes `P_ISBOT = 10100` and
+  those hunks are kept, with one of the port's own (`pvp_ranged.rs2`: a bot's arrows in PvP are used up, not dropped),
+  as patches in `web/engine/bots/content/` against the Content commit in its `BASE`, compiled at build time with the
+  engine's own script compiler, with the two commands at **explicit opcodes `P_ISBOT = 10100` and
   `P_BOT_INTERACT_TRADE = 10101`** (`port/BotScriptCommands.ts`). Only the scripts that differ from the vanilla
-  `script.dat` ship (`engine/vfs/bots/scripts.bin`, 24 scripts, about 15 KB); they replace their vanilla entries after
+  `script.dat` ship (`engine/vfs/bots/scripts.bin`, 26 scripts, about 16 KB); they replace their vanilla entries after
   every `ScriptProvider.load` (also `::reload`), each after a name and CRC check.
 - **Saves** go to one store per profile (§4.5); the Characters list (`players/<profile>/*.sav`) never sees a bot.
 

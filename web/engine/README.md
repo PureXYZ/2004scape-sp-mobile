@@ -24,7 +24,7 @@ With bots (`docs/BOTS.md`) the build also writes `engine-bots.js`, which boot.js
 | `cache/main_file_cache.{dat,idx0..4}` | The cache (8.9 MB), shared with the client; the manifest points at `../cache/…`. |
 | `engine/engine-bots.js` (+ `.map` in debug) | Unless `bots: false`: `src/entry-bots.ts` = the same entry and engine + the bot library (`bots/src`, `#/engine/bot/*`) + the glue (`src/runtime/bots`). |
 | `engine/vfs-manifest-bots.json` | What boot.js preloads on top of the 38 for `engine-bots.js`: 1 entry. |
-| `engine/vfs/bots/scripts.bin` | The bots' content-script overlay (24 scripts, 14.5 KB; `bots/content/compile.mjs`). |
+| `engine/vfs/bots/scripts.bin` | The bots' content-script overlay (26 scripts, 15.2 KB; `bots/content/compile.mjs`). |
 
 `buildEngine({ out, debug = false, engineDir, contentDir, bots = {}, autotest = false })` (the directories default to the upstream
 checkouts `scripts/lib/upstream.mjs` resolves) returns
@@ -211,7 +211,9 @@ are taken in the engine's `ScriptOpcodeMap`; `scripts.bin` was not diffed agains
 as patches against the upstream content (commit in `BASE`): `engine.rs2` declares `p_isbot`/`.p_isbot` and
 `p_bot_interact_trade`/`.p_bot_interact_trade`, `trade.rs2` tells a bot that a player wants to trade with it (the
 library takes the request or declines) and clears the bot's trade when the trade window closes, `death.rs2` lets bots
-keep their items (a human who kills one in PvP gets 1–50,000 coins). `compile.mjs` clones the content into
+keep their items (a human who kills one in PvP gets 1–50,000 coins). One more is the port's own: `pvp_ranged.rs2` uses a
+bot's arrows up in PvP instead of dropping them (a PK bot's arrows come with its kit, so they lay about Edgeville for
+anyone once their 100 ticks were over). `compile.mjs` clones the content into
 `build/tmp/bots`, applies the patches (`git apply`, outside any repository) and runs the upstream engine's own server-script
 compiler in place under its `tsx --tsconfig` with the cwd in `build/tmp/bots` (`compile.mts`: the two commands at the
 explicit opcodes of `bots/src/port/BotScriptCommands.ts`, 10100/10101, asserted free – never by editing
@@ -233,7 +235,7 @@ hook body is guarded – an exception from bot code must not reach `World.cycle`
 | Hook | What |
 |---|---|
 | `ScriptRunner.HANDLERS[10100/10101]` | `p_isbot` (1 if the active player – with int operand 1 the secondary one – is a bot) and `p_bot_interact_trade(uid, stage)`: stage 0 = a human asks this bot to trade → `BotTrade.onTradeRequest(human, bot)` (a trading bot that is free takes it, any other declines), stage −1 = the trade window closed → the bot's trade target is cleared (upstream wrote the target only while it was −1, so its reset did nothing); asserted free first |
-| `ScriptProvider.load` | after every load (`World.start`, `::reload`): the overlay replaces its 24 scripts, only if each id still has its name and its vanilla bytes (CRC) – else the vanilla scripts stay and the bots are switched off |
+| `ScriptProvider.load` | after every load (`World.start`, `::reload`): the overlay replaces its 26 scripts, only if each id still has its name and its vanilla bytes (CRC) – else the vanilla scripts stay and the bots are switched off |
 | `World.start` | after `World.start(false,false)`, before the first tick: the bot store is read, one `GET /save-index`, `BotManager.start` (upstream started them inside the `startCycle` branch, which the worker never takes) |
 | `World.processPlayers` | then `BotManager.tick()` (keep-alive, staggered spawning, the AI) – the bots' share of the tick is measured |
 | `World.processClientsIn` | then `BotManager.clearAfkEvents()`: the engine's own random-event roll is cleared for every bot (the flag is set in there); the bot library arms bots near a human itself (`port/BotRandomEvents`), and those keep the flag |

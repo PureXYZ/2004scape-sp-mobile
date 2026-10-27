@@ -4,7 +4,7 @@
 //   tsc -p web/engine/bots, worker safety, names and the pool, inventory vs 254, pathing, the walking graph, content
 //   names, a short world simulation (10 bots, 600 ticks), determinism (two seeded runs end the same), the faster
 //   internals against what they replace (exact.test: every route and zone search of a seeded world, a sweep), a crowd of 100
-//   bots around the player, chat, what bots say unprompted (lines.test), PKers, PK tactics (pkfight.test), trade, the economy (economy.test: street
+//   bots around the player, chat, what bots say unprompted (lines.test), PKers, PK tactics (pkfight.test), a bot's PvP arrows (ammo.test), trade, the economy (economy.test: street
 //   prices, rares, stock by trade bank, adverts; realism phase 4), ageing, personas and human timing,
 //   habits (breaks, leaving, timing in a 40-bot world), social life (regulars, lures, friend cliques in a 60-bot world),
 //   the humanlike report's measures (synthetic records), own tiles and hang-outs (tiles.test, hangout.test: realism
@@ -44,6 +44,7 @@ const STEPS = [
     ['chat: market, conversations, come here', [test('chat.test.mjs')]],
     ['PKers and gates (free world gear, target claims, NPC claims, gate predicate)', [test('pk.test.mjs')]],
     ['PK tactics (kits, the KO switch on the fast tick, potions, eating, getting out, Edgeville fights)', ['--expose-gc', test('pkfight.test.mjs')]],
+    ['a bot\'s arrows in PvP are used up, a human\'s drop (content patch 0004)', [test('ammo.test.mjs')]],
     ['trade', [test('trade.test.mjs')]],
     ['economy (street prices, rares singly from real levels, stock by trade bank, adverts and nicknames, a vendor\'s look; realism phase 4)', ['--expose-gc', test('economy.test.mjs')]],
     ['ageing (same name same age, tier shares, levels, free worlds, start tiles, InitTask after it)', [test('age.test.mjs')]],

@@ -1,0 +1,30 @@
+bots: a bot's arrows in PvP are used up, never dropped (pvp_ranged.rs2)
+
+A PK bot's arrows come with its kit (120-250 rune arrows at every restock: port/BotPkFight) and it
+never picks one up, so 274's drop under the target (4 in 5 shots, the shooter's for 100 ticks, then
+anyone's) left free rune arrows about Edgeville for the human to take. A bot's arrow now goes the
+way of the fifth one (inv_del), like the rest of its kit at a death (0003). In the Duel Arena it
+still goes to the duel's arrows; a human's arrows drop as before.
+
+diff --git a/scripts/skill_combat/scripts/pvp/pvp_ranged.rs2 b/scripts/skill_combat/scripts/pvp/pvp_ranged.rs2
+index 75ecc65..1c4a2c5 100644
+--- a/scripts/skill_combat/scripts/pvp/pvp_ranged.rs2
++++ b/scripts/skill_combat/scripts/pvp/pvp_ranged.rs2
+@@ -88,7 +88,7 @@ if (random(^dropammo_chance) ! 0) {
+     if (~in_duel_arena(coord) = true) {
+         inv_moveitem(worn, duelarrows, $ammo, 1);
+         return;
+-    } else if (map_blocked(.coord) = false) {
++    } else if (p_isbot = 0 & map_blocked(.coord) = false) {
+         inv_dropitem_delayed(worn, .coord, $ammo, 1, ^lootdrop_duration, max($delay, 0));
+         return;
+     }
+@@ -104,7 +104,7 @@ if (random(^dropammo_chance) ! 0) {
+     if (~in_duel_arena(coord) = true) {
+         inv_moveitem(worn, duelarrows, $ammo, 1);
+         return;
+-    } else if (map_blocked($coord) = false) {
++    } else if (p_isbot = 0 & map_blocked($coord) = false) {
+         inv_dropitem_delayed(worn, $coord, $ammo, 1, ^lootdrop_duration, max($delay, 0));
+         return;
+     }

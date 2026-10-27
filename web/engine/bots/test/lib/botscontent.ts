@@ -1,7 +1,8 @@
 // The bots' content overlay and script commands, put in place as the runtime does (runtime/bots/index.ts): the scripts
-// compiled from bots/content (compile.mjs: a bot keeps its items when it dies, a bot answers a trade request) replace
-// their vanilla entries through the runtime's own overlay.ts and the vfs it reads, and the two script commands
-// (runtime/bots/scripts.ts) are declared. For the tests that run the world as the app does: trade.test, humanlike.
+// compiled from bots/content (compile.mjs: a bot keeps its items when it dies, a bot answers a trade request, a bot's
+// arrows in PvP are used up) replace their vanilla entries through the runtime's own overlay.ts and the vfs it reads, and
+// the two script commands (runtime/bots/scripts.ts) are declared. For the tests that run the world as the app does:
+// trade.test, humanlike and others.
 import { vfs } from '../../../src/shims/vfs.js';
 import { applyOverlay, OVERLAY_PATH, overlayStats } from '../../../src/runtime/bots/overlay.js';
 import { BOT_COMMANDS, installScriptCommands } from '../../../src/runtime/bots/scripts.js';

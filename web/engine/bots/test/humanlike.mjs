@@ -9,7 +9,7 @@
 //     friends here, and with it BotChat.tickOpeners only draws dice. So the same seed gives the research observer's
 //     world: the research.)
 //   - the bots' content overlay, as the app puts it in place (test/lib/botscontent.ts: a bot keeps its items when it dies,
-//     a bot answers a trade request; --overlay=false runs the vanilla scripts, as the research observer did);
+//     a bot answers a trade request, its PvP arrows are used up; --overlay=false runs the vanilla scripts, as the research observer did);
 //   - one human: on a tour of the 2004 hubs (default: 15 stops, 600 ticks = 6 min each, the research observer's), or
 //     standing at one (--tour=still --at=HUB), with levels in the 30s so monsters mostly leave it alone.
 // It records what a human sees and hears (lib/humanlike-metrics.mjs has the measures, their bands and the sources):

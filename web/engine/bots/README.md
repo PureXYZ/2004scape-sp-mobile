@@ -29,7 +29,7 @@ The vendored code keeps that licence: [LICENSE](LICENSE) here, and the full text
 | `src/tasks/` | The tasks: upstream's (one per activity) and the port's new ones (newbie, party, duel, outing, errand, minigames, …) |
 | `src/port/` | New modules: what the mod patched into the engine, and everything the port added (below) |
 | `data/` | Bundled as JSON imports: upstream's `chat_responses.json` and `bot_phrases.json` (the player names cut out of its lines marked `{name}`), and the port's `names.json`, `walk_graph.json` (made by `test/walk-graph-build.mjs`), `line_tags.json` (where each idle line fits, made by `test/line-tags-build.mjs`), the `lines2004*.json` files (lines in a late-2004 voice by moment), `threads.json`, `practices.json`, `social.json`, `party.json`, `duel.json` and `street_prices.json` (December 2004 street prices, each with its source) |
-| `content/` | The three script patches for the bots, their `BASE` commit, and the overlay compiler |
+| `content/` | The four script patches for the bots (Progressive's three, and the port's: a bot's PvP arrows are used up), their `BASE` commit, and the overlay compiler |
 | `test/` | Unit tests, the content-name check, the world simulator, the humanlike report ([Tests](#tests)); `model-data/` makes the chat model |
 | `tsconfig.json` | `tsc -p web/engine/bots`: the library against the upstream engine's sources |
 | `UPSTREAM` | Where the vendored files came from |
