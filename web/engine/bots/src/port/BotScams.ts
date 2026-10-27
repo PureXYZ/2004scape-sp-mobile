@@ -287,7 +287,12 @@ function crowd(stint: Stint): void {
     r.warnings++;
     const persona = botPersona(who);
     scheduleInTicks(reactionTicks(persona, 'notice') + typingTicks(persona, text), () => {
-        if (!canSpeak(who)) return;
+        // (busy by then, a fight or a trade: never said, so not counted, and another may warn: the record said 3 warnings
+        // where the crowd said 2, scams.test at some seeds)
+        if (!canSpeak(who)) {
+            r.warnings--;
+            return;
+        }
         sayPieceText(who, text, 'setpiece', { to: c });
         if (stint.stopped || Math.random() >= SCAMS.answerChance) return;
         const answer = freshPieceText(c, 'scam', 'answer');
@@ -475,6 +480,9 @@ scheduleInTicks(CHECK_TICKS, ambientCheck);
 
 // ── the spree (a director's set piece) ───────────────────────────────────────────────────────────────────────────
 
+/** the ticks a spree's second caller is waited for past its moment (busy typing a reply, then free) */
+const SECOND_WAIT = 20;
+
 export class ScamRun implements SetPieceRun {
     readonly id: number;
     readonly kind = 'scam_spree' as const;
@@ -511,8 +519,10 @@ export class ScamRun implements SetPieceRun {
         if (this.phase === 'done') return;
         if (this.second && now >= this.secondAt) {
             const b = this.second;
-            this.second = null;
-            if (mayCall(b)) {
+            // (2026-10-27: busy a moment, typing a reply to a bot: it begins once free, within SECOND_WAIT; a single look
+            // lost the second caller at seed 16 of scams.test)
+            if (mayCall(b) || now >= this.secondAt + SECOND_WAIT) this.second = null;
+            if (this.second === null && mayCall(b)) {
                 const stint = begin(b, this.venue, 'spree', Math.max(200, this.endsBy - now));
                 if (stint) {
                     this.stints.push(stint);

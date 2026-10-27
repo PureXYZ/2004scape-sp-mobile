@@ -4323,6 +4323,18 @@ export function interactObjOp(player: Player, obj: Obj, op: 1 | 2 | 3 | 4 | 5): 
     }
 }
 
+/**
+ * port (2026-10-27): can a player walk onto the item's tile from where it stands (a route ends on it)? An arrow shot
+ * over the fence of Lumbridge's chicken pen lands inside, and a ranger stood beside each one clicking ("I can't reach
+ * that!") for about 40 ticks. With no search left this tick: yes (the click tries, as before)
+ */
+export function objInReach(player: Player, obj: Obj): boolean {
+    if (player.level !== obj.level) return false;
+    if (player.x === obj.x && player.z === obj.z) return true;
+    if (pathBudgetLeft(player) === 0) return true;
+    return botFindPath(player.level, player.x, player.z, obj.x, obj.z).length > 0;
+}
+
 //Ground items
 //Ground items
 function _findObj(player: Player, cx: number, cz: number, level: number, radius: number, predicate: (obj: Obj) => boolean): Obj | null {

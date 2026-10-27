@@ -23,11 +23,14 @@
 //              fakedp pool) over about 3 minutes, at most 2 warnings, then done; no plan without a PKer at the edge
 //   errors     none
 //
-//   node --expose-gc web/engine/bots/test/scams.test.mjs [--seed=14]
+//   node --expose-gc web/engine/bots/test/scams.test.mjs [--seed=7]
 //
 // (2026-10-27, with the bot leak audit's merge: the default seed 7 -> 14. The scenes take bots of the living world and
 // its dice; the rangers' new pickups move the draws. On main da84f74 seeds 1-5 passed only at 2 and 5, and 7; with the
-// change 7 fails "the crowd" (a warning recorded, not seen: as main at seed 3) and of 8-17 only 14 and 15 pass)
+// change 7 fails "the crowd" (a warning recorded, not seen: as main at seed 3) and of 8-17 only 14 and 15 pass. Then the
+// scenes made to hold at every seed: no player-mod bot, random events or breaks of the world's; callers the game takes,
+// held on their tiles with their friends away; a placed bot's bank window closed; and in BotScams a warning counted
+// when said, a spree's second caller waited for while it types a reply. Seeds 1-20 pass: the default back to 7)
 import fs from 'fs';
 import path from 'path';
 import { BOTS_DIR, CONTENT_DIR, ENGINE_DIR, importTs } from './lib/paths.mjs';
@@ -41,7 +44,7 @@ const args = Object.fromEntries(
         return m ? [m[1], m[2] ?? 'true'] : [a, 'true'];
     })
 );
-const SEED = Number(args.seed ?? 14);
+const SEED = Number(args.seed ?? 7);
 function mulberry(seed) {
     let s = seed >>> 0 || 1;
     return () => {
@@ -91,6 +94,13 @@ World.processClientsIn = function () {
 const tick = (n = 1) => {
     for (let i = 0; i < n; i++) sim.tick();
 };
+// (2026-10-27, the flaky seeds: the scenes' callers held to what each check stages. The world's own player-mod bot,
+// where the dice had it at Varrock West, ended the first stint 24 ticks in (seeds 10, 13, 17: the mod scene stages its
+// own); a random event near the human left a caller armed or just after one (seed 12); a break left one away; the
+// checks that want those set them by hand)
+lib.ModBot.setModNamesForTest([]);
+lib.setEventRatesForTest({ odds: 0 });
+lib.Habits.setHabitRatesForTest({ breaks: 0, lingers: 0, watch: 0, abrupt: 0 });
 tick(200);
 // the ambient stints stay off but where a check turns them on; the caller's logout after its stint (the variety work,
 // round 1, track F: fixes.test checks it) off: the checks here stage stint after stint with the same few rude bots
@@ -100,7 +110,10 @@ const lines = [];
 lib.sayListeners.push((p, text, kind, to) => lines.push({ t: World.currentTick, name: p.username, text, kind, to: to?.username ?? null, x: p.x, z: p.z }));
 const pool = (event, kind) => lib.NEW_LINES.filter(l => l.tag.event === event && (l.tag.kinds ?? []).includes(kind)).map(l => l.text.toLowerCase());
 /** a line said is one of the pool's as styled (abbreviations, a laugh, a typo: most of its words the same) */
-const wordsOf = t => t.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+// (a laugh as the style layer types it, "lolol", "loool", "hahaha", the same word: "doubling? lol" said as "doubling? lolol"
+// was half its words, seed 1)
+const laugh = w => (/^l(o+l+)+$/.test(w) ? 'lol' : /^(ha){2,}h?$/.test(w) ? 'haha' : w);
+const wordsOf = t => t.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean).map(laugh);
 const inPool = (text, event, kind) => pool(event, kind).some(t => {
     const said = new Set(wordsOf(text));
     const want = wordsOf(t);
@@ -110,6 +123,8 @@ const ai = p => sim.botPlayer(p);
 const place = (p, x, z) => {
     p.clearWaypoints();
     p.clearInteraction();
+    // (a bank or shop its task had open: a caller there may not call, seed 3's second spree caller)
+    p.closeModal();
     p.teleJump(x, z, 0);
 };
 const levelling = () => sim.bots().filter(p => ['skiller', 'fighter', 'balanced', 'random'].includes(p.botPlanner) && !lib.isNewbie(p) && !ai(p)?.hasSubTask());
@@ -117,6 +132,48 @@ const rude = () => levelling().filter(p => lib.botPersona(p).friendliness < 0 &&
 // (the cliques stay, but do nothing together: a friend's travel, BotCliques' pass every 5 ticks, took a picked caller off
 // two ticks before its stint in the merged world)
 lib.setCliqueBehaviourForTest(false);
+/** the bot stands where it is, its task the test's (the planner hands it back) until `release`: a spree's second caller
+ * waits 1-2 minutes for its turn, and its own task walked it off, into a fight or a bank window meanwhile */
+const STAND = { name: 'Stand', reset() {}, interrupt() {}, interrupted: false, shouldRun: () => true, isComplete: () => false, tick() {}, activityStep: () => null };
+function hold(p) {
+    const bp = ai(p);
+    const was = bp.currentTask;
+    const task = Object.create(STAND);
+    bp.planner.pickTask = () => task;
+    bp.currentTask = task;
+    bp.planEnds = World.currentTick + 100000;
+    return () => {
+        delete bp.planner.pickTask;
+        if (bp.currentTask === task) bp.currentTask = was;
+    };
+}
+/** `n` callers the game takes: rude, no two of a clique (a friend near keeps a caller quiet); the levelling bots first,
+ * then the rude social regulars (seed 1's world had one rude levelling bot of no clique, seed 12's none) */
+function pickCallers(n) {
+    const pool = [...rude(), ...sim.bots().filter(p => p.botPlanner === 'extras_social' && lib.botPersona(p).friendliness < 0 && !ai(p)?.hasSubTask())];
+    pool.sort((a, b) => Number(!!lib.cliqueOf(a.username)) - Number(!!lib.cliqueOf(b.username)));
+    const out = [];
+    for (const p of pool) {
+        if (out.length >= n) break;
+        if (!out.some(o => (lib.cliqueOf(o.username) ?? []).includes(p.username))) out.push(p);
+    }
+    return out;
+}
+/** the callers' clique-mates within 20 tiles sent off to Varrock square and held there (a friend within 15 tiles keeps
+ * a caller quiet: seed 1's second caller's walked back by the bank); the release of each */
+function sendMatesOff(callers) {
+    const held = [];
+    for (const c of callers) {
+        for (const name of lib.cliqueOf(c.username) ?? []) {
+            const m = sim.bots().find(b => b.username === name);
+            if (m && !callers.includes(m) && cheb(m, c) <= 20) {
+                place(m, 3212, 3440);
+                held.push(hold(m));
+            }
+        }
+    }
+    return held;
+}
 
 // ---- draws ----
 {
@@ -187,8 +244,10 @@ let caller = rude()[0];
     };
     const texts = new Set();
     for (const t of calls.map(l => base(l.text))) if (![...texts].some(x => edits(x, t) <= 2)) texts.add(t);
+    // (a call that met another line in its tick shows a tick later, botSay's one line a tick: the gap after it a tick
+    // short of 25, 24 at seed 17)
     const gaps = calls.slice(1).map((l, i) => l.t - calls[i].t);
-    check('a stint: calls every 15-45 s (kind scam), 8-24 in 10 minutes, from 2-3 lines (a typo aside), standing where it is', rec && calls.length >= 8 && calls.length <= 24 && texts.size >= 1 && texts.size <= 4 && gaps.every(g => g >= 25) && moved <= 2, { calls: calls.length, texts: [...texts], gaps, moved });
+    check('a stint: calls every 15-45 s (kind scam), 8-24 in 10 minutes, from 2-3 lines (a typo aside), standing where it is', rec && calls.length >= 8 && calls.length <= 24 && texts.size >= 1 && texts.size <= 4 && gaps.every(g => g >= 23) && moved <= 2, { calls: calls.length, texts: [...texts], gaps, moved });
     const warnings = lines.slice(from).filter(l => l.kind === 'setpiece' && l.to === caller.username);
     const answers = calls.length ? lines.slice(from).filter(l => l.name === caller.username && l.kind === 'scam' && l.to !== null && l.to !== human.username) : [];
     check('the crowd: at most 4 warnings (kind setpiece, the scam warn pool), the caller\'s answers no more than those', warnings.length <= 4 && answers.length <= warnings.length && warnings.every(l => inPool(l.text, 'scam', 'warn')) && rec.warnings === warnings.length, { warnings: warnings.map(l => l.text), answers: answers.map(l => l.text), rec: rec?.warnings });
@@ -221,7 +280,8 @@ let caller = rude()[0];
 // ---- moved off (a random event's fail teleport, a death), random events, an armed bot ----
 {
     scene(SEED, 'moved off'); // (its own dice: test/lib/dice.mjs)
-    const c = rude().find(p => p !== caller && !ai(p)?.hasSubTask()) ?? caller;
+    // (one a random event may arm now: the check is that the stint takes that away)
+    const c = rude().find(p => p !== caller && !ai(p)?.hasSubTask() && lib.randomEventEligible(p)) ?? caller;
     place(c, 3186, 3431);
     tick(2);
     const before = lib.randomEventEligible(c);
@@ -294,11 +354,12 @@ let caller = rude()[0];
 {
     scene(SEED, 'the spree'); // (its own dice: test/lib/dice.mjs)
     Scams.resetScamsForTest();
-    // (two with no clique: a friend near keeps a caller quiet)
-    const callers = rude().filter(p => !lib.cliqueOf(p.username)).slice(0, 2);
-    const crowd = levelling().filter(p => !callers.includes(p)).slice(0, 6);
+    // (two the game takes, held where they stand: pickCallers, hold)
+    const callers = pickCallers(2);
+    const crowd = levelling().filter(p => !callers.includes(p) && !callers.some(c => (lib.cliqueOf(c.username) ?? []).includes(p.username))).slice(0, 6);
     callers.forEach((p, i) => place(p, 3183 + i * 3, 3431));
     crowd.forEach((p, i) => place(p, 3180 + (i % 3) * 3, 3436 + Math.floor(i / 3) * 3));
+    const released = [...sendMatesOff(callers), ...callers.map(hold)];
     tick(2);
     const ctx = lib.standInContext(true);
     const def = lib.pieceDef('scam_spree');
@@ -312,8 +373,10 @@ let caller = rude()[0];
         if (t2 < 0 && Scams.activeStints().length >= 2) t2 = World.currentTick - t0;
     }
     const stints = Scams.scamLog.filter(r => r.kind === 'spree');
+    // (the second 60-120 ticks on, and up to 20 more when it was typing a reply then: BotScams' SECOND_WAIT)
     check('the spree: planned at the trade bank with a crowd, a rumour line from its pool', !!plan && plan.venue.key === 'varrock_west' && rumour !== null && inPool(rumour, 'scam', 'rumour-varrock_west'), { plan: plan?.venue.key, rumour });
-    check('the spree: two callers, the second 1-2 minutes after the first, done at its end', stints.length === 2 && t2 >= 60 && t2 <= 125 && run?.phase === 'done' && stints.every(r => r.end >= 0), { stints: stints.map(r => `${r.caller} ${r.start}-${r.end} ${r.calls}`), t2, callers: plan?.data?.callers?.map(p => `${p.username} sub${ai(p)?.hasSubTask()} role${JSON.stringify(SetPieces.eventRoleOf(p)?.role)} may${Scams.mayCall(p)}`) });
+    check('the spree: two callers, the second 1-2 minutes after the first, done at its end', stints.length === 2 && t2 >= 60 && t2 <= 145 && run?.phase === 'done' && stints.every(r => r.end >= 0), { stints: stints.map(r => `${r.caller} ${r.start}-${r.end} ${r.calls}`), t2, callers: plan?.data?.callers?.map(p => `${p.username} sub${ai(p)?.hasSubTask()} role${JSON.stringify(SetPieces.eventRoleOf(p)?.role)} may${Scams.mayCall(p)}`), picked: callers.map(p => p.username) });
+    released.forEach(f => f());
     SetPieces.resetSetPiecesForTest();
 }
 
@@ -397,6 +460,8 @@ let caller = rude()[0];
     if (pk) place(pk, 3093, 3535);
     const callerFdp = levelling().filter(p => lib.botPersona(p).friendliness < 0.3)[0];
     place(callerFdp, 3094, 3492);
+    // (held there: its own task's bank window or fight left no caller to plan with, seed 3)
+    const releaseFdp = hold(callerFdp);
     levelling().filter(p => p !== callerFdp).slice(0, 4).forEach((p, i) => place(p, 3090 + i * 2, 3489));
     tick(2);
     const ctx = lib.standInContext(true);
@@ -425,6 +490,7 @@ let caller = rude()[0];
     check('fake DP: with one there, a caller: 3-4 calls (kind setpiece, its pool) over about 3 minutes, then done', !!run && calls.length >= 3 && calls.length <= 4 && calls.every(l => inPool(l.text, 'fakedp', 'call')) && run.phase === 'done' && calls[calls.length - 1].t - calls[0].t <= 300, { calls: calls.map(l => `t${l.t - t0} ${l.text}`), phase: run?.phase });
     check('fake DP: at most 2 warnings from the crowd ("its a lure lol": the fakedp warn pool)', warns.length <= 2 && warns.every(l => inPool(l.text, 'fakedp', 'warn')), warns.map(l => l.text));
     for (const [p, x, z] of away) if (p !== pk) place(p, x, z);
+    releaseFdp();
     SetPieces.resetSetPiecesForTest();
 }
 

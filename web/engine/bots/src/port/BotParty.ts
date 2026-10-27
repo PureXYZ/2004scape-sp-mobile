@@ -257,8 +257,10 @@ export function planKit(bot: Player, kind: PartyKind, random: () => number = Mat
     const leverCoins = kind === 'party_room' ? D.lever + (knights ? D.knights : 0) : 0;
     if (coinsHave < D.hostCoins + leverCoins) return null;
     const budget = logUniform(D.budget[kind], random);
-    // (the pack holds the piles: 28 slots, its tools kept)
-    const maxDrops = kind === 'drop_party' ? 28 - toolsCarried(bot) : 26;
+    // (the pack holds the piles: 28 slots, its tools kept. The Party Room's kit goes through the pack to the chest too: a
+    // host with 7 tools kept and a kit of 24 slots took 21 of it out and no lever coins, and the party was off at the
+    // booth, 'no kit': test/party.test at seed 3)
+    const maxDrops = Math.min(kind === 'drop_party' ? 28 : 26, 28 - toolsCarried(bot));
     const target = Math.min(maxDrops - 1, randIn(D.drops[kind], random));
     // (the coin pile's share kept back: now and then a joke pile instead, "lol 1 coin drop")
     const joke = opts.joke ?? random() < D.jokeCoinChance;
@@ -293,7 +295,9 @@ export function planKit(bot: Player, kind: PartyKind, random: () => number = Mat
         for (const id of shuffled(byClass.better, random)) {
             const name = ObjType.get(id).debugname ?? '';
             const runes = kitClasses().betterRunes.get(name);
-            const count = runes !== undefined ? Math.min(runes, left.get(id) ?? 0) : 1;
+            // (in the Party Room at most ROOM_STACK, as the stackables below: its 50 natures went into the chest whole,
+            // test/party.test's kits at seeds 2 and 3)
+            const count = runes !== undefined ? Math.min(runes, left.get(id) ?? 0, room ? ROOM_STACK : Infinity) : 1;
             if (count <= 0 || itemValue(id) * count > D.betterMax) continue;
             take(id, id, count, 'better', 1);
             better = true;

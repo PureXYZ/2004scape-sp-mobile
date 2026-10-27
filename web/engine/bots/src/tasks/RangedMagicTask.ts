@@ -101,7 +101,7 @@ import {
 import { canTravel, CollisionType } from '#/engine/routefinder/index.js';
 import { elementalsWanted } from '#/engine/bot/port/BotTeleport.js';
 import type { SkillStep, WindSpellTier } from '#/engine/bot/tasks/BotTaskBase.js';
-import { findNpcFiltered, npcMatchesName, npcWithin, interactHeldOp, interactObjOp, findLootObj, _wornContains, _equipLoot, climbDownNear, tryOpenGateNear } from '#/engine/bot/BotAction.js';
+import { findNpcFiltered, npcMatchesName, npcWithin, interactHeldOp, interactObjOp, findLootObj, objInReach, _wornContains, _equipLoot, climbDownNear, tryOpenGateNear } from '#/engine/bot/BotAction.js';
 import { bankStop } from '#/engine/bot/port/BotHabits.js';
 import NpcType from '#/cache/config/NpcType.js';
 import ObjType from '#/cache/config/ObjType.js';
@@ -900,6 +900,11 @@ export class RangedMagicTask extends BotTask {
                 obj = null;
             }
             if (obj && obj !== this.lootObj) {
+                // (2026-10-27: one no route reaches, shot over a fence, is left at once: BotAction.objInReach)
+                if (!objInReach(player, obj)) {
+                    this.skipLoot.set(obj, this.taskTicks + 300);
+                    return;
+                }
                 this.lootObj = obj;
                 this.lootTicks = 0;
             }

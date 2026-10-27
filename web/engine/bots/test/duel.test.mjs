@@ -404,6 +404,13 @@ T.setEventRatesForTest?.({ odds: 0 });
     check('human: the bot they beat is never staked again (no rematch)', beat?.beaten.includes(other.username) && Arena.refuseHuman(other, human, 100000) === 'beaten', beat);
     // they challenge it again: a word, no screens
     tick(40);
+    // (on its tile first, standing still a while: back from the fight it was still walking to it, 18 tiles on, and the
+    // human's challenge from beside it never reached it (no client route here: the human stood where it had been): seed 1)
+    still = 0;
+    waitUntil(() => {
+        still = tE.state === 'stand' && !other.hasWaypoints() && Duel.inChallengeArea(other.x, other.z, 0) ? still + 1 : 0;
+        return still >= 10;
+    }, 400);
     const s3 = says.length;
     beside(other);
     T.opPlayer(human, other, 1);

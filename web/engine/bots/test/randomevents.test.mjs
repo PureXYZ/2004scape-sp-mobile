@@ -89,6 +89,10 @@ const wornHas = (b, name) => {
     return false;
 };
 
+// (the round's errands off, as party.test and groups.test have them: a hosted errand is a sub-task, over the idle task a
+// scene or the flow's crowd gives a bot, and it walks the bot off: in the flow at seed 1 a bot on a quest look-alike was
+// armed at three rolls running and disarmed 'far' each time, 30 ticks on)
+await lib.setD2Offers(false);
 if (FLOW) await flow();
 
 const sim = await lib.Sim.create({ bots: 14, members: true, debug: false, ageNewBots: true });
@@ -182,7 +186,9 @@ const roomFor = (b, n) => {
     // winner off to Varrock with its box unanswered, and the box held the cap past the held winner's window)
     lib.setDirectorForTest({ first: 1e9 });
     lib.resetDirectorForTest();
-    const pool = bots.filter(b => BotManager.botFor(b)).slice(0, 4);
+    // (no PKer: the rolls never arm one (BotRandomEvents' 'pker'), and at seed 1 the cap's second winner was a PKer, nothing
+    // held back for it. By its planner only: eligible() now leaves out a bot busy a moment, too few for the four at seed 2)
+    const pool = bots.filter(b => BotManager.botFor(b) && b.botPlanner !== 'extras_pker' && b.botPlanner !== 'extras_edgeville_pker').slice(0, 4);
     // (the other bots far off: each roll is between these four)
     for (const b of bots) {
         idle(b);
@@ -397,13 +403,16 @@ lib.setEventRatesForTest({ ignore: 0 });
     const b = pick();
     const home = [b.x, b.z];
     const items = () => b.getInventory(InvType.INV).items.reduce((n, it) => n + (it ? it.count : 0), 0);
+    // (room for the reward: 274's maze adds it to the pack, and one full of the scenes' before had none for it, seed 3)
+    const free0 = b.getInventory(InvType.INV).freeSlotCount;
+    b.getInventory(InvType.INV).removeAll();
     const before = items();
     const marksBefore = marks().length;
     force(b, 'macro_event_general_spawn', [8]);
     const inMaze = run(10, () => lib.inMazeZone(b.x, b.z, b.level));
     const back = run(500, () => !lib.inMazeZone(b.x, b.z, b.level));
     const m = marks().slice(marksBefore).filter(x => x.name === b.username.toLowerCase());
-    check('the maze: finished unseen at its shrine after 90-240 s, its reward, the bot home; the moves marked real', inMaze > 0 && back >= 150 && back <= 460 && cheb(b, { x: home[0], z: home[1] }) <= 2 && items() > before && m.length >= 3, { back, at: [b.x, b.z], items: [before, items()], marks: m.length });
+    check('the maze: finished unseen at its shrine after 90-240 s, its reward, the bot home; the moves marked real', inMaze > 0 && back >= 150 && back <= 460 && cheb(b, { x: home[0], z: home[1] }) <= 2 && items() > before && m.length >= 3, { back, at: [b.x, b.z], items: [before, items()], marks: m.length, free0 });
 }
 {
     scene(SEED, 'answers 8'); // (its own dice: test/lib/dice.mjs)

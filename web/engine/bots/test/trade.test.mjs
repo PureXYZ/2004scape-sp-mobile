@@ -411,8 +411,16 @@ if (MEMBERS) {
 
     // ---- 2. a vendor, and a slow human -------------------------------------------------------------------------
     // (a vendor with 3 or more to sell: since phase 4 a rare is one item, its own check below)
+    const sells = p => p.botPlanner === 'extras_vendor' && taskOf(p)?.state === 'idle' && freeAdjacent(p);
     let vendor = null;
-    waitUntil(() => (vendor = sim.bots().find(p => p.botPlanner === 'extras_vendor' && taskOf(p)?.state === 'idle' && taskOf(p).itemCount >= 3 && !taskOf(p).stock?.rare && freeAdjacent(p))), 600);
+    waitUntil(() => (vendor = sim.bots().find(p => sells(p) && taskOf(p).itemCount >= 3 && !taskOf(p).stock?.rare)), 600);
+    // (none: an idle vendor stocks again, its own picks, till it has 3 or more. An item worth over 200k is stocked one at
+    // a time too (BotPrices.stockCount): the one vendor of the 16 bots at seed 1 sold a dragon sq shield all along)
+    if (!vendor) {
+        const v = sim.bots().find(sells);
+        for (let i = 0; v && i < 50 && (taskOf(v).itemCount < 3 || taskOf(v).stock?.rare); i++) taskOf(v).handleInit(v);
+        if (v && waitUntil(() => sells(v) && taskOf(v).itemCount >= 3 && !taskOf(v).stock?.rare, 100)) vendor = v;
+    }
     if (check('an idle vendor', vendor)) {
         const task = taskOf(vendor);
         // (its price from the item's value: port/BotPrices)

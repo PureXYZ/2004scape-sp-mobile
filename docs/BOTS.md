@@ -539,6 +539,13 @@ the engine works in a scratch copy under `build/tmp/bots/`, with the library lin
 what it checks; `web/engine/bots/README.md` has the full table. `LC_BOTS_SRC=<dir>/src` runs any test against another
 copy of the library (with its `data` beside it).
 
+The staged tests (fixes, scams, parties, groups, the Duel Arena, …) take bots of a seeded world, so a check that held
+only on some dice failed when anything else moved them (a new draw in a planner, a bot that walked a tick longer).
+Each scene draws from its own dice (`test/lib/dice.mjs`), stages what its checks ask (a fighter ready to fight with
+its bank empty, a bot held on its tile, the world's own player-mod bot and random events off where a check is not
+about them), and should pass at every seed: `node web/engine/bots/test/seeds.mjs fixes.test.mjs --seeds=1-20` runs a
+test at many seeds, one at a time, and lists which checks failed at which.
+
 Seeded worlds repeat exactly in V8 (Node). In JavaScriptCore they do only with `Array.prototype.sort` replaced by a
 deterministic one: some of upstream's tasks shuffle with `sort(() => Math.random() - 0.5)`, and JavaScriptCore's native
 sort calls such a comparator a varying number of times once its optimizing JIT tiers run, so the random draws shift

@@ -99,10 +99,14 @@ const place = (p, x, z) => {
 const levelling = () => sim.bots().filter(p => ['skiller', 'fighter', 'balanced', 'random'].includes(p.botPlanner) && !lib.isNewbie(p) && !ai(p)?.hasSubTask() && !SetPieces.eventRoleOf(p) && !p.delayed);
 const name = id => ObjType.get(id)?.debugname ?? String(id);
 const bankId = InvType.getId('bank');
-/** what a bot owns in its bank and pack, by item (a note counted as its item) */
+/**
+ * what a bot owns in its bank, pack and hands, by item (a note counted as its item). (Worn too: between the plan and
+ * the party's end a Party Room host's own task put its bronze pickaxe in hand for its staff of air, and its bank and
+ * pack less the kit were a pickaxe short and a staff over: seed 1)
+ */
 function owned(p) {
     const m = new Map();
-    for (const inv of [p.getInventory(bankId), p.getInventory(InvType.INV)]) {
+    for (const inv of [p.getInventory(bankId), p.getInventory(InvType.INV), p.getInventory(InvType.WORN)]) {
         for (let s = 0; inv && s < inv.capacity; s++) {
             const it = inv.get(s);
             if (!it) continue;
@@ -184,6 +188,16 @@ function party(kind, venueKey, opts = {}) {
     let knights = 0;
     let joke = 0;
     let room = 0;
+    // (the better item's 1 in 10 is of the kits whose host has one to give, a mithril or adamant piece or natures in its
+    // bank: planKit's own pick, forced. The 8 hosts are the world's richest, and at seed 1 few had one: 15 better kits
+    // of 472, 3 %)
+    let givers = 0;
+    const gives = new Map();
+    const canGive = (host, kind) => {
+        const key = `${host.username} ${kind}`;
+        if (!gives.has(key)) gives.set(key, Party.planKit(host, kind, mulberry(37), { better: true, knights: false })?.better === true);
+        return gives.get(key);
+    };
     const dice = mulberry(31);
     // (600 kits, the variety work's round 1: at 300 a world's hosts drew the knights' 1 in 4 at 14 of 99, 20-23 % at
     // 600 and 1,200: the sample, not the rule)
@@ -194,6 +208,7 @@ function party(kind, venueKey, opts = {}) {
         if (!kit) continue;
         kits++;
         if (kit.better) better++;
+        if (kit.better || canGive(host, kind)) givers++;
         if (kit.coins > 0 && kit.coins <= 10) joke++;
         if (kind === 'party_room') {
             room++;
@@ -217,7 +232,7 @@ function party(kind, venueKey, opts = {}) {
     }
     check(`kits: never a tool, a rare, an untradeable, a members item on a free world; F2P 12-28 piles within the 2-10k budget; the Party Room's stacks <= 25, notes <= 15, singles 100+ (${kits} kits)`, kits >= 200 && bad.length === 0, bad.slice(0, 6));
     // (a free world has no natures to give and fewer mithril or adamant pieces in its banks: at most the 1 in 10 there)
-    check('kits: one better item 5-17 % (a free world at most that), a joke coin pile 5-25 %, the knights 15-35 % of Party Room kits', (!MEMBERS || better / kits >= 0.05) && better / kits <= 0.17 && joke / kits >= 0.05 && joke / kits <= 0.25 && (!MEMBERS || (knights / room >= 0.15 && knights / room <= 0.35)), { kits, better, joke, room, knights });
+    check('kits: one better item 5-17 % (a free world at most that), a joke coin pile 5-25 %, the knights 15-35 % of Party Room kits', (!MEMBERS || better / givers >= 0.05) && better / kits <= 0.17 && joke / kits >= 0.05 && joke / kits <= 0.25 && (!MEMBERS || (knights / room >= 0.15 && knights / room <= 0.35)), { kits, givers, better, joke, room, knights });
 }
 
 // ---- the venue: where the bots are, never where the human is ----
@@ -297,7 +312,9 @@ function party(kind, venueKey, opts = {}) {
             const t = p.slot !== -1 ? lib.standTileOf(p) : null;
             return t && Math.max(Math.abs(t[0] - vx), Math.abs(t[1] - vz)) <= 8 && !ai(p)?.hasSubTask();
         });
-        check('F2P: the party done, its guests back at their own tasks, their tiles given back', rec.outcome === 'done' && rec.asked >= 3 && rec.came >= 2 && stillIn.length === 0 && tiles.length === 0 && run.phase === 'done' && !ai(run.host)?.hasSubTask(), { outcome: rec.outcome, asked: rec.asked, came: rec.came, stillIn: stillIn.length, tiles: tiles.map(p => p.username) });
+        // (and the host out of its part: a sub-task of its own after it is its own, an alcher's stint at a bank stop at the
+        // free world's seed 2)
+        check('F2P: the party done, its guests back at their own tasks, their tiles given back', rec.outcome === 'done' && rec.asked >= 3 && rec.came >= 2 && stillIn.length === 0 && tiles.length === 0 && run.phase === 'done' && !(ai(run.host)?.subTask?.name ?? '').startsWith('Party'), { outcome: rec.outcome, asked: rec.asked, came: rec.came, stillIn: stillIn.length, tiles: tiles.map(p => p.username), host: ai(run.host)?.subTask?.name ?? null });
         tick(1010);
         check('F2P: nobody of the party stuck at the venue 10 minutes on', rec.stuckAfter === 0, rec.stuckAfter);
         out(`note: F2P party: ${rec.drops.length} piles worth ${rec.kitValue} (budget ${rec.budget}), ${rec.came} guests of ${rec.asked} asked, peak ${rec.peak}, taken: ${JSON.stringify(per)}, ${quick.length} within 10 ticks`);
@@ -390,15 +407,17 @@ if (MEMBERS) {
         each(run) {
             const now = World.currentTick;
             if (!moved) {
-                // (a guest waiting at the venue is moved 100 tiles off)
+                // (a guest waiting at the venue is moved 100 tiles off, once another has set off too: the guests' moments
+                // are spread over the lead, and at the free world's seed 3 the first to wait was the only one yet, the
+                // rest still to set off: no other in the party to go on)
                 const waiting = [...run.guests].find(([, t]) => t.stage === 'wait');
-                if (waiting && run.phase === 'build') {
+                if (waiting && run.phase === 'build' && run.guests.size >= 2) {
                     moved = waiting[0];
                     movedAt = now;
                     place(moved, 3093, 3300);
                 }
             } else if (guestGone === null && now - movedAt >= 10) {
-                guestGone = { stage: run.guests.get(moved)?.stage ?? 'gone', sub: ai(moved)?.subTask?.name ?? null, others: [...run.guests].filter(([p, t]) => p !== moved && t.stage !== 'done').length };
+                guestGone = { stage: run.guests.get(moved)?.stage ?? 'gone', sub: ai(moved)?.subTask?.name ?? null, others: [...run.guests].filter(([p, t]) => p !== moved && t.stage !== 'done').length, stages: [...run.guests.values()].map(t => t.stage) };
                 // (then the host, waiting at the venue)
                 if (run.phase === 'build') {
                     hostMoved = true;

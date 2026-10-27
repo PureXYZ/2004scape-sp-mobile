@@ -46,6 +46,13 @@ export { setHangoutRateForTest } from '#/engine/bot/port/BotHangout.js';
 export { resetDirectorForTest, setDirectorForTest } from '#/engine/bot/port/BotDirector.js';
 export { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
 export { IdleTask } from '#/engine/bot/tasks/UtilTasks.js';
+// (the variety work, round 2, Track D2's errands off, as test/lib/groups.ts has it: loaded on demand, so an older library
+// (an A/B run, LC_BOTS_SRC) loads and goes on without)
+export async function setD2Offers(on: boolean): Promise<boolean> {
+    const d2 = await import('#/engine/bot/port/BotD2Picks.js').catch(() => null);
+    d2?.setD2OffersForTest(on);
+    return d2 !== null;
+}
 
 import type Player from '#/engine/entity/Player.js';
 import type Npc from '#/engine/entity/Npc.js';

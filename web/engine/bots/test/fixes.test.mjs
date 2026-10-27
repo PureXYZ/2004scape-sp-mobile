@@ -42,17 +42,22 @@
 //              to the bank
 //   errors     none
 //
-//   node --expose-gc web/engine/bots/test/fixes.test.mjs [--seed=38]
+//   node --expose-gc web/engine/bots/test/fixes.test.mjs [--seed=7]
 //
 // (2026-10-19, with the PK tactics' merge: the default seed 7 -> 8. The scenes take bots of the living world and its
 // dice: on main (6a5e7ed) seeds 1-9 passed only at 5 and 7, the junk sale failing at most others; the PK tactics' new
 // draws moved seed 7 onto a failing one (the cow field's jump, the junk sale); 8 passes with them. The rare emotes'
 // (2026-10-19) moved 8 back onto the junk sale's failure: of 1-11 only 7 passes with them. 2026-10-27, the bot leak
 // audit's merge: 7 -> 38. The rangers' pickups moved 7 onto the cow field's failure (no ranger there: the draws); of
-// 7-37 none passes, the junk sale failing at most; 38 does)
+// 7-37 none passes, the junk sale failing at most; 38 does. Then the scenes made to hold at every seed: each its own
+// dice (test/lib/dice.mjs); the fighters ready to fight (fightReady); the junk sale's platebody worn or banked and its
+// hides given after the task's first tick; the woodcutter of combat 15 (Draynor's dark wizards); the miner's rocks kept
+// taken, its second task with a clean pack; the party's guest idle while its pack is looked at; a slow alt asking a
+// train's leader at every look; a placed bot's bank window closed. Seeds 1-24 and 38 pass: the default back to 7)
 import path from 'path';
 import { BOTS_DIR, importTs } from './lib/paths.mjs';
 import { prepareEngineClone, simWorldConfig, stubWorkerThreads } from './lib/clone.mjs';
+import { scene } from './lib/dice.mjs';
 
 const args = Object.fromEntries(
     process.argv.slice(2).map(a => {
@@ -60,7 +65,7 @@ const args = Object.fromEntries(
         return m ? [m[1], m[2] ?? 'true'] : [a, 'true'];
     })
 );
-const SEED = Number(args.seed ?? 38);
+const SEED = Number(args.seed ?? 7);
 const out = (s = '') => process.stdout.write(s + '\n');
 const checks = [];
 const check = (name, ok, detail = '') => checks.push({ name, ok: !!ok, detail: typeof detail === 'string' ? detail : JSON.stringify(detail) });
@@ -185,6 +190,8 @@ function force(p, task) {
 function place(p, x, z, level = 0) {
     p.clearWaypoints();
     p.clearPendingAction();
+    // (a bank or shop its task had open: a newbie with one is never calm, and asks no train's leader: seed 11)
+    p.closeModal();
     p.teleJump(x, z, level);
     placing = true;
     tick(1);
@@ -197,6 +204,18 @@ function levels(p, lv) {
     p.levels[3] = p.baseLevels[3];
     p.runenergy = 10000;
 }
+/**
+ * ready to fight: an iron scimitar on, its bank empty. An aged bot's armour or weapon in its bank (needsFightDress,
+ * combatWeaponFor 'banked'), or a staff in hand (_meleeInHand), sent it to the bank first: the junk sale's hides put in
+ * there unsold (seed 2), the cow field reached with its time gone (seed 13)
+ */
+function fightReady(p) {
+    clearInv(bankOf(p));
+    const worn = p.getInventory(InvType.WORN);
+    const held = worn.get(3)?.id ?? -1;
+    worn.set(3, { id: ObjType.getId('iron_scimitar'), count: 1 });
+    lib.refreshWorn(p, held);
+}
 /** the path searches of this tick spent (a crowded fill's tick), as the other bots would */
 function spendSearches() {
     for (let i = 0; i < 400 && lib.Pathing.pathBudgetLeft() > 0; i++) lib.Pathing.botWalkPath(0, 3222, 3218, 3230, 3203);
@@ -206,6 +225,7 @@ function spendSearches() {
 // budget waits are no stall (ISS-1)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'budget waits are no stall'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
     levels(p, {});
     place(p, 3222, 3218);
@@ -249,6 +269,7 @@ function spendSearches() {
 // the watchdog near the spot ends the task (ISS-7)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'the watchdog near the spot ends the task'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
     levels(p, {});
     place(p, 3222, 3218);
@@ -272,6 +293,7 @@ function spendSearches() {
 // futile bank loops (DO-1/ISS-2): the guard, the food kept
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'futile bank loops'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
     place(p, 3185, 3436);
     clearInv(packOf(p));
@@ -301,6 +323,7 @@ function spendSearches() {
 // the baker's stall thief with a pack of cakes (DO-1/ISS-2)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'the baker\'s stall thief with a pack of cakes'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
     levels(p, { 17: 20, 3: 30 });
     const step = lib.SkillProgression.THIEVING.find(s => s.extra?.locName === 'bakers_stall_stealing');
@@ -325,6 +348,7 @@ function spendSearches() {
 // leftover bars (DO-2)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'leftover bars'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
     levels(p, { 13: 30 });
     const step = lib.SkillProgression.SMITHING.find(s => s.action === 'smith' && s.itemConsumed === Items.BRONZE_BAR);
@@ -361,6 +385,7 @@ function spendSearches() {
 // every rock taken: a wait beside one, then another task (DO-3)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'every rock taken'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
     levels(p, { 14: 10 });
     const step = lib.SkillProgression.MINING.find(s => s.location === Locations.MINE_VARROCK_WEST);
@@ -373,27 +398,38 @@ function spendSearches() {
         for (let zz = (step.location[1] - 24) >> 3; zz <= (step.location[1] + 24) >> 3; zz++) {
             for (const loc of World.gameMap.getZone(zx << 3, zz << 3, 0).getAllLocsSafe()) {
                 const name = lib.LocType.get(loc.type).debugname ?? '';
-                if (/^(tin|copper)rock/.test(name) && !lib.isLocClaimed(loc)) {
-                    lib.claimLoc(loc);
-                    rocks.push(loc);
-                }
+                if (/^(tin|copper)rock/.test(name)) rocks.push(loc);
             }
         }
     }
+    // (each kept taken all through: a world miner's claim on one, left out here, went with it when it moved on and the
+    // rock was free again; mined, the wait began anew and never ran out, seed 22)
+    const takeRocks = () => {
+        for (const r of rocks) if (!lib.isLocClaimed(r)) lib.claimLoc(r);
+    };
+    takeRocks();
     const wander0 = lib.gatherStats.wander.Mine ?? 0;
     const waits0 = lib.gatherStats.waits;
     const gaveUp0 = lib.gatherStats.gaveUp;
     const task = force(p, new lib.MiningTask(step));
     let besideAt = -1;
     run(160, () => {
+        takeRocks();
         if (besideAt < 0 && rocks.some(r => Math.max(Math.abs(r.x - p.x), Math.abs(r.z - p.z)) <= 2) && !p.hasWaypoints()) besideAt = World.currentTick;
         return false;
     });
     check(`miner: every rock of its ore taken (${rocks.length} claimed): it waits beside one, never walking about`, rocks.length > 0 && lib.gatherStats.waits > waits0 && besideAt >= 0 && (lib.gatherStats.wander.Mine ?? 0) === wander0, { waits: lib.gatherStats.waits - waits0, besideAt, wander: (lib.gatherStats.wander.Mine ?? 0) - wander0, at: [p.x, p.z] });
-    run(lib.RESOURCE_PATIENCE[1] + 20, () => task.isComplete(p));
+    run(lib.RESOURCE_PATIENCE[1] + 20, () => {
+        takeRocks();
+        return task.isComplete(p);
+    });
     check('miner: after 2-4 minutes still taken it gives up: its task ends', task.isComplete(p) && lib.gatherStats.gaveUp > gaveUp0, { complete: task.isComplete(p), gaveUp: lib.gatherStats.gaveUp - gaveUp0 });
     // displaced (a party's guest, a "come here"): its task back at 'approach' in Varrock square, 50 tiles off: it walks
     // back to the mine, no wait and no tile of its own there
+    // (the pack but its pickaxe cleared: the weapon the first task put in it, taking the pickaxe in hand (WEAR-3: banked at
+    // the next stop), is a new task's leftover, banked first, the walk to the bank at seeds 6, 14, 20)
+    clearInv(packOf(p));
+    packOf(p).add(Items.BRONZE_PICKAXE, 1);
     const task2 = force(p, new lib.MiningTask(step));
     place(p, 3212, 3428);
     task2.state = 'approach';
@@ -414,8 +450,11 @@ function spendSearches() {
 // every tree a stump: a wait by one, a few steps round the grove to another now and then (DO-3)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'every tree a stump'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
-    levels(p, { 8: 35 });
+    // (combat 15 or more: Draynor's dark wizards, WoodcuttingTask runs there for none below (woodcutStepRefused); the
+    // bot drawn at seeds 5, 6 and 38 was below, its task never ran)
+    levels(p, { 0: 20, 1: 20, 2: 20, 3: 20, 8: 35 });
     const step = lib.SkillProgression.WOODCUTTING.find(s => s.location === Locations.WILLOWS_DRAYNOR);
     place(p, step.location[0], step.location[1]);
     clearInv(packOf(p));
@@ -423,21 +462,28 @@ function spendSearches() {
     // (every willow near felled: a stump for 10 minutes, 274's own change of the loc; back after)
     const stumpType = lib.LocType.getId('treestump2');
     const felled = [];
-    for (let zx = (step.location[0] - 24) >> 3; zx <= (step.location[0] + 24) >> 3; zx++) {
-        for (let zz = (step.location[1] - 24) >> 3; zz <= (step.location[1] + 24) >> 3; zz++) {
-            for (const loc of World.gameMap.getZone(zx << 3, zz << 3, 0).getAllLocsSafe()) {
-                const name = lib.LocType.get(loc.type).debugname ?? '';
-                if (/^willow/.test(name) && !name.includes('stump')) felled.push({ loc, type: loc.type, shape: loc.shape, angle: loc.angle });
+    // (and felled again all through: a willow a world woodcutter had felled was left out, grew back meanwhile and was
+    // chopped, the wait over, seed 27)
+    const fellAll = () => {
+        for (let zx = (step.location[0] - 24) >> 3; zx <= (step.location[0] + 24) >> 3; zx++) {
+            for (let zz = (step.location[1] - 24) >> 3; zz <= (step.location[1] + 24) >> 3; zz++) {
+                for (const loc of World.gameMap.getZone(zx << 3, zz << 3, 0).getAllLocsSafe()) {
+                    const name = lib.LocType.get(loc.type).debugname ?? '';
+                    if (!/^willow/.test(name) || name.includes('stump')) continue;
+                    if (!felled.some(f => f.loc === loc)) felled.push({ loc, type: loc.type, shape: loc.shape, angle: loc.angle });
+                    World.changeLoc(loc, stumpType, loc.shape, loc.angle, 1000);
+                }
             }
         }
-    }
-    for (const f of felled) World.changeLoc(f.loc, stumpType, f.shape, f.angle, 1000);
+    };
+    fellAll();
     const moves0 = lib.gatherStats.moves;
     const task = force(p, new lib.WoodcuttingTask(step));
     const by = [];
     let last = null;
     let wandered = 0;
     run(lib.RESOURCE_PATIENCE[0] - 10, () => {
+        fellAll();
         const now = task.wait?.current ?? null;
         if (now && now !== last) {
             by.push({ at: World.currentTick, x: now.x, z: now.z, stump: (lib.LocType.get(now.type).debugname ?? '').includes('stump') });
@@ -459,6 +505,7 @@ function spendSearches() {
 // hill giants by the Edgeville trapdoor, out the same way; a dungeon to another (ISS-4)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'hill giants by the Edgeville trapdoor, out the same way'); // (its own dice: test/lib/dice.mjs)
     const rooms = [lib.dungeonRoomForTest(3097, 9870), lib.dungeonRoomForTest(3110, 9909), lib.dungeonRoomForTest(3114, 9841)];
     check('dungeons: the hill giants\' rooms on the 274 map: the trapdoor\'s corridor 0, the east passage 1, the giants\' room 2', rooms.join() === '0,1,2', rooms);
     check('dungeons: the giants and the trapdoor\'s floor the same dungeon, the ice giants another', lib.sameDungeon(3114, 9840, 3097, 9868) && !lib.sameDungeon(3114, 9840, 3059, 9568));
@@ -523,6 +570,7 @@ function spendSearches() {
 // (the variety work, round 1, the fixes) a tree across a fence: out of reach (the members' fence east of Varrock)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'a tree across a fence'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
     force(p, driver('Idle', () => {}));
     tick(3);
@@ -553,6 +601,7 @@ function spendSearches() {
 // (the variety work, round 1, the fixes) the Varrock sewers: their doors and web, jitter in a place's room, the void
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'the Varrock sewers'); // (its own dice: test/lib/dice.mjs)
     // underground, a jittered tile is in the place's own room (the sewers' zombies, skeletons and moss giants had a
     // third to a half of theirs across a wall, in another room or the map's unused floor)
     const off = [];
@@ -613,6 +662,13 @@ function spendSearches() {
     // a bot across the wall from the ladder (the map's unused floor, where a rescue jump put a bot): the jump up, no click
     place(p, 3234, 9858);
     said.length = 0;
+    // (with the mage's full pack again: the bank walk. An empty one left the walk to what its own bank held, and at seed
+    // 22 it stood where it was)
+    clearInv(packOf(p));
+    packOf(p).add(ObjType.getId('staff_of_air'), 1);
+    packOf(p).add(ObjType.getId('mindrune'), 500);
+    packOf(p).add(ObjType.getId('knife'), 1);
+    while (packOf(p).freeSlotCount > 0) packOf(p).add(ObjType.getId('big_bones'), 1);
     force(p, new lib.RangedMagicTask(mage, 6));
     const out3 = run(120, () => p.z < 6400);
     check('sewers: a bank walk from across the wall from the manhole\'s ladder (the void round the sewers) jumps up, unseen, with no "I can\'t reach that!"', out3 > 0 && !said.some(m => /reach that/.test(m)), { out3, at: [p.x, p.z], said: said.slice(0, 3) });
@@ -627,6 +683,7 @@ function spendSearches() {
 // Lumbridge castle's stairs with the searches spent 9 ticks in 10 (ISS-10)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'Lumbridge castle\'s stairs with the searches spent 9 ticks in 10'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
     levels(p, {});
     place(p, 3215, 3217);
@@ -650,8 +707,10 @@ function spendSearches() {
 // Lumbridge's west cow field: in by its gate from the far side of the river, out again (the watchdog's jumps)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'Lumbridge\'s west cow field'); // (its own dice: test/lib/dice.mjs)
     const p = take(p => levellingFree(p) && p.combatLevel >= 5);
     levels(p, { 0: 15, 1: 15, 2: 15, 3: 15 });
+    fightReady(p);
     const step = lib.SkillProgression.ATTACK.find(s => s.location === Locations.COWS_LUMBRIDGE2);
     place(p, 3200, 3370); // north of the Champions' Guild: the field's fence and the river between
     clearInv(packOf(p));
@@ -672,6 +731,7 @@ function spendSearches() {
 // reach, the fire's tile, a stun (ISS-11)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'reach, the fire\'s tile, a stun'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
     place(p, 3029, 3217); // Port Sarim's docks
     const across = { x: 2954, z: 3146, level: 0, width: 1, length: 1 }; // Karamja's shore, over the sea
@@ -713,9 +773,12 @@ function spendSearches() {
 // parties (ISS-3): a full pack comes; a busy asked guest is asked again; passers-by walk in
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'parties'); // (its own dice: test/lib/dice.mjs)
     const Party = lib.Party;
     const q = take(levellingFree);
     levels(q, {});
+    // (idle: its own task put the pack's scimitar or leather on in the two ticks after the drop, seed 38)
+    force(q, driver('Idle', () => {}));
     // (on Lumbridge's ground floor, not armed for a random event: only its pack is in question)
     place(q, 3222, 3240);
     q.afkEventReady = false;
@@ -812,6 +875,7 @@ function spendSearches() {
 // trains of 2+ (ISS-6)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'trains of 2+'); // (its own dice: test/lib/dice.mjs)
     const T = lib.Trains;
     T.resetTrainsForTest();
     /** a levelling bot made a level-3 in Lumbridge (a newbie or not), standing about */
@@ -859,7 +923,8 @@ function spendSearches() {
     // the low-level under test is the one free)
     const busied = sim.bots().filter(b => ![first, low, second, stranger].includes(b) && b.level === 0 && b.combatLevel <= 10 && cheb(b, first) <= 60 && !ai(b)?.hasSubTask());
     for (const b of busied) ai(b)?.setSubTask(driver('Idle', () => {}));
-    T.setTrainRatesForTest({ ask: 1, form: 0, yes: 1, join: 1 });
+    // (ask 2: a slow alt asks at half the chance, every look for it too; ricky_dee, seed 11, let nine looks go by)
+    T.setTrainRatesForTest({ ask: 2, form: 0, yes: 1, join: 1 });
     let lowJoined = false;
     let secondJoined = false;
     let moved = false;
@@ -882,7 +947,7 @@ function spendSearches() {
         if (tr && tr.members.includes(low) && !lowJoined) {
             lowJoined = true;
             // (the line's third place left to the second newbie's ask: no more joins by the roll)
-            T.setTrainRatesForTest({ ask: 1, form: 0, yes: 1, join: 0 });
+            T.setTrainRatesForTest({ ask: 2, form: 0, yes: 1, join: 0 });
         }
         if (tr && tr.members.includes(second)) secondJoined = true;
         // (the second newbie kept beside the leader until it has asked and joined: the leader walks on)
@@ -908,6 +973,7 @@ function spendSearches() {
 // stakes (ISS-8): 30-50 % of the poorer bot's coins, zero-sum
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'stakes'); // (its own dice: test/lib/dice.mjs)
     const A = lib.Arena;
     const p = sim.bots().find(b => lib.isLevelling(b.botPlanner) && lib.Party.coinsOwned(b) >= 10000 && lib.Party.coinsOwned(b) <= 200000) ?? sim.bots().find(b => lib.isLevelling(b.botPlanner));
     const owned = lib.Party.coinsOwned(p);
@@ -926,6 +992,7 @@ function spendSearches() {
 // an alcher at a bank stop (ISS-9)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'an alcher at a bank stop'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
     levels(p, { 6: 60 });
     place(p, 3183, 3436);
@@ -954,6 +1021,7 @@ function spendSearches() {
 // the scam caller logs out after its stint (the 5b spec's item)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'the scam caller logs out after its stint'); // (its own dice: test/lib/dice.mjs)
     const p = take(levellingFree);
     place(p, 3185, 3436);
     force(p, driver('Idle', () => {}));
@@ -968,6 +1036,7 @@ function spendSearches() {
 // a login near the human lingers (pop-out)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'a login near the human lingers'); // (its own dice: test/lib/dice.mjs)
     lib.Linger.setLingerForTest(true);
     const p = take(levellingFree);
     place(p, 3222, 3218);
@@ -995,6 +1064,7 @@ function spendSearches() {
 // a fighter's junk sale (2026-10-18): the nearest general store; its own things banked, the loot sold
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
+    scene(SEED, 'a fighter\'s junk sale'); // (its own dice: test/lib/dice.mjs)
     const p = take(p => levellingFree(p) && p.combatLevel >= 5);
     levels(p, { 0: 40, 1: 40, 2: 40, 3: 40 });
     const near = s => {
@@ -1008,13 +1078,17 @@ function spendSearches() {
     let seenLumbridge = false;
     let soldHides = false;
     let before = [];
+    const kept = (id, i) => count(bankOf(p), id) > before[i] || (id === own[0] && count(p.getInventory(InvType.WORN), id) > 0);
     if (step) {
         place(p, step.location[0], step.location[1]);
         const pack = packOf(p);
         clearInv(pack);
+        fightReady(p);
         for (const id of own) pack.add(id, id === own[1] ? 20 : 1);
-        force(p, new lib.CombatTask(step, 0));
-        tick(1);
+        const task = force(p, new lib.CombatTask(step, 0));
+        // (the hides after its first tick, which notes the pack the fight began with (_notePack): the fight's loot. A task
+        // whose first tick came later had them noted as its own and banked, never sold: seed 2)
+        run(20, () => task.taskTicks >= 1);
         pack.add(hide, pack.freeSlotCount);
         const bank = bankOf(p);
         before = own.map(id => count(bank, id));
@@ -1022,11 +1096,14 @@ function spendSearches() {
             if (cheb(p, { x: 3217, z: 3413 }) <= 8) seenVarrock = true;
             if (cheb(p, { x: 3211, z: 3246 }) <= 8) seenLumbridge = true;
             if (seenVarrock && count(pack, hide) === 0) soldHides = true;
-            return soldHides && own.every((id, i) => count(bank, id) > before[i]);
+            return soldHides && own.every((id, i) => kept(id, i));
         });
     }
+    // (kept: banked, or worn: a black platebody (g) over a weaker body goes on at the bank stop, _equipLoot's; it failed the
+    // check at most seeds, the bank's count, where the bot drawn wore iron or steel)
     const banked = own.map((id, i) => count(bankOf(p), id) - (before[i] ?? 0));
-    check('junk sale: a fighter by Varrock sells its loot at Varrock\'s general store, not Lumbridge\'s; the black platebody (g), law runes and rune pickaxe it carried go to the bank', step && seenVarrock && !seenLumbridge && soldHides && banked.every(n => n > 0), { step: step?.location, seenVarrock, seenLumbridge, soldHides, banked });
+    const worn = own.map(id => count(p.getInventory(InvType.WORN), id));
+    check('junk sale: a fighter by Varrock sells its loot at Varrock\'s general store, not Lumbridge\'s; the black platebody (g), law runes and rune pickaxe it carried go to the bank (the platebody on instead when it beats its own)', step && seenVarrock && !seenLumbridge && soldHides && own.every((id, i) => kept(id, i)), { step: step?.location, seenVarrock, seenLumbridge, soldHides, banked, worn });
     free.push(p);
 }
 

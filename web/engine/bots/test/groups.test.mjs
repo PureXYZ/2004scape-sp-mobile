@@ -192,13 +192,20 @@ const attacking = p => (p.target && p.target.username !== undefined && (p.target
     D.resetDirectorForTest();
     D.setDirectorForTest({ first: 5, firstKinds: ['clan_walk'], kinds: ['clan_walk'] });
     let walk = null;
+    const coinsAfter = new Map();
+    const spent = p => coins.get(p.username) - (coinsAfter.get(p.username) ?? coinsOf(p));
     const seen = { phases: new Set(), followTicks: 0, memberWalkTicks: 0, chainOk: 0, chainTicks: 0, leaderRuns: 0, leaderSteps: 0, stopTicks: 0, stopStacked: 0, stopFollowing: 0, gathered: false, capesAtPeak: null, legsReached: 0, joinAsked: false };
     let last = null;
     let joinAt = -1;
     run(6000, tick => {
         const runs = SetPieces.runningSetPieces();
         const r = runs.find(x => x.kind === 'clan_walk') ?? null;
-        if (r && !walk) walk = r;
+        // (the coins from the walk's start to its end, as the new bots' walk below has them: their own tasks earn and spend
+        // before it (a fighter's drops) and after it (a woodcutter's 560 gp, spent once it was let go: seed 4))
+        if (r && !walk) {
+            walk = r;
+            for (const p of clan) coins.set(p.username, coinsOf(p));
+        }
         if (!walk) return false;
         seen.phases.add(walk.phase);
         if (walk.phase === 'build' && walk.line.every(m => cheb(m, walk.route[0]) <= 8)) seen.gathered = true;
@@ -240,13 +247,14 @@ const attacking = p => (p.target && p.target.username !== undefined && (p.target
                 if (walk.line.includes(m) && isFollowing(m, walk.aheadOf(m))) seen.stopFollowing++;
             }
         }
+        if (walk.phase === 'done') for (const p of clan) coinsAfter.set(p.username, coinsOf(p));
         return walk.phase === 'done';
     });
     run(60);
     const rec = D.directorLog.find(e => e.kind === 'clan_walk');
     check('a clan walk of the clique starts (forced early: the runner\'s --director-first) and ends at its last hub', !!walk && walk.outcome === 'done' && seen.legsReached >= walk.route.length - 1, walk ? `${walk.route.map(h => h.key).join(' > ')}; outcome ${walk.outcome}; ${walk.line.length + 1} walkers; phases ${[...seen.phases].join(' ')}` : `none; ${D.directorLog.length} events`);
     const walkers = walk ? clan.filter(p => rec?.recruits.some(r => r.name === p.username && r.left === null)) : [];
-    check('saved bots: a red walk (Thessalia\'s): each walker bought its red cape there (a few coins) and wore it on the walk (G3)', !!walk && walk.colour === 0 && walkers.length >= 3 && !!seen.capesAtPeak && seen.capesAtPeak.every(Boolean) && walkers.every(p => coins.get(p.username) - coinsOf(p) >= 1 && coins.get(p.username) - coinsOf(p) <= 20), { colour: walk?.colour, capes: seen.capesAtPeak, walkers: walkers.map(p => p.username), spent: clan.map(p => `${p.username} ${coins.get(p.username) - coinsOf(p)}`) });
+    check('saved bots: a red walk (Thessalia\'s): each walker bought its red cape there (a few coins) and wore it on the walk (G3)', !!walk && walk.colour === 0 && walkers.length >= 3 && !!seen.capesAtPeak && seen.capesAtPeak.every(Boolean) && walkers.every(p => spent(p) >= 1 && spent(p) <= 20), { colour: walk?.colour, capes: seen.capesAtPeak, walkers: walkers.map(p => p.username), spent: clan.map(p => `${p.username} ${spent(p)}`) });
     const leaderLines = lines.filter(l => l.kind === 'setpiece' && l.name === walk?.leader.username).map(l => l.text);
     check("they gathered at the hub, the leader's call and lines (a set piece's: out of H7)", seen.gathered && leaderLines.length >= 2, { gathered: seen.gathered, leaderLines });
     check('a line: each follows the one ahead (the game\'s Follow, near it, 70 %+ of the walk), not all the leader', seen.memberWalkTicks > 100 && seen.followTicks >= seen.memberWalkTicks * 0.7 && seen.chainOk >= seen.chainTicks * 0.9, seen);
@@ -355,10 +363,12 @@ const attacking = p => (p.target && p.target.username !== undefined && (p.target
             seen.patrolSamples++;
             for (const m of raid.roles.keys()) if (m.x >= PkTeam.RAID_ZONE.x0 - 12 && m.x <= PkTeam.RAID_ZONE.x1 + 12 && m.z >= PkTeam.RAID_ZONE.z0 - 12 && m.z <= PkTeam.RAID_ZONE.z1 + 12) seen.inStrip++;
             // (the human walks in beside the leader, its combat the team's: fair game in multi-combat; the team of one
-            // combat level, as a 2004 team of friends of the same level was: else the game's level range splits it)
+            // combat level, as a 2004 team of friends of the same level was: else the game's level range splits it. All seven
+            // combat skills, the leader's 1s too: a member's own Strength and Prayer over a 1-Strength leader's kept it at
+            // combat 61 to their 57, out of a level-3 Wilderness's range of the human, who was never piled on: seed 1)
             if (humanIn < 0 && tick - raid.startedAt > 200) {
                 humanIn = tick;
-                for (const m of raid.roles.keys()) if (m !== raid.leader) for (let st = 0; st < 7; st++) if (raid.leader.baseLevels[st] > 1) m.setLevel(st, raid.leader.baseLevels[st]);
+                for (const m of raid.roles.keys()) if (m !== raid.leader) for (let st = 0; st < 7; st++) m.setLevel(st, raid.leader.baseLevels[st]);
                 sim.copyLevels(raid.leader);
                 const [x, z] = tileNear(raid.leader.x + 3, raid.leader.z);
                 sim.teleportHuman(x, z, 0);

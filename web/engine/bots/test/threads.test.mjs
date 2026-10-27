@@ -278,8 +278,12 @@ const nameOf = p => p.username;
         for (const b of [w1, w2]) W.readyForTest(b);
         const from = said.length;
         const hp = victim.levels[lib.PlayerStat.HITPOINTS];
-        victim.levels[lib.PlayerStat.HITPOINTS] = 0;
-        tick(40);
+        // (held at 0 through the look: 274's Hitpoints restore gave it 1 back in the tick it was set to 0, before the
+        // witnesses' look at the tick's deaths, and the death at the ditch was never seen: seed 3)
+        for (let i = 0; i < 40; i++) {
+            victim.levels[lib.PlayerStat.HITPOINTS] = 0;
+            tick(1);
+        }
         victim.levels[lib.PlayerStat.HITPOINTS] = hp;
         tick(2);
         return said.slice(from).filter(s => s.name !== victim.username && (s.name === w1.username || s.name === w2.username));
@@ -343,10 +347,12 @@ const nameOf = p => p.username;
     W.resetWitnessForTest();
     W.setWitnessRatesForTest({ human: 1, respond: 1 });
     const human = sim.human;
-    sim.teleportHuman(2500, 3300);
+    // (West Ardougne's north, out of its undead's reach: at 2500,3300 a ghost hit the responder, and a bot in a fight says
+    // nothing, no response: seed 4)
+    sim.teleportHuman(2520, 3330);
     const [a, b] = [bots[5], bots[6]];
-    place(a, 2502, 3300);
-    place(b, 2498, 3301);
+    place(a, 2522, 3330);
+    place(b, 2518, 3331);
     tick(3);
     W.readyForTest(a);
     W.readyForTest(b);
@@ -488,8 +494,10 @@ const nameOf = p => p.username;
         lib.chatDice.roll = roll;
         const turns = said.slice(from).filter(s => s.kind === 'practice' && pair.some(p => p.username === s.name));
         const owed = pair.map((p, i) => (lib.Chatter.chatterStateOf(p)?.debt ?? 0) - debt0[i]);
-        const each = pair.map(p => Math.min(6, turns.filter(s => s.name === p.username).length));
-        check('B3: an exchange near the human: each turn in the place of a line of its speaker\'s own (its debt one more a turn)', turns.length >= 2 && owed.every((n, i) => n === each[i]), `${turns.map(s => s.text).join(' / ')}; owed ${owed.join(', ')} for ${each.join(', ')}`);
+        // (at most 6 owed, port/BotChatter DEBT_MAX, from what each owed before: the chatter frozen, the earlier scenes' turns
+        // are never paid, and a speaker that owed 5 came to 6 on its opener and stayed there on its last word: seed 2)
+        const each = pair.map((p, i) => Math.min(6, debt0[i] + turns.filter(s => s.name === p.username).length) - debt0[i]);
+        check('B3: an exchange near the human: each turn in the place of a line of its speaker\'s own (its debt one more a turn)', turns.length >= 2 && owed.every((n, i) => n === each[i]), `${turns.map(s => s.text).join(' / ')}; owed ${owed.join(', ')} for ${each.join(', ')} (owing ${debt0.join(', ')} before)`);
         for (const p of pair) place(p, 2600 + Math.floor(Math.random() * 40), 3300);
         sim.teleportHuman(3300, 3000);
     } else check('B3: two sociable bots for the exchange', false);

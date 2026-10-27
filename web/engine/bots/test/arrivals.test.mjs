@@ -9,9 +9,9 @@
 //              none from 9, the soon gap by N; a test's "no newcomers" stays none
 //   newbies    newbie by levels (port/BotNewbie): combat 10 or total level 60 ends it; about 2 newcomers in 3 are slow
 //              levellers ("slower turnover"), the same for the same name
-//   near first the real 274 world, a new aged world of N bots and the human at Varrock West: the bots that log in within
-//              40 tiles of it (at most 25) are in within the first 3 ticks of logins, the rest at 5 a tick, nearest
-//              first; the fill's ticks and its near ones in BotManager.stats(); the burst's ticks under --burst-ms
+//   near first the real 274 world, a new aged world of N bots and the human at Edgeville's bank: the bots that log in
+//              within 40 tiles of it (at most 25) are in within the first 3 ticks of logins, the rest at 5 a tick,
+//              nearest first; the fill's ticks and its near ones in BotManager.stats(); the burst's ticks under --burst-ms
 //              (1,000 by default: a cold start on a busy machine; 300 for the spec's measure at 500 bots)
 //   a newbie   newcomers (a new character's): newbies with the tutorial's kit, on Newbie and Combat only, a slow
 //              leveller's next task seldom a fight and a newbie's mostly (the planner's picks); given the levels a newbie
@@ -142,9 +142,11 @@ const sim = await lib.Sim.create({
         }
     }
 });
-// the human: at Varrock West (the trade hub, aged bots' banks) in the main phase, at the Lumbridge courtyard (where the
-// newbies are) after the restart
-const HUMAN = handoff ? [3222, 3218, 0] : [3183, 3428, 0];
+// the human: at Edgeville's bank (the PKers' home, aged bots' bank) in the main phase, at the Lumbridge courtyard (where
+// the newbies are) after the restart
+// (it stood at Varrock West, where a pool of 120 names has a few vendors and aged bots: 2-4 of the 60 came in within
+// 40 tiles of it at seeds 1-8, 2 at seeds 1 and 4, under the burst's 3; 10-12 by Edgeville's bank)
+const HUMAN = handoff ? [3222, 3218, 0] : [3093, 3491, 0];
 sim.addHuman(...HUMAN);
 
 // every login: its tick, name, where it came in and how far from the human
@@ -376,8 +378,12 @@ if (!BURST && !handoff) {
         const file = path.join(TMP_DIR, `arrivals-handoff-${process.pid}.json`);
         fs.mkdirSync(TMP_DIR, { recursive: true });
         fs.writeFileSync(file, JSON.stringify({ world, saves: Object.fromEntries([...all].map(([k, v]) => [k, Buffer.from(v).toString('base64')])), newbies, levelled: levelled?.username ?? null }));
+        // (a world as big as the one that was online: every bot of it back. The newcomers came on top of N (75 online at
+        // seed 4), and a restarted world of N brought back N of them, the role mix's places at random: the one given
+        // levels was among those left out at seeds 2-4)
+        const size = Math.max(N, Object.keys(world.online ?? {}).length);
         try {
-            const r = spawnSync(process.execPath, ['--expose-gc', fileURLToPath(import.meta.url), '--phase=restart', `--handoff=${file}`, `--bots=${N}`, `--seed=${SEED + 1}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+            const r = spawnSync(process.execPath, ['--expose-gc', fileURLToPath(import.meta.url), '--phase=restart', `--handoff=${file}`, `--bots=${size}`, `--seed=${SEED + 1}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
             const lines = `${r.stdout ?? ''}`.split('\n').filter(l => /^(ok|FAIL) /.test(l));
             for (const l of lines) check(`after a restart: ${l.replace(/^(ok  |FAIL) /, '').split(' — ')[0]}`, l.startsWith('ok'), l.split(' — ')[1] ?? '');
             if (!lines.length) check('after a restart: the child ran', false, `exit ${r.status}: ${(r.stderr ?? '').slice(-400)}`);

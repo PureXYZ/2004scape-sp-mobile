@@ -92,7 +92,9 @@ const pct = (a, b) => (b ? Math.round((1000 * a) / b) / 10 : 0);
 }
 
 // ---- the world ----
-const sim = await lib.Sim.create({ bots: 30, members: true, debug: false });
+// (yew_cutter, the roster's first name, online at every seed: the last run's world had it on, BotManager's restore. The
+// draw left it offline at seed 3, the themes unchecked)
+const sim = await lib.Sim.create({ bots: 30, members: true, debug: false, extra: { world: { v: 1, online: { yew_cutter: -1 }, away: {} } } });
 sim.addHuman(3222, 3218, 0);
 for (let i = 0; i < 12; i++) sim.tick();
 lib.setHabitRatesForTest({ breaks: 0, lingers: 0, watch: 0, abrupt: 0 });
@@ -103,6 +105,9 @@ lib.setCliqueBehaviourForTest(false);
 lib.setEventRatesForTest({ odds: 0 });
 lib.setTrainRatesForTest({ ask: 0, form: 0, yes: 0, join: 0 });
 lib.setAlchRateForTest(0);
+// (the variety work's round 2 errands off, as party.test and scams.test have them: a power-dropper staged at Port Sarim's
+// willows went off picking in the fields, its task never chopping, at seed 2; errands.test is theirs)
+await lib.setD2Offers?.(false);
 check('the world: 30 bots online', sim.bots().length === 30, `${sim.bots().length}`);
 
 // ---- the map: every step's spot holds something, the dungeons' ways ----
@@ -258,7 +263,9 @@ const DRAYNOR_WILLOWS = willow(3086, 3234);
     }
 
     // DO-9: a level-5 thief by Lumbridge: Lumbridge's men no longer its only spot (members: pickpocketing)
-    const thief = take(levelling);
+    // (one whose home town is not Lumbridge: a home's spots weigh HOME_WEIGHT, and a Lumbridge thief picked its men 53 %
+    // of the time, seed 3)
+    const thief = take(p => levelling(p) && !Favourites.nearHome(Favourites.homeOf(p.username, true), [3223, 3238]));
     place(thief, 3222, 3240);
     thief.setLevel(lib.PlayerStat.THIEVING, 5);
     const planner = sim.botPlayer(thief).planner;
@@ -320,9 +327,11 @@ const DRAYNOR_WILLOWS = willow(3086, 3234);
         const mapleStep = SkillProgression.WOODCUTTING.find(s => s.itemGained === Items.MAPLE_LOGS && s.location[0] === Locations.MAPLES_SEERS[0]);
         const yews = opts.weigh(yewStep);
         const plainYews = opts.weigh(mapleStep);
+        // (2,000 shuffles: its share is about 18 % (woodcutting's weight 24 of 205, the unaffordable skills after the rest);
+        // 200 gave 10.5 % at seed 1, a check of 13 % failing on the dice)
         let first = 0;
         const order = [];
-        for (let i = 0; i < 200; i++) {
+        for (let i = 0; i < 2000; i++) {
             const c = planner._buildCandidates(yc);
             if (c[0] === 'WOODCUTTING') first++;
             if (i < 3) order.push(c.slice(0, 3).join('/'));
@@ -330,7 +339,7 @@ const DRAYNOR_WILLOWS = willow(3086, 3234);
         check(`themes: yew_cutter's picks weigh its theme's spots ${Favourites.PREFER_WEIGHT} times (Seers' yews against Seers' maples)`, yews === plainYews * Favourites.PREFER_WEIGHT, { yews, maples: plainYews });
         // (the shuffle alone: woodcutting's weight x4 among the skiller's 17 skills; the theme's roll, THEME_FIRST, puts it
         // first on top of that in the pick, below)
-        check('themes: yew_cutter\'s shuffle puts woodcutting first about 1 time in 5 (THEME_WEIGHT; without it, about 1 in 16)', first / 200 > 0.13, `${pct(first, 200)} %: ${order.join(', ')}`);
+        check('themes: yew_cutter\'s shuffle puts woodcutting first about 1 time in 5 (THEME_WEIGHT; without it, about 1 in 16)', first / 2000 > 0.13, `${pct(first, 2000)} %: ${order.join(', ')}`);
 
         // the theme's roll comes before the claims: with 30 logs banked (the logs claim: firemaking or fletching) and an
         // axe, still woodcutting most picks; before, the claims came first (2 in 5 themed miners and woodcutters fletched)

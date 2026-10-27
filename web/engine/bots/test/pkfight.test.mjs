@@ -559,7 +559,9 @@ function koFight(profile, ticks, reach) {
         const b = sim.botPlayer(p);
         delete b.tick;
         b.planner.pickTask = () => new lib.EdgevillePKerTask();
-        if (b.currentTask) b.currentTask.interrupt?.();
+        // (its sub-task dropped too: the login's linger by the human, held with its tick since then, ran ahead of the PK
+        // task past the 60 ticks below at seed 4, and yew_cutter took none)
+        b.windDown();
         p.clearWaypoints();
         p.clearPendingAction();
         p.teleJump(3088 + i * 3, 3532 + (i % 2) * 4, 0);

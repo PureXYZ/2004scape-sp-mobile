@@ -181,15 +181,22 @@ const show = r => `${r.shot} shot; on the ground at most ${r.most}, after the fi
     const [sx, sz] = step.location;
     const bp = sim.botPlayer(b);
     delete bp.tick;
-    for (const [stat, level] of [[PlayerStat.ATTACK, 1], [PlayerStat.STRENGTH, 1], [PlayerStat.DEFENCE, 1], [PlayerStat.HITPOINTS, 20], [PlayerStat.RANGED, 10], [PlayerStat.PRAYER, 1], [PlayerStat.MAGIC, 1]]) b.setLevel(stat, level);
+    // (the same scene at every seed: Ranged 1, where a level up outgrows no step (at 10 one may: the next spot's minimum);
+    // its bank empty, where an outfit sent it to Varrock West for it first and back to the far side of the pen's fence,
+    // seed 2; and inside the pen, below)
+    for (const [stat, level] of [[PlayerStat.ATTACK, 1], [PlayerStat.STRENGTH, 1], [PlayerStat.DEFENCE, 1], [PlayerStat.HITPOINTS, 20], [PlayerStat.RANGED, 1], [PlayerStat.PRAYER, 1], [PlayerStat.MAGIC, 1]]) b.setLevel(stat, level);
     kit(b, 0);
     const pack = b.getInventory(InvType.INV);
     for (let s = 0; s < pack.capacity; s++) pack.set(s, null);
+    b.getInventory(InvType.getId('bank')).removeAll();
     pack.add(I.SHORTBOW, 1);
     pack.add(I.BRONZE_ARROW, 400);
     b.clearWaypoints();
     b.clearPendingAction();
-    b.teleJump(sx, sz, 0);
+    // (among the chickens, inside their pen: from outside its fence the shots' arrows fell where no route reaches, and
+    // its task gave the spot up for the goblins south of Lumbridge, where they hurt it and it left its arrows: seed 1)
+    const hen = lib.findNpcByName(sx, sz, 0, 'chicken', 15);
+    b.teleJump(hen?.x ?? sx, hen?.z ?? sz, 0);
     const task = new lib.RangedMagicTask(step, PlayerStat.RANGED);
     bp.currentTask?.interrupt?.();
     bp.planner.pickTask = () => task;

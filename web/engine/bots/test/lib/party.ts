@@ -38,7 +38,9 @@ export { cliqueOf, setCliqueBehaviourForTest } from '#/engine/bot/port/BotClique
 export { isMembersWorld } from '#/engine/bot/port/BotWorldRules.js';
 export { itemValue } from '#/engine/bot/port/BotPrices.js';
 // (a set piece's part keeps random events off a bot: port/BotRandomEvents' eligibility)
-export { eligible as randomEventEligible } from '#/engine/bot/port/BotRandomEvents.js';
+export { eligible as randomEventEligible, setEventRatesForTest } from '#/engine/bot/port/BotRandomEvents.js';
+// (scams.test: the world's own player-mod bot kept off its staged stints)
+export * as ModBot from '#/engine/bot/port/BotModBot.js';
 
 /** a bot free for a set piece (as the director's freeBots: online, no sub-task, no part in a piece, not a newbie or a vendor at its stall) */
 function free(p: Player): boolean {

@@ -33,6 +33,7 @@ export { setCliqueBehaviourForTest } from '#/engine/bot/port/BotCliques.js';
 export { setEventRatesForTest } from '#/engine/bot/port/BotRandomEvents.js';
 export { setTrainRatesForTest } from '#/engine/bot/port/BotTrains.js';
 export { setAlchRateForTest } from '#/engine/bot/port/BotAlch.js';
+export { setScamRatesForTest } from '#/engine/bot/port/BotScams.js';
 export { botErrorCount } from '#/engine/bot/port/BotLog.js';
 export { teleportStats } from '#/engine/bot/BotAction.js';
 export { default as ObjType } from '#/cache/config/ObjType.js';

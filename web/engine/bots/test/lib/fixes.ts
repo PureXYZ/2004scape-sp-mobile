@@ -2,6 +2,7 @@
 // the research): test/lib/party.ts (the real 274 world, the trade helpers, the set pieces' stand-in
 // director) with the modules the fixes touch, through one module graph.
 export * from './party.js';
+export { refreshWorn } from '#/engine/bot/BotAction.js';
 export { Locations, SkillProgression, dungeonRoute } from '#/engine/bot/BotKnowledge.js';
 export { getExpByLevel } from '#/engine/entity/Player.js';
 export { personaOf } from '#/engine/bot/port/BotPersona.js';

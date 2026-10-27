@@ -268,6 +268,9 @@ if (want('tower')) {
     const p = take(levelling);
     levels(p, { RANGED: 55, DEFENCE: 40, HITPOINTS: 45 });
     kit(p, [], [], [Items.OAK_SHORTBOW]);
+    // (held: only its attack moves it. Its own task, back since the bots were held, walked it about the floor between the
+    // attempts, and its arrows went at the demon from tiles off these three, 3108,3161 and 3109,3159: seeds 2 and 4)
+    hold(p);
     const fired = [];
     for (const [x, z] of [[3107, 3157], [3106, 3158], [3105, 3160]]) {
         place(p, x, z, 2);
@@ -540,6 +543,7 @@ if (want('trail')) {
     const dig = lib.Clues.clueStep(map1);
     place(p, dig.at[0] + 8, dig.at[1] + 3);
     const moves = watchMoves(p);
+    const causes0 = new Map([...lib.teleportStats.byCause].map(([k, [j]]) => [k, j]));
     const s0 = JSON.parse(JSON.stringify(lib.trailStats));
     const task = new lib.TreasureTrailTask();
     assign(p, task);
@@ -553,7 +557,8 @@ if (want('trail')) {
     const st = lib.trailStats;
     check('trail: the map clue read, walked to its spot, dug with the spade (274\'s opheld1 spade: the casket), the casket opened', casket > 0 && st.caskets > s0.caskets && (st.steps.dig ?? 0) > (s0.steps.dig ?? 0), { casket, caskets: st.caskets - s0.caskets, steps: st.steps, at: [p.x, p.z] });
     check('trail: followed to its end: the reward (274\'s roll, in the pack) or a clue it cannot do dropped', t > 0 && (st.rewards > s0.rewards || Object.keys(st.gaveUp).length > Object.keys(s0.gaveUp).length || Object.values(st.gaveUp).reduce((a, b) => a + b, 0) > Object.values(s0.gaveUp).reduce((a, b) => a + b, 0)) && lib.Clues.carriedTrailItem(p) === null, { t, rewards: st.rewards - s0.rewards, gaveUp: st.gaveUp, ended: st.ended, clues: st.clues - s0.clues, steps: st.steps });
-    check('trail: walked, no unseen jump', moves.unseen().length === 0, moves.unseen().slice(0, 3));
+    const causes = [...lib.teleportStats.byCause].filter(([k, [j]]) => j > (causes0.get(k) ?? 0)).map(([k, [j]]) => `${k} ${j - (causes0.get(k) ?? 0)}`);
+    check('trail: walked, no unseen jump', moves.unseen().length === 0, { unseen: moves.unseen().slice(0, 3), causes });
     hold(p);
     free.push(p);
 }

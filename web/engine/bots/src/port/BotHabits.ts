@@ -352,7 +352,9 @@ function startSpell(p: Player, h: Habits, kind: SpellKind, now: number): void {
         const brb = kind !== 'skill' && Math.random() < 0.5 + 0.4 * h.persona.sociability;
         h.spell = { kind, start: now, until: now + uniform(brb ? BRB_BREAK_TICKS : BREAK_TICKS), brb, hp: p.levels[PlayerStat.HITPOINTS] };
         h.nextBreak = Infinity;
-        if (brb) sayOccasion(p, 'brb');
+        // (a "brb" said, not only meant: one sayOccasion held back (its share of a busy place's talk) left the "back"
+        // at the break's end on its own: test/habits.test.mjs at seed 2)
+        if (brb) h.spell.brb = sayOccasion(p, 'brb') !== null;
     }
     h.watch = null;
     if (kind !== 'skill') {

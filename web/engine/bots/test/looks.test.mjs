@@ -497,7 +497,9 @@ run(30);
         run(400, () => {
             if (offAt >= 0) return;
             const w = wornNames(p);
-            if (taskKind(p) === 'Woodcut' && !w[4] && !w[7]) offAt = World.currentTick;
+            // (the plate off, not the slots empty: an aged bot's bank may hold an apron for its outfit, and iron_fist's went
+            // on in the body's slot at seed 2)
+            if (taskKind(p) === 'Woodcut' && w[4] !== 'adamant_platebody' && w[7] !== 'adamant_platelegs') offAt = World.currentTick;
         });
         const atSkill = wornNames(p);
         const step = lib.SkillProgression.ATTACK.find(s => s.extra?.npcType === 'chicken') ?? lib.SkillProgression.ATTACK[0];

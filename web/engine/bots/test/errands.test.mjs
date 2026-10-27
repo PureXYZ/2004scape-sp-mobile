@@ -65,6 +65,9 @@ lib.setCliqueBehaviourForTest(false);
 lib.setEventRatesForTest({ odds: 0 });
 lib.setTrainRatesForTest({ ask: 0, form: 0, yes: 0, join: 0 });
 lib.setAlchRateForTest(0);
+// (no ambient scam caller either, as duel.test: a held bot drawn for a doubling stint logs out a minute or two after it,
+// and the spirit trees' bot went offline mid-ride, a crash on its gone BotPlayer: seed 2)
+lib.setScamRatesForTest({ ambient: false });
 // (every bot held by a task no rescan replaces: 'Idle' is one BotPlayer never interrupts)
 const STAND = { name: 'Idle', reset() {}, interrupt() {}, interrupted: false, shouldRun: () => true, isComplete: () => false, tick() {}, activityStep: () => null };
 const hold = p => {
@@ -117,6 +120,9 @@ const jumpsNow = () => lib.teleportStats.jumps;
 /** an errand staged on a bot and run to its end: the task, how it ended, the ticks */
 function stage(name, p, task, max) {
     scene(SEED, name);
+    // (no errand of its own under way: a flour run the bot had begun as a sub-task before its hold went on first, 2,400
+    // ticks of the feathers' 3,500, seed 2)
+    sim.botPlayer(p).windDown();
     assign(p, task);
     const host = task;
     const errand = task.errand ?? task;
@@ -151,8 +157,17 @@ const bot = () => free[next++ % free.length];
     kit(p, { CRAFTING: 3, MINING: 5 }, [[o('bronze_pickaxe'), 1]], [[995, 200]]);
     place(p, 3005, 3360);
     const xp0 = p.stats[S.CRAFTING];
+    // (a pot fired at Crafting 3 cracks about 3 times in 10, 274's stat_random(crafting, 180, 800): both of a round's two
+    // cracked at seed 2, none to bank; a cracked one counts as made)
+    let cracked = 0;
+    const messageGame = p.messageGame;
+    p.messageGame = function (msg, ...rest) {
+        if (/cracks in the oven/.test(msg)) cracked++;
+        return messageGame.call(this, msg, ...rest);
+    };
     const r = stage('pottery', p, Chains.chainTask('pottery'), 3000);
-    check("chains: pottery: Rimmington's clay, buckets from its general store, the well's water, the Barbarian Village wheel and oven, pots banked at Edgeville", r.rounds >= 1 && p.stats[S.CRAFTING] > xp0 && banked(p, o('pot_empty')) >= 2, { outcome: r.outcome, rounds: r.rounds, pots: banked(p, o('pot_empty')), t: r.t });
+    p.messageGame = messageGame;
+    check("chains: pottery: Rimmington's clay, buckets from its general store, the well's water, the Barbarian Village wheel and oven, pots banked at Edgeville (or cracked in the oven)", r.rounds >= 1 && p.stats[S.CRAFTING] > xp0 && banked(p, o('pot_empty')) + cracked >= 2, { outcome: r.outcome, rounds: r.rounds, pots: banked(p, o('pot_empty')), cracked, t: r.t });
     hold(p);
 }
 {

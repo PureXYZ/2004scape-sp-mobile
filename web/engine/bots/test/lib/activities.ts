@@ -100,3 +100,11 @@ export function walkSteps(level: number, x: number, z: number, tx: number, tz: n
     }
     return -1;
 }
+
+// (variety round 2, Track D2: the scenes staged with the round's errands off, as party.test's; loaded on demand, so an
+// older library (an A/B run, LC_BOTS_SRC) loads and goes on without)
+export async function setD2Offers(on: boolean): Promise<boolean> {
+    const d2 = await import('#/engine/bot/port/BotD2Picks.js').catch(() => null);
+    d2?.setD2OffersForTest(on);
+    return d2 !== null;
+}
