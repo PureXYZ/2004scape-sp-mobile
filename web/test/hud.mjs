@@ -9,7 +9,7 @@
 //   an open panel, a tutorial game message beside it;
 //   after skipping the tutorial (::setvar, logout through the side panel, the characters list, log in again): the 13
 //   tabs and their panel, tap-to-drop (the chat bar's button: an item dropped by a tap, its menu by a long-press, the
-//   bank's inventory left alone), the action label (beside an item's slot and a red cross, fading out; a walk leaves it), the real Run, the compact chat lines, the chatbox toggle and history drag, the chat filters,
+//   bank's inventory left alone), the action label (beside an item's slot and a red cross, fading out; a walk leaves it), the battery in the top left corner, the real Run, the compact chat lines, the chatbox toggle and history drag, the chat filters,
 //   the keyboard bar's charsets, the quest list drag and glide, the bank (window and side panel), the panel stepping
 //   aside for a dialogue or window, the World map (open, its data unpacked with libbzip2, drag, pinch, double-tap, Key,
 //   overview, underground, centre, close, Escape), the camera pad, hardware Space and Escape, a safe-area change, Settings
@@ -257,7 +257,7 @@ async function hudOverlaps() {
     return evaluate(`(() => {
         const box = sel => { const n = document.querySelector(sel); if (!n || n.closest('[hidden]') || !n.getClientRects().length) return null; const r = n.getBoundingClientRect(); return { sel, l: r.left, t: r.top, r: r.right, b: r.bottom }; };
         const map = box('#hud-map');
-        const rects = ['#btn-compass', '#map-zoom', '#btn-worldmap', '#hud-tabs', '#hud-panel', '#hud-chat-bar', '#hud-chat-lines', '#hud-chat-box', '#hud-dialog', '#hud-camera', ...[...document.querySelectorAll('#hud-orbs > button')].map(b => '#' + b.id)].map(box).filter(Boolean);
+        const rects = ['#btn-compass', '#map-zoom', '#btn-worldmap', '#hud-tabs', '#hud-panel', '#hud-chat-bar', '#hud-chat-lines', '#hud-chat-box', '#hud-dialog', '#hud-camera', '#hud-battery', ...[...document.querySelectorAll('#hud-orbs > button')].map(b => '#' + b.id)].map(box).filter(Boolean);
         const hit = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;
         const found = [];
         for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) if (hit(rects[i], rects[j])) found.push(rects[i].sel + ' / ' + rects[j].sel);
@@ -1098,6 +1098,30 @@ try {
     await sleep(300);
     check('...and again closes it', !(await visible('#hud-panel')));
 
+    // ---- the battery in the top left corner: none until native reports one (as here), then the glyph and percentage,
+    // which taps go through; the client's tooltip and prompts go under it (its top inset). Left on for the rest of the run.
+    const batteryOf = `(() => { const n = document.getElementById('hud-battery'), r = n.getBoundingClientRect(), cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+        return { shown: !n.hidden, text: n.textContent, cls: n.className, rect: [r.left, r.top, r.right, r.bottom], touchable: !!document.elementFromPoint(cx, cy)?.closest('#hud-battery'), freeTop: ${C}.freeTop }; })()`;
+    const setBattery = async (level, charging) => {
+        await evaluate(`window.LostCityHost.battery(${level}, ${charging})`);
+        await sleep(300);
+        return evaluate(batteryOf);
+    };
+    let battery = await evaluate(batteryOf);
+    check('no battery until native reports one, and the client\'s free area starts at the top', !battery.shown && battery.freeTop === 0, JSON.stringify(battery));
+    battery = await setBattery(0.87, false);
+    check('the battery (87 %) in the top left corner of the safe area, faint, not touchable; the client\'s top inset its bottom',
+        battery.shown && battery.text === '87%' && battery.cls === '' && Math.abs(battery.rect[0] - (SAFE.left + 4 * ZOOM)) <= ZOOM && Math.abs(battery.rect[1] - (SAFE.top + 4 * ZOOM)) <= ZOOM && !battery.touchable && battery.freeTop === toRender(battery.rect[3]),
+        JSON.stringify(battery));
+    const batteryLow = await setBattery(0.2000000029802322, false); // (iOS's Float 0.2 as a Double)
+    const batteryCharging = await setBattery(0.15, true);
+    check('...red when low (20 % and below) and unplugged, green on the charger', batteryLow.text === '20%' && batteryLow.cls === 'low' && batteryCharging.text === '15%' && batteryCharging.cls === 'charging', JSON.stringify({ batteryLow, batteryCharging }));
+    battery = await setBattery(-1, false);
+    check('...an unknown level (iOS\'s -1) takes it away again, and the top inset with it', !battery.shown && battery.freeTop === 0, JSON.stringify(battery));
+    await setBattery(0.87, false);
+    overlap = await hudOverlaps();
+    check('with the battery: no HUD control overlaps another or runs off the screen', clean(overlap), JSON.stringify(overlap));
+
     // ---- the real Run
     s = await hudState();
     await tapElement('#btn-run');
@@ -1431,7 +1455,8 @@ try {
     }
     const bankDrop = await evaluate(`({ client: ${C}.hudState().tapToDrop, deposit: ${C}.hudState().tapDeposit, red: document.getElementById('hud-panel').classList.contains('drop-mode'), actions: window.__actions.slice(${bankMark}) })`);
     check('the bank, with tap-to-drop left on: a red frame, and a tap on the logs in its inventory deposits all of them', bankLogs && bankDrop.client === true && bankDrop.deposit === true && bankDrop.red && bankDrop.actions.length === 1 && /^Deposit All @lre@Logs/.test(bankDrop.actions[0]), JSON.stringify({ bankLogs, ...bankDrop }));
-    check('the bank: the minimap, orbs and tab column give way; nothing overlaps', !(await visible('#hud-map')) && !(await visible('#hud-orbs')) && !(await visible('#btn-run')) && overlap.found.length === 0, JSON.stringify(overlap));
+    const bankFreeTop = (await free())[1];
+    check('the bank: the minimap, orbs, battery and tab column give way (no top inset); nothing overlaps', !(await visible('#hud-map')) && !(await visible('#hud-orbs')) && !(await visible('#btn-run')) && !(await visible('#hud-battery')) && bankFreeTop === 0 && overlap.found.length === 0, JSON.stringify({ bankFreeTop, ...overlap }));
     await evaluate(`${C}.closeModal()`);
     await sleep(800);
     check('after the bank the player\'s panel and the tab column are back', (await visible('#hud-panel')) && (await visible('#hud-tabs')));

@@ -550,6 +550,68 @@ body.pixelated .surface {
     }
 }
 
+/* the phone's battery in the top left corner (hud.js updateBattery): a pixel glyph filled to the charge and the
+   percentage in the small 2004 font, faint white so it stays out of the way; red when low and unplugged, green while
+   charging. Taps go through to the world. */
+#hud-ui > #hud-battery {
+    pointer-events: none;
+}
+
+#hud-battery {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font: 16px/12px var(--font-small);
+    color: var(--white);
+    text-shadow: var(--shadow);
+    white-space: nowrap;
+    opacity: 0.7;
+}
+
+#hud-battery.low {
+    color: var(--red);
+}
+
+#hud-battery.charging {
+    color: var(--green);
+}
+
+/* 14x8 with its nub on the right; the 1 px black shadow of the game's text on the outline, the charge and the nub */
+#hud-battery .battery-icon {
+    position: relative;
+    box-sizing: border-box;
+    width: 14px;
+    height: 8px;
+    border: 1px solid currentColor;
+    box-shadow: 1px 1px 0 #000, inset 1px 1px 0 #000;
+}
+
+#hud-battery .battery-icon::after {
+    content: '';
+    position: absolute;
+    right: -3px;
+    top: 1px;
+    width: 2px;
+    height: 4px;
+    background: currentColor;
+    box-shadow: 1px 1px 0 #000;
+}
+
+/* (the digits' 8 px level with the glyph's) */
+#battery-value {
+    position: relative;
+    top: 1px;
+}
+
+#battery-fill {
+    position: absolute;
+    left: 1px;
+    top: 1px;
+    height: 4px;
+    background: currentColor;
+    box-shadow: 1px 1px 0 #000;
+}
+
 .icon-hp {
     background-image: url('ui/sprites/staticons-6.png');
 }

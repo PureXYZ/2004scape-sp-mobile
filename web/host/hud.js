@@ -10,6 +10,7 @@
 //   - right: the 13 classic tabs and Settings as stone slabs in a framed stone column under the minimap; a tap slides
 //     that tab's panel out beside the column, a tap on the open tab closes it. A side modal (bank, shop, trade...) opens the panel
 //     by itself at the right edge, and the minimap, orbs and column give way to it;
+//   - top left: the phone's battery (the status bar is hidden), small and faint, while nothing else needs the corner;
 //   - bottom left: the newest chat lines over the world above the tap-to-drop, keyboard and chat buttons; the full
 //     chatbox (and the 2004 chat filter buttons under it, online Report abuse too) opens on a tap, and by itself for a dialogue, the tutorial's
 //     instructions, an amount/name prompt or typed chat. Tap-to-drop is OSRS mobile's: while it is on (the button red),
@@ -93,6 +94,9 @@
     const CAMERA_PAD = { w: 44 * 3 + 4, h: 40 * 3 + 4 };
     const DIALOG_ROW = 40; // a dialogue answer, for a finger (the 2004 lines are 16 px)
     const DIALOG_TITLE = 24;
+    const BATTERY_H = 12; // the battery's row: its glyph and percentage (host.css #hud-battery)
+    const BATTERY_CELL = 10; // the glyph's charge at 100 %, in whole HUD px
+    const BATTERY_LOW = 20; // % and below, unplugged: red (the percentage shown: iOS's level is a Float, 0.2000000030)
 
     let api = null;
     const el = {};
@@ -119,6 +123,7 @@
         linesKey: '',
         linesTimer: 0,
         orbsKey: '',
+        batteryKey: '',
         zoomArc: null, // the zoom slider's groove as placed: { out, in, r } (degrees, HUD px)
         zoomDrag: null, // { id, offset }: the finger moving the knob
         zoomNotch: null, // where the knob last stopped with a click: 'min', 'max', 'detent'
@@ -131,7 +136,7 @@
 
     function init(hostApi) {
         api = hostApi;
-        for (const id of ['hud-dialog', 'hud-dialog-options', 'hud', 'hud-ui', 'surface-game', 'surface-map', 'surface-side', 'surface-chat', 'hud-map', 'hud-map-clip', 'btn-compass', 'btn-worldmap', 'hud-orbs', 'map-zoom', 'map-zoom-track', 'zoom-mark-in', 'zoom-mark-out', 'hud-tabs', 'hud-panel', 'btn-drop', 'hud-chat-box', 'hud-chat-bar', 'hud-chat-modes', 'hud-chat-lines', 'hud-camera', 'btn-chat-toggle', 'orb-hp', 'orb-prayer', 'hp-value', 'prayer-value', 'run-energy']) {
+        for (const id of ['hud-dialog', 'hud-dialog-options', 'hud', 'hud-ui', 'surface-game', 'surface-map', 'surface-side', 'surface-chat', 'hud-map', 'hud-map-clip', 'btn-compass', 'btn-worldmap', 'hud-orbs', 'map-zoom', 'map-zoom-track', 'zoom-mark-in', 'zoom-mark-out', 'hud-tabs', 'hud-panel', 'btn-drop', 'hud-chat-box', 'hud-chat-bar', 'hud-chat-modes', 'hud-chat-lines', 'hud-camera', 'btn-chat-toggle', 'orb-hp', 'orb-prayer', 'hp-value', 'prayer-value', 'run-energy', 'hud-battery', 'battery-fill', 'battery-value']) {
             el[id] = document.getElementById(id);
         }
         el.rose = el['btn-compass'].querySelector('.compass-rose');
@@ -644,6 +649,9 @@
         // the orbs in a row left of the compass, at the top
         g.orbs = { right: Math.min(g.compass.x, g.map.cx - r) - GAP, y: top };
 
+        // the battery in the top left corner
+        g.battery = { x: left, y: top, bottom: top + BATTERY_H };
+
         // the chat: its buttons in the bottom left corner, the chatbox above them
         g.bar = { x: left, y: bottom - BAR_H };
         g.chat = { x: left, y: g.bar.y - GAP - (CHAT.h + FRAME * 2), w: CHAT.w + FRAME * 2, h: CHAT.h + FRAME * 2 };
@@ -686,6 +694,8 @@
             tabs: !s.sideModal,
             map: !s.sideModal,
             orbs: !s.mainModal && !s.sideModal && !typing,
+            // (with the orbs: out of the way of a window, and of the chatbox lifted above the keyboard)
+            battery: api.battery?.() != null && !s.mainModal && !s.sideModal && !typing,
             chat: chatShown && !(state.dialog && !typing),
             dialog: chatShown && !!state.dialog && !typing,
             // the chat filters only beside a chatbox the player opened or is typing in, not under a dialogue, prompt
@@ -802,6 +812,12 @@
             setBox(dialog, g.chat.x, dialogTop, Math.min(g.chat.w, g.coveredRight - GAP - g.chat.x), height);
         }
 
+        // the battery, unless a long list of answers reaches up into the corner
+        const battery = el['hud-battery'];
+        const batteryShown = show.battery && !(show.dialog && dialogTop < g.battery.bottom + GAP);
+        battery.hidden = !batteryShown;
+        Object.assign(battery.style, { left: `${g.battery.x}px`, top: `${g.battery.y}px`, height: `${BATTERY_H}px` });
+
         // typing: the chatbox above the keyboard, sliding up and back down with it. It scales down to fit beside what
         // shows at its height there: the tops of the panel and the tab column (the rest is under the keyboard), the
         // minimap and its compass; and on a short screen (an SE with Display Zoom) to fit above the keyboard at all.
@@ -840,7 +856,7 @@
         // room above (a long list of answers)
         const camera = el['hud-camera'];
         const above = show.dialog ? dialogTop : show.chat ? g.chat.y : g.bar.y - (show.lines ? CHAT_LINES * LINE_H : 0);
-        const padTop = Math.max(v.safe.top + EDGE, Math.round((above - CAMERA_PAD.h) / 2));
+        const padTop = Math.max(batteryShown ? g.battery.bottom + GAP : v.safe.top + EDGE, Math.round((above - CAMERA_PAD.h) / 2));
         camera.hidden = !show.camera || padTop + CAMERA_PAD.h + GAP > above;
         if (!camera.hidden) {
             setBox(camera, g.left, padTop, CAMERA_PAD.w, CAMERA_PAD.h);
@@ -848,7 +864,8 @@
 
         // what the client may use for windows and its own texts (viewport px): the leftmost HUD edge on the right at the
         // height of the world (the orbs only cover the top while no window is open; a panel opened over a window is
-        // left out, so the window stays where it is), the chat at the bottom
+        // left out, so the window stays where it is), the chat at the bottom, and the battery's row at the top (the
+        // tooltip and a use prompt go under it, at its left edge; it is never there with a window)
         const size = renderSize(view);
         const coverRight = Math.min(panelOver ? g.column.x : g.coveredRight, show.map ? g.map.cx - g.map.r : g.right) - GAP;
         const coverBottom = typing
@@ -862,7 +879,7 @@
                   : v.vh - v.safe.bottom;
         const insets = {
             left: Math.round(view.safe.left * size.scale),
-            top: 0,
+            top: batteryShown ? Math.round(g.battery.bottom * k * size.scale) : 0,
             right: Math.round((view.vw - coverRight * k) * size.scale),
             bottom: Math.round((view.vh - coverBottom * k) * size.scale)
         };
@@ -1080,6 +1097,7 @@
         }
 
         updateOrbs(s);
+        updateBattery();
         if (s.cameraYaw !== state.yaw && typeof s.cameraYaw === 'number') {
             state.yaw = s.cameraYaw;
             el.rose.style.transform = `rotate(${(s.cameraYaw * 360) / 2048}deg)`;
@@ -1106,6 +1124,26 @@
         el['run-energy'].className = `orb-value ${s.runExists ? level(s.runEnergy, 100) : ''}`;
         setClass(runButton, 'active', s.running || api.isRunHeld());
         setClass(runButton, 'disabled', s.runExists && !s.runAvailable);
+    }
+
+    // The phone's battery (host.js: { level 0..1, charging } from native, or null): a glyph filled to the charge and the
+    // percentage, faint white; red when low and unplugged, green while charging. (Whether it shows is place()'s.)
+    function updateBattery() {
+        const b = api.battery?.() ?? null;
+        const percent = b ? Math.round(b.level * 100) : 0;
+        const key = b ? `${percent}|${b.charging}` : '';
+        if (key === state.batteryKey) {
+            return;
+        }
+        state.batteryKey = key;
+        if (!b) {
+            return;
+        }
+        el['battery-value'].textContent = `${percent}%`;
+        el['battery-fill'].style.width = `${percent > 0 ? Math.max(1, Math.round(b.level * BATTERY_CELL)) : 0}px`;
+        setClass(el['hud-battery'], 'charging', b.charging);
+        setClass(el['hud-battery'], 'low', !b.charging && percent <= BATTERY_LOW);
+        el['hud-battery'].setAttribute('aria-label', `Battery ${percent}%${b.charging ? ', charging' : ''}`);
     }
 
     function setOrb(node, value, max) {

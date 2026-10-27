@@ -152,7 +152,9 @@ it. `AssetRouter` (+ `GameAssets`, `Mime`, `BodyHeader`), `SaveStore` (+ `FileOp
 `GameWebViewClient`, `GameChromeClient`, `RSTheme` (+ `RSTextView`, `StretchDrawable`) and `Cover` are the core.
 
 - **Components.** Everything else is a `SessionComponent` in `session.components`, installed by one line each in
-  GameSession's init, in this order: `Shell.install` (haptics, sound, the loading cover: §4.4, §4.5), `LmComponent.install`
+  GameSession's init, in this order: `Shell.install` (haptics, sound, the loading cover: §4.4, §4.5; the battery:
+  `BatteryComponent`, `LostCityHost.battery` from the sticky `ACTION_BATTERY_CHANGED` while started, a new percentage
+  or plug change only), `LmComponent.install`
   (the bots' chat model: §5.2), `KeyboardBridge.install` (§4.3). GameSession calls each at iOS's points (`pageReset`,
   `pageReady`, `status`, `settingsChanged`, `fatal`, `memoryWarning`, `start`/`resume`/`pause`/`stop`, `attach`/`detach` of an activity with its root view, focus and
   configuration changes). A component registers the page messages it handles with `session.handle("keyboard") { msg ->

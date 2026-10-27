@@ -80,6 +80,9 @@
                 <button class="orb" id="orb-prayer" aria-label="Prayer"><span class="icon icon-prayer"></span><span class="orb-value" id="prayer-value"></span></button>
             </div>
 
+            <!-- top left: the phone's battery, quietly (native's LostCityHost.battery; the status bar is hidden) -->
+            <div id="hud-battery" role="img" hidden><span class="battery-icon"><span id="battery-fill"></span></span><span id="battery-value"></span></div>
+
             <div id="hud-camera" hidden>
                 <button class="stone-btn cam-btn" data-hold="1" aria-label="Rotate camera left"><span class="icon icon-rotate-left"></span></button>
                 <button class="stone-btn cam-btn" data-hold="3" aria-label="Tilt camera up"><span class="icon icon-up"></span></button>

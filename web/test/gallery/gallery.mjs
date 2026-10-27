@@ -134,6 +134,9 @@ export const STATES = {
         await tapSel(page, '#btn-drop');
     },
     stats: async page => tapSel(page, '#hud-tabs .tab[data-tab="1"]'),
+    // the battery in the top left corner (every shot has one at 76 %): low and unplugged, and charging
+    'battery-low': async page => page.evaluate(`window.LostCityHost.battery(0.12, false)`),
+    'battery-charging': async page => page.evaluate(`window.LostCityHost.battery(0.43, true)`),
     chat: async page => tapSel(page, '#btn-chat-toggle'),
     'chat-panel': async page => {
         await tapSel(page, '#hud-tabs .tab[data-tab="3"]');
@@ -448,7 +451,7 @@ async function fits(page, selector, { safe = true } = {}) {
 async function hudClean(page, filters) {
     const hud = await page.evaluate(`(() => {
         const box = sel => { const n = document.querySelector(sel); if (!n || n.closest('[hidden]') || !n.getClientRects().length) return null; const r = n.getBoundingClientRect(); return { sel, l: r.left, t: r.top, r: r.right, b: r.bottom }; };
-        const rects = ['#btn-compass', '#map-zoom', '#btn-worldmap', '#hud-tabs', '#hud-panel', '#hud-chat-bar', '#hud-chat-box', ...[...document.querySelectorAll('#hud-orbs > button')].map(b => '#' + b.id)].map(box).filter(Boolean);
+        const rects = ['#btn-compass', '#map-zoom', '#btn-worldmap', '#hud-tabs', '#hud-panel', '#hud-chat-bar', '#hud-chat-box', '#hud-battery', ...[...document.querySelectorAll('#hud-orbs > button')].map(b => '#' + b.id)].map(box).filter(Boolean);
         const hit = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;
         const found = [];
         for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) if (hit(rects[i], rects[j])) found.push(rects[i].sel + ' / ' + rects[j].sel);
@@ -614,6 +617,7 @@ try {
                 continue;
             }
             await page.evaluate(`window.__lcSafeAreaOverride = ${JSON.stringify(device.safe)}`);
+            await page.evaluate(`window.LostCityHost.battery(0.76, false)`); // (as native reports it on a phone)
             await sleep(500);
             try {
                 if (device.world) {

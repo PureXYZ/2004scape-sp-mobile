@@ -326,6 +326,11 @@ at 60 Hz the page's main frames went from 60 to 48 a second, their cost from 8.9
 - **Orbs** (top right, left of the compass): hitpoints and prayer (`hudState().hp/hpMax/prayer/prayerMax`, coloured by
   how much is left; a tap opens the Stats / Prayer tab), and **Run** (the word and the run energy; red while running;
   dimmed during a dialogue, `runAvailable`). Hidden while a window is open or while typing.
+- **Battery** (top left corner; the status bar is hidden): a 14×8 pixel glyph filled to the charge and the percentage
+  in the small font, faint white (70 % opacity), red at 20 % and below unplugged, green on the charger; taps go
+  through. From native's `LostCityHost.battery(level, charging)` (§7); none until native reports a level (the
+  simulator, desktop Chrome). Hidden with the orbs, and where a long list of dialogue answers reaches the corner. While
+  it shows, the client's top inset is its bottom (16 HUD px), so the tooltip and a use prompt go under it.
 - **Tab column**: the 13 classic tabs (sideicons) and Settings on slabs (the red stone `redstone2` for the open tab,
   the same shape in grey for the others) in a framed column of rough stone (34 px per tab, 76 px in all) under the
   minimap, bottom-aligned with the panel. The rough stone (`ui/textures/stone.png`, web/ui/build.mjs: the world texture
@@ -498,6 +503,7 @@ Native → page: `webView.callAsyncJavaScript` on `window.LostCityHost`
 | `LostCityHost.keyboard.dismissed()` | The player dismissed the native keyboard. |
 | `LostCityHost.keyboard.pressKey(key, down)` | Hardware keyboard keys as separate key-down (`down: true`, repeated while Backspace is held) and key-up events: `Enter`, `Backspace`, `ArrowLeft`/`Right`/`Up`/`Down`, `Escape`, `Tab`, `Control`, `F1`… Enter on the login form behaves like `submit()`. |
 | `LostCityHost.memoryWarning()` | iOS memory warning. |
+| `LostCityHost.battery(level, charging)` | The battery for the HUD's corner (§6.1): `UIDevice.batteryLevel` (0..1; -1 unknown, which hides it) and whether it is on the charger (`charging` or `full`). At `ready`, on becoming active and at each `batteryLevelDidChange` / `batteryStateDidChange`. |
 | `LostCityHost.audio.setMuted(muted)` | Android only (docs/ANDROID.md §3.3): a fallback mute. |
 | `LostCityHost.bots.lmReply({id, text, source, error?, ms, timings?, usage?})` | **Bots**: native's answer to `{type:'lm'}` (§7.1). |
 | `LostCityHost.bots.lmStatus({local, online})` | **Bots**: the chat model's status changed (§7.1). |

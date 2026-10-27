@@ -77,6 +77,7 @@ final class GameViewController: UIViewController {
         if settings.readable {
             ServerPasswordStore.purge(keeping: OnlineServer.ids(in: settings.values))
         }
+        UIDevice.current.isBatteryMonitoringEnabled = true  // (the HUD's battery: reportBattery)
         observeApp()
         keyboard.onActivity = { [weak self] in self?.userActivity() }
         keyboard.onHaptic = { [weak self] in self?.playHaptic($0) }
@@ -254,6 +255,7 @@ final class GameViewController: UIViewController {
             $0.botChat.resume()
             $0.reloadIfNeeded()
             $0.keyboard.activate()
+            $0.reportBattery()
         }
         on(UIApplication.willTerminateNotification) {
             Log.info("app", "will terminate")
@@ -263,6 +265,8 @@ final class GameViewController: UIViewController {
         on(UIApplication.didReceiveMemoryWarningNotification) {
             $0.memoryWarning()
         }
+        on(UIDevice.batteryLevelDidChangeNotification) { $0.reportBattery() }
+        on(UIDevice.batteryStateDidChangeNotification) { $0.reportBattery() }
     }
 
     private func memoryWarning() {
@@ -271,6 +275,14 @@ final class GameViewController: UIViewController {
         page.call("memoryWarning") { outcome in
             Log.info("host", "memoryWarning → \(outcome)")
         }
+    }
+
+    /// The battery for the HUD's top left corner (the status bar is hidden): `LostCityHost.battery(level, charging)` at
+    /// `ready`, on becoming active and at each change iOS reports. The level is -1 where iOS does not know it (the
+    /// simulator), which the page leaves out; charging includes full on the charger.
+    private func reportBattery() {
+        let device = UIDevice.current
+        page.call("battery", [Double(device.batteryLevel), device.batteryState == .charging || device.batteryState == .full])
     }
 
     private func userActivity() {
@@ -315,6 +327,7 @@ final class GameViewController: UIViewController {
             Log.info("host", "page ready")
             uncover()
             keyboard.activate()
+            reportBattery()
         case "status":
             handleStatus(message["phase"] as? String ?? "?", detail: message["detail"])
         case "keyboard":

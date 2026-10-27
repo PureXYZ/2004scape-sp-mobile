@@ -5,6 +5,9 @@ with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
 ## [Unreleased]
 
+- **Battery.** The phone's battery level shows small and faint in the top left corner while you play (the status bar
+  is hidden): red when low, green on the charger. It steps aside for windows and the keyboard, and the game's hover
+  text moves just under it.
 - **Online mode.** The app can play on a Lost City (Engine-TS 274) server that you or a friend run, on your Wi-Fi or
   on the internet, instead of the world on the phone: the title's new **World** button (and Settings › World › Play on)
   chooses This phone or a server, **Add server** takes an address and checks it, and switching restarts the game in

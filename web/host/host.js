@@ -748,6 +748,9 @@
     let menu = null;
     // The World map window (worldmap.js), once booted; null if it failed to load (the HUD then has no World map button).
     let worldMap = null;
+    // The phone's battery as native last reported it (LostCityHost.battery): { level 0..1, charging }, or null (not
+    // known: the simulator, desktop Chrome), for the HUD's corner.
+    let battery = null;
 
     function canvasElement() {
         return document.getElementById('canvas');
@@ -1664,6 +1667,13 @@
             worldMap?.release(); // (a closed World map's iframe, ~40-75 MB)
         },
         saveNow: () => lifecycle('save'),
+        // native's battery reading, now and at each change: the level 0..1 and whether it is charging (or full on the
+        // charger); a level outside 0..1 (iOS's -1: unknown) hides it
+        battery(level, charging) {
+            const known = typeof level === 'number' && level >= 0 && level <= 1;
+            battery = known ? { level, charging: charging === true } : null;
+            return battery;
+        },
         // online: native's socket events, in arrival order (NativeSocket)
         socket: {
             events(batch) {
@@ -4336,6 +4346,7 @@
                 setMinimapZoom,
                 openWorldMap: worldMap ? openWorldMap : null,
                 isRunHeld: () => runToggled,
+                battery: () => battery,
                 keyboard: () => ({
                     overlap: keyboardOverlap,
                     duration: keyboardAnimation,
