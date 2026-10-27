@@ -1,0 +1,2154 @@
+ios: the 3D scene drawn again only where it changed
+
+With the camera still, little of the 3D scene changes from one frame to the next (0.3-1.1 % of its 16 px tiles at
+Lumbridge and at Varrock West with 500 bots), yet every frame drew all of it again: 11-14k triangles, 85-88 % of a
+frame's work. Now a frame with the camera, level, viewport and zoom of the frame before draws again only the tiles
+where something it draws changed, with exactly the pixels a full render gives (dash3d/IncrRender.ts):
+
+- Pass 1 is upstream's traversal (World.renderAll) unchanged, every side effect in its order (getTempModel and what it
+  sets, minY, picking, the ground pick, getTexels: which textures animate depends on it), drawing nothing. Each draw
+  item, a ground tile or a model placement, is matched with the item of the reference frame (the last one drawn) by its
+  object and arguments; a source (a player, NPC, projectile, spot anim, animated loc or ground item) also by the content
+  of the model getTempModel gave it (IncrSig: the vertices and face alphas by value, the face arrays shared with a
+  cached model by identity), so a player between two frames of an idle animation matches. A matched item is left as it
+  was: no projection, no face sorting, the reference's screen box and a copy of its recorded triangles. Any other is
+  recorded triangle by triangle (a full frame records every item while it draws). Never left as it was: a model the
+  pointer may pick, anything asking for texture 17 or 24, the ground while a click is pending.
+- The region drawn again: the boxes of every item without a match and every reference item left without one, the items
+  using texture 17 or 24 when it moved, and each tile where two matched items are drawn in another order than before.
+  World.fill's tile order depends on every sprite on the tiles, so a player moving can make two unchanged locs elsewhere
+  swap, and the last one drawn wins their overlap.
+- Blends write each pixel from the one to its right (dst[off++] = ... dst[off]): where the region meets a blending
+  item's box in a row of tiles, it covers that box to one pixel past its right edge, to a fixpoint. An unchanged blend
+  left of a changed pixel is then drawn again, and no blend that is drawn reads a pixel the region does not draw.
+- The region is cleared in a scratch frame and drawn again from the recorded triangles, in order, a triangle only when
+  its box meets the region and a span only when it meets the region's columns in its row; that goes into the
+  persistent frame, and the persistent frame to the output. On average the region is 5 % of the frame at Lumbridge
+  and 9-11 % at Varrock West with 500 bots.
+
+A frame is drawn in full, as upstream draws it, when the camera, level, viewport or zoom moved since the frame before,
+and the next one measures every item's box. Also in full: after any change to the scene (World's set/del/add/move/
+reset/shareLight methods, LOC_ANIM), to the colour table, the textures or the clipping, after PixMap.invalidate
+(visibility, pageshow, a restored context, a resize), at least every 64 frames and 1.5 s (a safety net), and when the
+region would be more than 60 % of the frame. An error inside it turns it off and draws upstream's frame from then on.
+World.incrBypass draws upstream's frame without any of it (tests), World.incrLast says what the last renderAll did,
+IncrRender.enabled = false turns it off.
+
+Debug builds only (LC_INCR_VERIFY, web/client/build.mjs; release bundles leave it out): IncrRender.verify draws each
+frame first as upstream does, from the state the frame starts with, puts that state back, lets the build draw the
+frame, and compares every pixel and the state a frame leaves (the picked entities in order, the ground pick, whether
+textures 17 and 24 animate, every drawn source's minY, height and animation state).
+
+Verified on debug builds, in Chrome (V8) and WebKit (JavaScriptCore, a macOS WKWebView): every partial frame equal
+to upstream's full render of the same frame, pixels and state, none differing.
+- web/test/render-verify (an outside oracle: it wraps renderAll, keeps the build's frame and draws upstream's into a
+  buffer of its own): the world session's 28 scenarios (the title to the world, Lumbridge's NPCs, camera views and
+  one-unit nudges, the waterfall, animated locs, the windmill, fires, doors, ground items, woodcutting, fishing, mining,
+  combat, the player's own animations, roofs and levels, blends, overhead chat, menus, the HUD's panels, zoom, the
+  classic layout, a resize, 30 fps, brightness, pause and resume, a relog): Chrome 29,626 partial frames, WebKit
+  29,852 (at half length), and its 12-minute idle, Chrome 37,020, WebKit 36,846; its bots session (Varrock West with
+  500 bots, Edgeville's PK crowd, the Wilderness, a relog, a long idle): Chrome 35,446, WebKit 35,239; its low-detail
+  session (Settings › World › Detail: Low, 16 scenarios): Chrome 11,814, WebKit 11,995; the world session as the
+  Android app's page (an 800x360 world, whole-frame pushes): 23,099; and the full frames from 32 fixed cameras
+  identical to main's in both engines (96 of 96).
+- The patch's own oracle (IncrVerify): Varrock West with 500 bots, Chrome 3,023 partial frames, WebKit 3,012;
+  Lumbridge, Chrome 3,020, WebKit 3,010; hud.mjs's play-through (Chrome), 6,889 as iOS and 6,576 as the Android page;
+  e2e.mjs's camera check, 427 and 424.
+
+Measured on release builds, main and this interleaved (A B A B A B, 20 s each after a settle, one at a time, a Mac):
+standing at Varrock West with 500 bots, Chrome's page main thread 331.1 -> 204.5 ms/s (-38 %; its renderer process
+with the engine's worker 440 -> 331) and WebKit's WebContent process (the page and the engine) 402.9 -> 309.5 ms/s
+(-23 %); at Lumbridge without bots 323.7 -> 231.0 (-29 %) and 335.4 -> 271.9 (-19 %); at Lumbridge walking every 3 s
+334.3 -> 273.9 (-18 %, Chrome). 51 logic cycles a second and 50 frames a second on both. It holds 4.7 MB (Lumbridge)
+to 5-7 MB (Varrock West with 500 bots) more: two 3D frames, two triangle buffers, the item lists and the sources'
+signatures.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 00aa25b..ca8d402 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -7507,6 +7507,7 @@ export class Client extends GameShell {
+             const layer: number = LOC_SHAPE_TO_LAYER[shape];
+ 
+             if (x >= 0 && z >= 0 && x < BuildArea.SIZE && z < BuildArea.SIZE && this.world && this.groundh) {
++                World.incrGen++; // custom (ios): a loc's model replaced in place: the next 3D frame in full (patch 0029)
+                 const heightSW = this.groundh[this.minusedlevel][x][z];
+                 const heightSE = this.groundh[this.minusedlevel][x + 1][z];
+                 const heightNE = this.groundh[this.minusedlevel][x + 1][z + 1];
+diff --git a/src/dash3d/IncrRender.ts b/src/dash3d/IncrRender.ts
+new file mode 100644
+index 0000000..886ea13
+--- /dev/null
++++ b/src/dash3d/IncrRender.ts
+@@ -0,0 +1,1074 @@
++import Pix2D from '#/graphics/Pix2D.js';
++import PixMap from '#/graphics/PixMap.js';
++import Pix3D from '#/dash3d/Pix3D.js';
++
++import type Model from '#/dash3d/Model.js';
++import type World from '#/dash3d/World.js';
++
++// custom (ios): the incremental 3D render (patch 0029). With the camera still, a frame differs from the one before only
++// where something it draws changed, so only that part is drawn again, with the same pixels a full render gives.
++//
++// Every frame World.renderAll draws is a sequence of draw items in its painter's order: ground tiles
++// (renderQuickGround, renderGround) and model placements (Model.worldRender for the scene's models,
++// ModelSource.worldRender for players, NPCs, projectiles, spot anims, animated locs and ground items). A pixel is the
++// result of the items that write it, in that order. So with the same camera, a pixel can only differ from the frame
++// before when an item writing it is new, gone, changed, or drawn in another order relative to the others (World.fill's
++// tile order depends on every sprite on the tiles, and players and NPCs are re-added each frame, so one moving can make
++// two unchanged locs elsewhere swap: the incremental render's prototype missed that). Hence:
++//
++// 1. Pass 1 runs upstream's traversal unchanged, with every side effect in upstream's order (getTempModel and what it
++//    sets, minY, picking, the ground pick, getTexels), but draws nothing. Each item is matched with the item of the
++//    reference frame (the last one drawn) drawn the same way: the same object and arguments, and for a source the same
++//    model content (IncrSig: the vertices and face alphas by value, the face arrays it shares with a cached model by
++//    identity). A matched item is left as it is (deferred: no projection, no face sorting): it keeps the reference's
++//    box and a copy of the reference's recorded triangles. Any other is recorded triangle by triangle (Pix3D.incrMode
++//    1). Never deferred: a model the pointer may pick (render2 picks in upstream's order), anything asking for texture
++//    17 or 24 (which of them animate depends on that, Client.textureRunAnims), the ground while World.click is pending.
++// 2. The region to draw again: the box of every item without a match and of every reference item left without one, of
++//    every item using texture 17 or 24 if it moved since, and, per 16 px tile, wherever two matched items drawn there
++//    are in another order than in the reference (two unchanged items that overlap change a pixel only by swapping).
++// 3. Blends: a blended span writes each pixel from the one to its right (Pix3D's dst[off++] = ... dst[off]), so an
++//    unchanged blending item can change left of a changed pixel, and drawing only part of the frame must not let a
++//    blend read a pixel that part does not draw. One rule closes both, to a fixpoint: where the region meets a blending
++//    item's box in a row of tiles, it covers that box to one pixel beyond its right edge in that row.
++// 4. The region is cleared in a scratch frame and drawn there again from the recorded triangles, item by item in order,
++//    each triangle only when its box touches the region and each span only when it meets the region's columns in its
++//    row (Pix3D.incrReplay, incrRowMin). Every pixel in the region is then exactly the full render's; the region goes
++//    into the persistent frame, and that to the output. Outside the region nothing drawn there changed.
++//
++// A frame is drawn in full (upstream's renderAll as is) when the camera, the level, the viewport or the zoom changed
++// since the frame before ('camera'). The next one is drawn in full too, recording every item ('settle', Pix3D.incrMode
++// 3), and the ones after it are partial. Also in full, measuring: after a change to the world (World's
++// set/del/add/move/reset methods, LOC_ANIM), to the colour table, the textures or the clipping, after PixMap.invalidate
++// (the page shown again, a canvas restored, a resize), at least every 64 frames and every 1.5 s (a safety net), and
++// when the region would cover most of the frame. World.incrBypass draws upstream's frame without any of this (for
++// tests); World.incrLast says what the last renderAll did.
++
++// eslint-disable-next-line @typescript-eslint/no-unused-vars
++declare const LC_INCR_VERIFY: boolean;
++
++const K_QGROUND: number = 1;
++const K_GROUND: number = 2;
++const K_MODEL: number = 3;
++const K_SOURCE: number = 4;
++
++const F_BLEND: number = 1; // a blended triangle (Pix3D.incrTriangle)
++const F_TEX17: number = 2; // asked for texture 17 (Pix3D.textureTriangle)
++const F_TEX24: number = 4; // asked for texture 24
++const F_VOLATILE: number = 8; // never matches another frame's item
++const F_DEFERRED: number = 16; // left as it was: the reference's box and triangles (pass 1)
++
++const FULL_FRAMES: number = 64; // a full frame at least this often (frames) ...
++const FULL_MS: number = 1500; // ... and this often (ms)
++const MAX_SHARE: number = 0.6; // more of the frame than this: draw it all
++
++class IncrStream {
++    n: number = 0;
++    obj: (object | null)[] = [];
++    ints: Int32Array = new Int32Array(8 * 1024); // kind, a, b, c, d, key, flags, typecode
++    box: Int32Array = new Int32Array(4 * 1024); // x0, x1, y0, y1 (x0 > x1: none)
++    cmd: Int32Array = new Int32Array(2 * 1024); // its triangles: a range of the frame's Pix3D.incrCmd
++    valid: boolean = false;
++    tex17: number = 0;
++    tex24: number = 0;
++
++    add(): number {
++        const i: number = this.n++;
++        if (this.n * 8 > this.ints.length) {
++            const ints: Int32Array = new Int32Array(this.ints.length * 2);
++            ints.set(this.ints);
++            this.ints = ints;
++            const box: Int32Array = new Int32Array(this.box.length * 2);
++            box.set(this.box);
++            this.box = box;
++            const cmd: Int32Array = new Int32Array(this.cmd.length * 2);
++            cmd.set(this.cmd);
++            this.cmd = cmd;
++        }
++        return i;
++    }
++
++    clear(): void {
++        this.obj.fill(null, 0, this.n); // (no references to old models or tiles are kept)
++        this.n = 0;
++        this.valid = false;
++    }
++}
++
++// what a source's model drew with: the face arrays (shared from the cached model a temp model is made from), by
++// identity, the vertices and face alphas (copied into scratch arrays for each temp model) by value, and the fields
++// worldRender and render2 read: the same content draws the same triangles at the same place.
++class IncrSig {
++    version: number = -1;
++    readonly ints: Int32Array = new Int32Array(8);
++    readonly refs: (Int32Array | null)[] = new Array(12).fill(null);
++    vx: Int32Array = new Int32Array(0);
++    vy: Int32Array = new Int32Array(0);
++    vz: Int32Array = new Int32Array(0);
++    alpha: Int32Array | null = null;
++
++    // the same content as last time, else taken as the new content
++    same(m: Model): boolean {
++        const n: number = m.numPoints;
++        const faces: number = m.numFaces;
++        const ints: Int32Array = this.ints;
++        const refs: (Int32Array | null)[] = this.refs;
++        const px: Int32Array | null = m.pointX;
++        const py: Int32Array | null = m.pointY;
++        const pz: Int32Array | null = m.pointZ;
++        const fa: Int32Array | null = m.faceAlpha;
++
++        let same: boolean =
++            this.version >= 0 &&
++            px !== null &&
++            py !== null &&
++            pz !== null &&
++            ints[0] === n &&
++            ints[1] === faces &&
++            ints[2] === m.numT &&
++            ints[3] === m.radius &&
++            ints[4] === m.minY &&
++            ints[5] === m.maxDepth &&
++            ints[6] === m.minDepth &&
++            (fa === null) === (this.alpha === null) &&
++            refs[0] === m.faceVertexA &&
++            refs[1] === m.faceVertexB &&
++            refs[2] === m.faceVertexC &&
++            refs[3] === m.faceColourA &&
++            refs[4] === m.faceColourB &&
++            refs[5] === m.faceColourC &&
++            refs[6] === m.faceColour &&
++            refs[7] === m.faceRenderType &&
++            refs[8] === m.facePriority &&
++            refs[9] === m.faceTextureP &&
++            refs[10] === m.faceTextureM &&
++            refs[11] === m.faceTextureN;
++
++        if (same) {
++            const vx: Int32Array = this.vx;
++            const vy: Int32Array = this.vy;
++            const vz: Int32Array = this.vz;
++            for (let v: number = 0; v < n; v++) {
++                if (vx[v] !== px![v] || vy[v] !== py![v] || vz[v] !== pz![v]) {
++                    same = false;
++                    break;
++                }
++            }
++        }
++        if (same && fa !== null) {
++            const alpha: Int32Array = this.alpha!;
++            for (let f: number = 0; f < faces; f++) {
++                if (alpha[f] !== fa[f]) {
++                    same = false;
++                    break;
++                }
++            }
++        }
++        if (same) {
++            return true;
++        }
++
++        ints[0] = n;
++        ints[1] = faces;
++        ints[2] = m.numT;
++        ints[3] = m.radius;
++        ints[4] = m.minY;
++        ints[5] = m.maxDepth;
++        ints[6] = m.minDepth;
++        refs[0] = m.faceVertexA;
++        refs[1] = m.faceVertexB;
++        refs[2] = m.faceVertexC;
++        refs[3] = m.faceColourA;
++        refs[4] = m.faceColourB;
++        refs[5] = m.faceColourC;
++        refs[6] = m.faceColour;
++        refs[7] = m.faceRenderType;
++        refs[8] = m.facePriority;
++        refs[9] = m.faceTextureP;
++        refs[10] = m.faceTextureM;
++        refs[11] = m.faceTextureN;
++        if (this.vx.length < n) {
++            this.vx = new Int32Array(n + 32);
++            this.vy = new Int32Array(n + 32);
++            this.vz = new Int32Array(n + 32);
++        }
++        if (px && py && pz) {
++            const vx: Int32Array = this.vx;
++            const vy: Int32Array = this.vy;
++            const vz: Int32Array = this.vz;
++            for (let v: number = 0; v < n; v++) {
++                vx[v] = px[v];
++                vy[v] = py[v];
++                vz[v] = pz[v];
++            }
++        }
++        if (fa !== null) {
++            if (this.alpha === null || this.alpha.length < faces) {
++                this.alpha = new Int32Array(faces + 32);
++            }
++            const alpha: Int32Array = this.alpha;
++            for (let f: number = 0; f < faces; f++) {
++                alpha[f] = fa[f];
++            }
++        } else {
++            this.alpha = null;
++        }
++        return false;
++    }
++}
++
++export default class IncrRender {
++    // on by default; tests may turn it off (World.incrBypass instead draws one frame without it)
++    static enabled: boolean = true;
++    // spans outside the region are not drawn (Pix3D.incrRowMin); tests may turn it off to compare
++    static rowSkip: boolean = true;
++    // debug builds: check every frame against a full render (World.incrVerifyFrame); 0 = off
++    static verify: number = 0;
++
++    // debug builds: IncrVerify's note of each source drawn (ModelSource.worldRender), or null
++    static touch: ((source: object) => void) | null = null;
++
++    static track: boolean = false; // items are being recorded (pass 1, or a full frame that measures)
++    static inSource: boolean = false; // inside a ModelSource's item (its model is part of it)
++    private static readonly sigs: WeakMap<object, IncrSig> = new WeakMap();
++    private static versions: number = 0;
++    static inside: boolean = false; // World.renderAll is running for this class (draws upstream's frame)
++
++    private static pass1: boolean = false;
++    private static click: boolean = false;
++
++    private static ref: IncrStream = new IncrStream();
++    private static cur: IncrStream = new IncrStream();
++    private static refCmd: Int32Array = new Int32Array(1 << 16); // the reference's triangles (Pix3D.incrCmd: this frame's)
++    private static cursor: number = 0; // where the next item most likely is in the reference
++    // the reference's first item of each object, and the next one of the same object (sameObj; -1: none), built once a
++    // frame needs them. The Map is kept from frame to frame and an entry is believed only where the reference holds
++    // that object at that index, so a frame drawing the objects of the frame before allocates nothing. It is emptied
++    // when the reference is dropped, and at a frame that measures once it holds many objects the reference does not.
++    private static readonly byObj: Map<object, number> = new Map();
++    private static sameObj: Int32Array = new Int32Array(1024);
++    private static byObjBuilt: boolean = false;
++    private static used: Uint8Array = new Uint8Array(1024); // reference items matched this frame
++    private static order: Int32Array = new Int32Array(0); // per tile: the latest reference position drawn there yet
++    private static cols: number = 0;
++    private static item: number = -1; // the current item (cur)
++    private static match: number = -1; // its reference item, or -1
++    private static blends: Int32Array = new Int32Array(256); // this frame's items that blend ...
++    private static blendCount: number = 0; // ... how many
++
++    private static width: number = 0;
++    private static height: number = 0;
++    private static words: number = 0;
++    private static rows: number = 0;
++    private static frame3d: Int32Array = new Int32Array(0); // the last frame's 3D pixels
++    private static scratch: Int32Array = new Int32Array(0);
++    private static region: Int32Array = new Int32Array(0); // tiles drawn again (bits)
++
++    private static readonly key: Int32Array = new Int32Array(12);
++    private static readonly lastKey: Int32Array = new Int32Array(12);
++    private static lastWorld: World | null = null;
++    private static lastOut: Int32Array | null = null;
++    private static lastScanline: Int32Array | null = null;
++    private static lastWorldGen: number = -1;
++    private static lastPix3DGen: number = -1;
++    private static lastPixMapGen: number = -1;
++    private static sinceFull: number = 0;
++    private static lastFullMs: number = 0;
++    private static fullFor: number = 0; // frames left to draw in full (after a frame that was mostly dirty)
++
++    // what the last frames did (also for tests)
++    static readonly stats = { partial: 0, full: 0, reasons: {} as Record<string, number>, tiles: 0, tilesDrawn: 0, deferred: 0, recorded: 0 }; // (deferred, recorded: debug builds)
++    // debug builds: why items were recorded in pass 1, and the biggest boxes of frames that were mostly dirty
++    static readonly why: Record<string, number> = {};
++    static readonly dirtyEvents: string[] = [];
++    private static readonly biggest: string[] = [];
++
++    // ---------------------------------------------------------------------------------------------- the frame
++
++    // World.renderAll's arguments plus what of World it needs; draws this frame's 3D pixels into Pix2D.pixels
++    static frame(world: World, eyeX: number, eyeY: number, eyeZ: number, maxLevel: number, eyeYaw: number, eyePitch: number, minLevel: number, worldGen: number, lowMem: boolean, click: boolean): string {
++        const out: Int32Array = Pix2D.pixels;
++        const w: number = Pix2D.width;
++        const h: number = Pix2D.height;
++
++        const key: Int32Array = this.key;
++        key[0] = eyeX;
++        key[1] = eyeY;
++        key[2] = eyeZ;
++        key[3] = maxLevel;
++        key[4] = eyeYaw;
++        key[5] = eyePitch;
++        key[6] = minLevel;
++        key[7] = Pix3D.originX;
++        key[8] = Pix3D.originY;
++        key[9] = w;
++        key[10] = h;
++        key[11] = (lowMem ? 1 : 0) | (Pix3D.lowDetail ? 2 : 0) | (Pix3D.lowMem ? 4 : 0);
++
++        let moved: boolean = world !== this.lastWorld || out !== this.lastOut || Pix3D.scanline !== this.lastScanline;
++        for (let i: number = 0; i < 12 && !moved; i++) {
++            moved = key[i] !== this.lastKey[i];
++        }
++        this.lastKey.set(key);
++        this.lastWorld = world;
++        this.lastOut = out;
++        this.lastScanline = Pix3D.scanline;
++
++        const pixMapGen: number = PixMap.incrGeneration();
++        const changed: boolean = worldGen !== this.lastWorldGen || Pix3D.incrGen !== this.lastPix3DGen || pixMapGen !== this.lastPixMapGen;
++        this.lastWorldGen = worldGen;
++        this.lastPix3DGen = Pix3D.incrGen;
++        this.lastPixMapGen = pixMapGen;
++
++        let why: string | null = null;
++        if (!this.enabled) {
++            why = 'full:off';
++        } else if (out.length !== w * h || Pix2D.clipMinX !== 0 || Pix2D.clipMinY !== 0 || Pix2D.clipMaxX !== w || Pix2D.clipMaxY !== h || w < 16 || h < 16) {
++            why = 'full:target';
++        } else if (moved) {
++            why = 'full:camera';
++        }
++
++        if (why !== null) {
++            this.drop();
++            this.plain(world, eyeX, eyeY, eyeZ, maxLevel, eyeYaw, eyePitch);
++            return this.count(why);
++        }
++
++        const now: number = performance.now();
++        if (!this.ref.valid) {
++            why = 'full:settle';
++        } else if (changed) {
++            why = 'full:world';
++        } else if (++this.sinceFull >= FULL_FRAMES || now - this.lastFullMs >= FULL_MS) {
++            why = 'full:refresh';
++        } else if (this.fullFor > 0) {
++            this.fullFor--;
++            why = 'full:dirty';
++        }
++
++        this.size(w, h);
++        try {
++            if (why !== null) {
++                this.measure(world, eyeX, eyeY, eyeZ, maxLevel, eyeYaw, eyePitch, out, now);
++                return this.count(why);
++            }
++
++            return this.count(this.partial(world, eyeX, eyeY, eyeZ, maxLevel, eyeYaw, eyePitch, out, click, now));
++        } catch (e) {
++            // a fault here must not break the game: upstream's frame, now and from then on
++            this.enabled = false;
++            this.drop();
++            console.error('IncrRender: off after an error', e);
++            out.fill(0, 0, w * h);
++            this.plain(world, eyeX, eyeY, eyeZ, maxLevel, eyeYaw, eyePitch);
++            return this.count('full:error');
++        }
++    }
++
++    // no reference while the camera moves (or the render is off): what the last frames drew is let go, so a rebuilt
++    // map's models or gone players are not kept alive by it
++    private static drop(): void {
++        this.ref.valid = false;
++        this.ref.clear();
++        this.cur.clear();
++        if (this.byObj.size !== 0) {
++            this.byObj.clear();
++        }
++    }
++
++    private static count(what: string): string {
++        this.lastPartial = what === 'partial';
++        if (what === 'partial') {
++            this.stats.partial++;
++        } else {
++            this.stats.full++;
++            this.stats.reasons[what] = (this.stats.reasons[what] ?? 0) + 1;
++        }
++        return what;
++    }
++
++    private static size(w: number, h: number): void {
++        if (w === this.width && h === this.height) {
++            return;
++        }
++
++        this.width = w;
++        this.height = h;
++        this.rows = (h + (1 << Pix3D.INCR_TILE_SHIFT) - 1) >> Pix3D.INCR_TILE_SHIFT;
++        const cols: number = (w + (1 << Pix3D.INCR_TILE_SHIFT) - 1) >> Pix3D.INCR_TILE_SHIFT;
++        this.words = (cols + 31) >> 5;
++        this.cols = cols;
++        this.order = new Int32Array(this.rows * cols);
++        this.frame3d = new Int32Array(w * h);
++        this.scratch = new Int32Array(w * h);
++        this.region = new Int32Array(this.rows * this.words);
++        this.ref.valid = false;
++    }
++
++    // upstream's frame, nothing recorded
++    private static plain(world: World, eyeX: number, eyeY: number, eyeZ: number, maxLevel: number, eyeYaw: number, eyePitch: number): void {
++        this.inside = true;
++        try {
++            world.renderAll(eyeX, eyeY, eyeZ, maxLevel, eyeYaw, eyePitch);
++        } finally {
++            this.inside = false;
++        }
++    }
++
++    // upstream's frame, drawn as it goes and recorded (Pix3D.incrMode 3): the reference for the next frames
++    private static measure(world: World, eyeX: number, eyeY: number, eyeZ: number, maxLevel: number, eyeYaw: number, eyePitch: number, out: Int32Array, now: number): void {
++        const cur: IncrStream = this.cur;
++        cur.clear();
++        this.blendCount = 0;
++        Pix3D.incrCmdLen = 0;
++        this.pass1 = false;
++
++        this.inside = true;
++        this.track = true;
++        Pix3D.incrMode = 3;
++        try {
++            world.renderAll(eyeX, eyeY, eyeZ, maxLevel, eyeYaw, eyePitch);
++        } finally {
++            Pix3D.incrMode = 0;
++            this.track = false;
++            this.inSource = false;
++            this.inside = false;
++        }
++
++        this.frame3d.set(out.subarray(0, this.width * this.height));
++        this.ref.clear();
++        this.cur = this.ref;
++        this.ref = cur;
++        this.swapCmd();
++        cur.valid = true;
++        if (this.byObj.size > cur.n + 256) {
++            this.byObj.clear(); // many objects the reference no longer draws (gone players, a rebuilt map)
++        }
++        cur.tex17 = Pix3D.incrTexVersion[17];
++        cur.tex24 = Pix3D.incrTexVersion[24];
++        this.sinceFull = 0;
++        this.lastFullMs = now;
++    }
++
++    private static partial(world: World, eyeX: number, eyeY: number, eyeZ: number, maxLevel: number, eyeYaw: number, eyePitch: number, out: Int32Array, click: boolean, now: number): string {
++        const ref: IncrStream = this.ref;
++        const cur: IncrStream = this.cur;
++        const region: Int32Array = this.region;
++        cur.clear();
++        region.fill(0);
++        this.blendCount = 0;
++        this.biggest.length = 0;
++        this.runCount = 0;
++        this.cursor = 0;
++        this.byObjBuilt = false;
++        if (this.used.length < ref.n) {
++            this.used = new Uint8Array(ref.n * 2);
++        }
++        this.used.fill(0, 0, ref.n);
++        this.order.fill(-1);
++        Pix3D.incrCmdLen = 0;
++        this.pass1 = true;
++        this.click = click;
++
++        // 1. upstream's traversal; sources recorded, unchanged tiles and placements deferred
++        this.inside = true;
++        this.track = true;
++        Pix3D.incrMode = 1;
++        try {
++            world.renderAll(eyeX, eyeY, eyeZ, maxLevel, eyeYaw, eyePitch);
++        } finally {
++            Pix3D.incrMode = 0;
++            this.track = false;
++            this.inSource = false;
++            this.inside = false;
++            this.pass1 = false;
++        }
++
++        this.copyRuns();
++
++        // 2. what the reference drew that this frame did not
++        const used: Uint8Array = this.used;
++        for (let i: number = 0; i < ref.n; i++) {
++            if (used[i] === 0) {
++                this.markRef(i);
++            }
++        }
++
++        // ... and the items using a texture that moved since
++        const moved17: boolean = Pix3D.incrTexVersion[17] !== ref.tex17;
++        const moved24: boolean = Pix3D.incrTexVersion[24] !== ref.tex24;
++        if (moved17 || moved24) {
++            const tex: number = (moved17 ? F_TEX17 : 0) | (moved24 ? F_TEX24 : 0);
++            for (let i: number = 0; i < cur.n; i++) {
++                if ((cur.ints[i * 8 + 6] & tex) !== 0) {
++                    this.markItem(cur, i);
++                }
++            }
++            for (let i: number = 0; i < ref.n; i++) {
++                if ((ref.ints[i * 8 + 6] & tex) !== 0) {
++                    this.markItem(ref, i);
++                }
++            }
++        }
++
++        // 3. blends
++        this.closeBlends();
++
++        let tiles: number = 0;
++        for (let i: number = 0; i < region.length; i++) {
++            let bits: number = region[i];
++            while (bits !== 0) {
++                bits &= bits - 1;
++                tiles++;
++            }
++        }
++        const total: number = this.rows * Math.ceil(this.width / (1 << Pix3D.INCR_TILE_SHIFT));
++        this.stats.tiles += total;
++        this.stats.tilesDrawn += tiles;
++
++        let what: string = 'partial';
++        if (tiles > total * MAX_SHARE) {
++            if (LC_INCR_VERIFY && this.dirtyEvents.length < 40) {
++                this.dirtyEvents.push(`${tiles}/${total}: ${this.biggest.join('; ')}`);
++            }
++            region.fill(-1);
++            this.fullFor = 8;
++            what = 'full:dirty';
++        }
++
++        // 4. the region, again, in the scratch frame
++        const scratch: Int32Array = this.scratch;
++        this.forRegion((start: number, end: number): void => {
++            scratch.fill(0, start, end);
++        });
++
++        Pix3D.incrDraw = region;
++        Pix3D.incrWords = this.words;
++        if (this.rowSkip) {
++            this.rowExtents();
++            Pix3D.incrRowMin = this.rowMin;
++            Pix3D.incrRowEnd = this.rowEnd;
++            Pix3D.incrInvWidth = 1 / this.width;
++        }
++        Pix2D.pixels = scratch;
++        try {
++            const box: Int32Array = cur.box;
++            const cmd: Int32Array = cur.cmd;
++            for (let i: number = 0; i < cur.n; i++) {
++                const b: number = i * 4;
++                const x0: number = box[b];
++                const x1: number = box[b + 1];
++                if (x0 <= x1 && Pix3D.incrHit(x0, x1, box[b + 2], box[b + 3])) {
++                    Pix3D.incrReplay(cmd[i * 2], cmd[i * 2 + 1]);
++                }
++            }
++        } finally {
++            Pix3D.incrRowMin = null;
++            Pix2D.pixels = out;
++        }
++
++        // the region into the persistent frame, and that to the output
++        const frame3d: Int32Array = this.frame3d;
++        this.forRegion((start: number, end: number): void => {
++            for (let k: number = start; k < end; k++) {
++                frame3d[k] = scratch[k];
++            }
++        });
++        out.set(frame3d);
++
++        this.cur = ref;
++        this.ref = cur;
++        this.swapCmd();
++        cur.valid = true;
++        cur.tex17 = Pix3D.incrTexVersion[17];
++        cur.tex24 = Pix3D.incrTexVersion[24];
++        if (what !== 'partial') {
++            this.sinceFull = 0;
++            this.lastFullMs = now;
++        }
++        return what;
++    }
++
++    // the deferred items' triangles, from the reference's buffer into this frame's: one copy per run of them that
++    // follow each other in both
++    private static runs: Int32Array = new Int32Array(3 * 256); // from, to, length
++    private static runCount: number = 0;
++
++    private static copyRuns(): void {
++        const runs: Int32Array = this.runs;
++        const into: Int32Array = Pix3D.incrCmd;
++        const from: Int32Array = this.refCmd;
++        for (let r: number = 0; r < this.runCount; r++) {
++            const at: number = runs[r * 3];
++            into.set(from.subarray(at, at + runs[r * 3 + 2]), runs[r * 3 + 1]);
++        }
++        this.runCount = 0;
++    }
++
++    // this frame's triangles become the reference's; the reference's buffer is written over next
++    private static swapCmd(): void {
++        const done: Int32Array = Pix3D.incrCmd;
++        Pix3D.incrCmd = this.refCmd;
++        this.refCmd = done;
++    }
++
++    private static rowMin: Int32Array = new Int32Array(0);
++    private static rowEnd: Int32Array = new Int32Array(0);
++
++    // per row of the frame, the region's first column and the one after its last (none: an empty range)
++    private static rowExtents(): void {
++        const h: number = this.height;
++        if (this.rowMin.length !== h) {
++            this.rowMin = new Int32Array(h);
++            this.rowEnd = new Int32Array(h);
++        }
++        const shift: number = Pix3D.INCR_TILE_SHIFT;
++        const cols: number = this.cols;
++        const words: number = this.words;
++        const region: Int32Array = this.region;
++        for (let ty: number = 0; ty < this.rows; ty++) {
++            let first: number = -1;
++            let last: number = -1;
++            for (let tx: number = 0; tx < cols; tx++) {
++                if ((region[ty * words + (tx >> 5)] & (1 << (tx & 31))) !== 0) {
++                    if (first < 0) {
++                        first = tx;
++                    }
++                    last = tx;
++                }
++            }
++            const min: number = first < 0 ? this.width : first << shift;
++            const end: number = first < 0 ? 0 : Math.min(this.width, (last + 1) << shift);
++            const y1: number = Math.min(h, (ty + 1) << shift);
++            for (let y: number = ty << shift; y < y1; y++) {
++                this.rowMin[y] = min;
++                this.rowEnd[y] = end;
++            }
++        }
++    }
++
++    // calls fn(start, end) for each row span of the region (offsets into the frame)
++    private static forRegion(fn: (start: number, end: number) => void): void {
++        const shift: number = Pix3D.INCR_TILE_SHIFT;
++        const size: number = 1 << shift;
++        const w: number = this.width;
++        const h: number = this.height;
++        const words: number = this.words;
++        const cols: number = (w + size - 1) >> shift;
++        const region: Int32Array = this.region;
++
++        for (let ty: number = 0; ty < this.rows; ty++) {
++            const row: number = ty * words;
++            const y0: number = ty << shift;
++            const y1: number = Math.min(h, y0 + size);
++
++            let tx: number = 0;
++            while (tx < cols) {
++                if ((region[row + (tx >> 5)] & (1 << (tx & 31))) === 0) {
++                    tx++;
++                    continue;
++                }
++
++                const from: number = tx;
++                while (tx < cols && (region[row + (tx >> 5)] & (1 << (tx & 31))) !== 0) {
++                    tx++;
++                }
++
++                const x0: number = from << shift;
++                const x1: number = Math.min(w, tx << shift);
++                for (let y: number = y0; y < y1; y++) {
++                    fn(y * w + x0, y * w + x1);
++                }
++            }
++        }
++    }
++
++    // ---------------------------------------------------------------------------------------------- the region
++
++    private static markItem(stream: IncrStream, i: number): void {
++        const b: number = i * 4;
++        this.markBox(stream.box[b], stream.box[b + 1], stream.box[b + 2], stream.box[b + 3]);
++    }
++
++    private static markRef(i: number): void {
++        this.markItem(this.ref, i);
++    }
++
++    private static markBox(x0: number, x1: number, y0: number, y1: number): void {
++        if (x0 > x1) {
++            return;
++        }
++
++        const shift: number = Pix3D.INCR_TILE_SHIFT;
++        const ty1: number = y1 >> shift;
++        for (let ty: number = y0 >> shift; ty <= ty1; ty++) {
++            this.setRange(ty, x0 >> shift, x1 >> shift);
++        }
++    }
++
++    // sets the tiles tx0..tx1 of a row of tiles; true if one was not set
++    private static setRange(ty: number, tx0: number, tx1: number): boolean {
++        const region: Int32Array = this.region;
++        const row: number = ty * this.words;
++        const w0: number = tx0 >> 5;
++        const w1: number = tx1 >> 5;
++        let added: boolean = false;
++
++        for (let w: number = w0; w <= w1; w++) {
++            const lo: number = w === w0 ? tx0 & 31 : 0;
++            const hi: number = w === w1 ? tx1 & 31 : 31;
++            const bits: number = (-1 >>> (31 - hi)) & (-1 << lo);
++            const was: number = region[row + w];
++            if ((was & bits) !== bits) {
++                region[row + w] = was | bits;
++                added = true;
++            }
++        }
++
++        return added;
++    }
++
++    private static anyInRange(ty: number, tx0: number, tx1: number): boolean {
++        const region: Int32Array = this.region;
++        const row: number = ty * this.words;
++        const w0: number = tx0 >> 5;
++        const w1: number = tx1 >> 5;
++
++        for (let w: number = w0; w <= w1; w++) {
++            const lo: number = w === w0 ? tx0 & 31 : 0;
++            const hi: number = w === w1 ? tx1 & 31 : 31;
++            if ((region[row + w] & (-1 >>> (31 - hi)) & (-1 << lo)) !== 0) {
++                return true;
++            }
++        }
++
++        return false;
++    }
++
++    // where the region meets a blending item's box in a row of tiles, it covers the box to one pixel past its right edge
++    // in that row: then an unchanged blend left of a changed pixel is drawn again, and no blend that is drawn reads a
++    // pixel the region does not draw (the box holds every pixel the item writes and every one its spans read)
++    private static closeBlends(): void {
++        const cur: IncrStream = this.cur;
++        const blends: Int32Array = this.blends;
++        const count: number = this.blendCount;
++        if (count === 0) {
++            return;
++        }
++
++        const shift: number = Pix3D.INCR_TILE_SHIFT;
++        const last: number = this.width - 1;
++        let again: boolean = true;
++        while (again) {
++            again = false;
++            for (let j: number = 0; j < count; j++) {
++                const b: number = blends[j] * 4;
++                const tx0: number = cur.box[b] >> shift;
++                const tx1: number = Math.min(cur.box[b + 1] + 1, last) >> shift;
++                const ty1: number = cur.box[b + 3] >> shift;
++                for (let ty: number = cur.box[b + 2] >> shift; ty <= ty1; ty++) {
++                    if (this.anyInRange(ty, tx0, tx1) && this.setRange(ty, tx0, tx1)) {
++                        again = true;
++                    }
++                }
++            }
++        }
++    }
++
++    // ---------------------------------------------------------------------------------------------- the items
++
++    private static begin(kind: number, obj: object | null, a: number, b: number, c: number, d: number, key: number, typecode: number): number {
++        const cur: IncrStream = this.cur;
++        const i: number = cur.add();
++        const k: number = i * 8;
++        cur.obj[i] = obj;
++        cur.ints[k] = kind;
++        cur.ints[k + 1] = a;
++        cur.ints[k + 2] = b;
++        cur.ints[k + 3] = c;
++        cur.ints[k + 4] = d;
++        cur.ints[k + 5] = key;
++        cur.ints[k + 6] = key === -1 ? F_VOLATILE : 0;
++        cur.ints[k + 7] = typecode;
++        cur.cmd[i * 2] = Pix3D.incrCmdLen;
++        cur.cmd[i * 2 + 1] = Pix3D.incrCmdLen;
++
++        Pix3D.incrX0 = 0;
++        Pix3D.incrX1 = -1;
++        Pix3D.incrY0 = 0;
++        Pix3D.incrY1 = -1;
++        Pix3D.incrFlags = 0;
++
++        this.item = i;
++        this.match = this.pass1 ? this.find(kind, obj, a, b, c, d, key) : -1;
++        return i;
++    }
++
++    // the reference item drawn the same way (not matched yet), or -1: most often the one after the last match, else
++    // found by its object; players, NPCs, projectiles and spot anims (key -1) never match
++    private static find(kind: number, obj: object | null, a: number, b: number, c: number, d: number, key: number): number {
++        if (key === -1 || obj === null) {
++            return -1;
++        }
++
++        const ref: IncrStream = this.ref;
++        const ints: Int32Array = ref.ints;
++        const used: Uint8Array = this.used;
++
++        const at: number = this.cursor;
++        if (at < ref.n && used[at] === 0 && ref.obj[at] === obj) {
++            const k: number = at * 8;
++            if (ints[k] === kind && ints[k + 1] === a && ints[k + 2] === b && ints[k + 3] === c && ints[k + 4] === d && ints[k + 5] === key && (ints[k + 6] & F_VOLATILE) === 0) {
++                used[at] = 1;
++                this.cursor = at + 1;
++                return at;
++            }
++        }
++
++        const byObj: Map<object, number> = this.byObj;
++        const refObj: (object | null)[] = ref.obj;
++        const n: number = ref.n;
++        if (!this.byObjBuilt) {
++            this.byObjBuilt = true;
++            if (this.sameObj.length < n) {
++                this.sameObj = new Int32Array(n * 2);
++            }
++            const same: Int32Array = this.sameObj;
++            for (let j: number = n - 1; j >= 0; j--) {
++                const o: object | null = refObj[j];
++                if (o === null || (ints[j * 8 + 6] & F_VOLATILE) !== 0) {
++                    same[j] = -1;
++                    continue;
++                }
++                // set earlier in this loop: the next item of the same object (else an entry from another frame)
++                const next: number | undefined = byObj.get(o);
++                same[j] = next !== undefined && next > j && next < n && refObj[next] === o ? next : -1;
++                byObj.set(o, j);
++            }
++        }
++
++        const first: number | undefined = byObj.get(obj);
++        if (first === undefined || first >= n || refObj[first] !== obj) {
++            return -1; // not in the reference (an entry from another frame, if any)
++        }
++        const same: Int32Array = this.sameObj;
++        for (let j: number = first; j >= 0; j = same[j]) {
++            const k: number = j * 8;
++            if (used[j] === 0 && refObj[j] === obj && ints[k] === kind && ints[k + 1] === a && ints[k + 2] === b && ints[k + 3] === c && ints[k + 4] === d && ints[k + 5] === key) {
++                used[j] = 1;
++                this.cursor = j + 1;
++                return j;
++            }
++        }
++
++        return -1;
++    }
++
++    // a matched item in each tile of its box: where one drawn before it this frame came after it in the reference, the
++    // two (if both write the tile) can now end in the other order: the tile is drawn again
++    private static orderCheck(r: number, x0: number, x1: number, y0: number, y1: number): void {
++        if (x0 > x1) {
++            return;
++        }
++
++        const shift: number = Pix3D.INCR_TILE_SHIFT;
++        const cols: number = this.cols;
++        const order: Int32Array = this.order;
++        const tx0: number = x0 >> shift;
++        const tx1: number = x1 >> shift;
++        const ty1: number = y1 >> shift;
++        for (let ty: number = y0 >> shift; ty <= ty1; ty++) {
++            const row: number = ty * cols;
++            for (let tx: number = tx0; tx <= tx1; tx++) {
++                if (r < order[row + tx]) {
++                    this.setRange(ty, tx, tx);
++                } else {
++                    order[row + tx] = r;
++                }
++            }
++        }
++    }
++
++    // a deferred item takes its reference item's box and flags, and draws nothing in pass 1
++    private static defer(): void {
++        const cur: IncrStream = this.cur;
++        const ref: IncrStream = this.ref;
++        const i: number = this.item;
++        const j: number = this.match;
++        const rb: Int32Array = ref.box;
++        const cb: Int32Array = cur.box;
++        const x0: number = (cb[i * 4] = rb[j * 4]);
++        const x1: number = (cb[i * 4 + 1] = rb[j * 4 + 1]);
++        const y0: number = (cb[i * 4 + 2] = rb[j * 4 + 2]);
++        const y1: number = (cb[i * 4 + 3] = rb[j * 4 + 3]);
++        this.orderCheck(j, x0, x1, y0, y1);
++        cur.ints[i * 8 + 6] = (ref.ints[j * 8 + 6] & (F_BLEND | F_TEX17 | F_TEX24)) | F_DEFERRED;
++        // its triangles: room in this frame's buffer now, the reference's copied there after pass 1 (copyRuns)
++        const from: number = ref.cmd[j * 2];
++        const n: number = ref.cmd[j * 2 + 1] - from;
++        Pix3D.incrReserve(n);
++        const to: number = Pix3D.incrCmdLen;
++        cur.cmd[i * 2] = to;
++        cur.cmd[i * 2 + 1] = to + n;
++        Pix3D.incrCmdLen = to + n;
++        const runs: Int32Array = this.runs;
++        const last: number = (this.runCount - 1) * 3;
++        if (this.runCount > 0 && runs[last] + runs[last + 2] === from && runs[last + 1] + runs[last + 2] === to) {
++            runs[last + 2] += n;
++        } else {
++            if ((this.runCount + 1) * 3 > runs.length) {
++                const grown: Int32Array = new Int32Array(runs.length * 2);
++                grown.set(runs);
++                this.runs = grown;
++            }
++            const at: number = this.runCount++ * 3;
++            this.runs[at] = from;
++            this.runs[at + 1] = to;
++            this.runs[at + 2] = n;
++        }
++        if ((cur.ints[i * 8 + 6] & F_BLEND) !== 0) {
++            this.addBlend(i);
++        }
++        if (LC_INCR_VERIFY) {
++            this.stats.deferred++;
++        }
++        this.item = -1;
++    }
++
++    private static addBlend(i: number): void {
++        if (this.blendCount === this.blends.length) {
++            const grown: Int32Array = new Int32Array(this.blends.length * 2);
++            grown.set(this.blends);
++            this.blends = grown;
++        }
++        this.blends[this.blendCount++] = i;
++    }
++
++    static endItem(): void {
++        this.inSource = false;
++        const i: number = this.item;
++        if (i < 0) {
++            return; // deferred
++        }
++
++        const cur: IncrStream = this.cur;
++        const b: number = i * 4;
++        const x0: number = Pix3D.incrX0;
++        const x1: number = Pix3D.incrX1;
++        const y0: number = Pix3D.incrY0;
++        const y1: number = Pix3D.incrY1;
++        cur.box[b] = x0 <= x1 ? x0 : 1;
++        cur.box[b + 1] = x0 <= x1 ? x1 : 0;
++        cur.box[b + 2] = y0;
++        cur.box[b + 3] = y1;
++        cur.ints[i * 8 + 6] |= Pix3D.incrFlags & (F_BLEND | F_TEX17 | F_TEX24);
++        cur.cmd[i * 2 + 1] = Pix3D.incrCmdLen;
++        if ((Pix3D.incrFlags & F_BLEND) !== 0) {
++            this.addBlend(i);
++        }
++        this.item = -1;
++
++        if (!this.pass1) {
++            return;
++        }
++
++        if (LC_INCR_VERIFY) {
++            this.stats.recorded++;
++        }
++        const j: number = this.match;
++        if (LC_INCR_VERIFY) {
++            const kind: number = cur.ints[i * 8];
++            const name: string = kind === K_SOURCE ? `source:${(cur.obj[i] as object).constructor.name}` : kind === K_MODEL ? 'model' : 'ground';
++            const reason: string = j < 0 ? `${name}:new` : kind === K_SOURCE ? `${name}:same` : (this.ref.ints[j * 8 + 6] & (F_TEX17 | F_TEX24)) !== 0 ? `${name}:tex` : x0 > x1 ? `${name}:none` : kind === K_MODEL ? 'model:pick' : 'ground:click';
++            this.why[reason] = (this.why[reason] ?? 0) + 1;
++            const area: number = (x1 - x0 + 1) * (y1 - y0 + 1);
++            if (j < 0 && x0 <= x1 && area > (this.width * this.height) / 8 && this.biggest.length < 8) {
++                this.biggest.push(`${reason} box ${x0},${x1},${y0},${y1}`);
++            }
++        }
++        if (j < 0) {
++            this.markItem(cur, i); // new, changed or drawn in another order
++            return;
++        }
++
++        // matched: the same box (anything else would be a change upstream's arguments did not show), and the same order
++        // as the reference wherever it draws
++        const r: Int32Array = this.ref.box;
++        if (r[j * 4] !== cur.box[b] || r[j * 4 + 1] !== cur.box[b + 1] || r[j * 4 + 2] !== cur.box[b + 2] || r[j * 4 + 3] !== cur.box[b + 3]) {
++            this.markItem(cur, i);
++            this.markRef(j);
++            return;
++        }
++        this.orderCheck(j, cur.box[b], cur.box[b + 1], cur.box[b + 2], cur.box[b + 3]);
++    }
++
++    // ---------------------------------------------------------------------------------------------- hooks
++
++    // World.renderQuickGround (kind 1: level, x, z) and World.renderGround (kind 2: x, z); true: deferred, draw nothing
++    static beginGround(kind: number, ground: object, a: number, b: number, c: number, texture: number): boolean {
++        this.begin(kind === 1 ? K_QGROUND : K_GROUND, ground, a, b, c, 0, 0, 0);
++        if (this.match >= 0 && !this.click && texture !== 17 && texture !== 24 && (this.ref.ints[this.match * 8 + 6] & (F_TEX17 | F_TEX24)) === 0) {
++            this.defer();
++            return true;
++        }
++        return false;
++    }
++
++    // Model.worldRender, a placement of a model of the scene (not a source's)
++    static beginModel(model: object, yaw: number, relativeX: number, relativeY: number, relativeZ: number, typecode: number): void {
++        this.begin(K_MODEL, model, yaw, relativeX, relativeY, relativeZ, 0, typecode);
++    }
++
++    // Model.worldRender, once it knows it draws and the pointer cannot pick it: true when its reference box stands in
++    static deferModel(): boolean {
++        if (!this.pass1 || this.item < 0 || this.match < 0 || (this.ref.ints[this.match * 8 + 6] & (F_TEX17 | F_TEX24)) !== 0) {
++            return false;
++        }
++        this.defer();
++        return true;
++    }
++
++    // ModelSource.worldRender, after getTempModel: an item keyed by the content of the model it returned (a new version
++    // whenever that differs from the source's last one), so an animated loc between two frames of its animation, or a
++    // player standing between two of their idle animation's, matches the frame before like any unchanged placement
++    static beginSource(source: object, model: Model, yaw: number, relativeX: number, relativeY: number, relativeZ: number, typecode: number): void {
++        let sig: IncrSig | undefined = this.sigs.get(source);
++        if (!sig) {
++            sig = new IncrSig();
++            this.sigs.set(source, sig);
++        }
++        if (!sig.same(model)) {
++            // a new version (a model without vertices has none: it never matches)
++            sig.version = model.pointX && model.pointY && model.pointZ ? (this.versions = (this.versions + 1) & 0x7fffffff) : -1;
++        }
++        const key: number = sig.version;
++
++        this.begin(K_SOURCE, source, yaw, relativeX, relativeY, relativeZ, key, typecode);
++        this.inSource = true;
++    }
++
++    static get partialCount(): number {
++        return this.stats.partial;
++    }
++
++    // what the persistent 3D frame holds (tests)
++    static get frame3dPixels(): Int32Array {
++        return this.frame3d;
++    }
++
++    static get verifyBuild(): boolean {
++        return LC_INCR_VERIFY;
++    }
++
++    private static lastPartial: boolean = false;
++
++    // whether the last frame drew the pixel (x, y) again (a full frame draws every pixel)
++    static regionHas(x: number, y: number): boolean {
++        if (!this.lastPartial) {
++            return true;
++        }
++        const tx: number = x >> Pix3D.INCR_TILE_SHIFT;
++        return (this.region[(y >> Pix3D.INCR_TILE_SHIFT) * this.words + (tx >> 5)] & (1 << (tx & 31))) !== 0;
++    }
++}
+diff --git a/src/dash3d/IncrVerify.ts b/src/dash3d/IncrVerify.ts
+new file mode 100644
+index 0000000..834871f
+--- /dev/null
++++ b/src/dash3d/IncrVerify.ts
+@@ -0,0 +1,234 @@
++import Pix2D from '#/graphics/Pix2D.js';
++import Pix3D from '#/dash3d/Pix3D.js';
++import Model from '#/dash3d/Model.js';
++import World from '#/dash3d/World.js';
++import IncrRender from '#/dash3d/IncrRender.js';
++
++// custom (ios): the incremental 3D render's verify mode (patch 0029), in debug builds only (IncrRender.verify; World
++// calls it when LC_INCR_VERIFY). Each frame it first draws upstream's full frame (World.incrBypass) from the state the
++// frame starts with, then puts that state back, lets IncrRender draw the frame as it would have anyway, and compares:
++// every pixel of the 3D frame, and the state a full frame leaves (the picked entities in order, the ground tile the
++// pointer picked, whether textures 17 and 24 will animate, and every source's minY, height and animation state). So the
++// build under test runs as without the check, and a partial frame, or a full one, that differs is counted.
++
++// true in debug builds only (web/client/build.mjs)
++declare const LC_INCR_VERIFY: boolean;
++
++type Source = Record<string, unknown>;
++
++const SOURCE_FIELDS: string[] = ['minY', 'height', 'locModel', 'anim', 'animFrame', 'animCycle'];
++
++export default class IncrVerify {
++    static readonly stats = {
++        frames: 0,
++        partial: 0,
++        full: 0,
++        badFrames: 0, // a pixel differs
++        badPartial: 0,
++        badPixels: 0,
++        badState: 0, // the state differs
++        mismatches: [] as Record<string, unknown>[],
++        stateMismatches: [] as string[]
++    };
++
++    private static oracle: Int32Array = /* @__PURE__ */ new Int32Array(0);
++    static touching: boolean = false;
++    private static touched: Source[] = [];
++    private static readonly touchedSet: Set<Source> = new Set();
++    private static before: unknown[][] = [];
++
++    static reset(): void {
++        const s = this.stats;
++        s.frames = 0;
++        s.partial = 0;
++        s.full = 0;
++        s.badFrames = 0;
++        s.badPartial = 0;
++        s.badPixels = 0;
++        s.badState = 0;
++        s.mismatches = [];
++        s.stateMismatches = [];
++    }
++
++    // ModelSource.worldRender, while touching: the first time a source is drawn this frame, what it held before
++    static touch(source: object): void {
++        const s: Source = source as Source;
++        if (this.touchedSet.has(s)) {
++            return;
++        }
++        this.touchedSet.add(s);
++        this.touched.push(s);
++        this.before.push(SOURCE_FIELDS.map((f: string): unknown => s[f]));
++    }
++
++    private static takeTouched(): { list: Source[]; before: unknown[][] } {
++        const out = { list: this.touched, before: this.before };
++        this.touched = [];
++        this.before = [];
++        this.touchedSet.clear();
++        return out;
++    }
++
++    static frame(world: World, eyeX: number, eyeY: number, eyeZ: number, maxLevel: number, eyeYaw: number, eyePitch: number, getClick: () => boolean, setClick: (click: boolean) => void, draw: () => string): string {
++        const out: Int32Array = Pix2D.pixels;
++        const n: number = Pix2D.width * Pix2D.height;
++        const stats = this.stats;
++
++        // the state upstream's frame reads and writes, as this frame starts
++        const picked0: number = Model.pickedCount;
++        const pickedList0: Int32Array = Model.pickedEntityTypecode.slice(0, picked0);
++        const click0: boolean = getClick();
++        const clickX0: number = World.clickX;
++        const clickY0: number = World.clickY;
++        const groundX0: number = World.groundX;
++        const groundZ0: number = World.groundZ;
++        const cycle0: number = Pix3D.cycle;
++        const texCycle0: Int32Array = Pix3D.texCycle.slice();
++
++        // 1. upstream's frame
++        if (this.oracle.length < n) {
++            this.oracle = new Int32Array(n);
++        }
++        const oracle: Int32Array = this.oracle;
++        oracle.fill(0, 0, n);
++        this.takeTouched();
++        IncrRender.touch = (source: object): void => IncrVerify.touch(source);
++        this.touching = true;
++        Pix2D.pixels = oracle;
++        World.incrBypass = true;
++        try {
++            world.renderAll(eyeX, eyeY, eyeZ, maxLevel, eyeYaw, eyePitch);
++        } finally {
++            World.incrBypass = false;
++            Pix2D.pixels = out;
++            this.touching = false;
++            IncrRender.touch = null;
++        }
++        const upstream = this.takeTouched();
++        const upstreamAfter: unknown[][] = upstream.list.map((s: Source): unknown[] => SOURCE_FIELDS.map((f: string): unknown => s[f]));
++        const pickedU: Int32Array = Model.pickedEntityTypecode.slice(0, Model.pickedCount);
++        const clickU: boolean = getClick();
++        const groundXU: number = World.groundX;
++        const groundZU: number = World.groundZ;
++        const tex17U: boolean = Pix3D.texCycle[17] >= cycle0;
++        const tex24U: boolean = Pix3D.texCycle[24] >= cycle0;
++
++        // 2. back to the state the frame started with (the texel pool stays as it is: what it holds is right for each
++        // texture that is in it, and which ones are only decides when one is unpacked again)
++        for (let i: number = 0; i < upstream.list.length; i++) {
++            const s: Source = upstream.list[i];
++            const was: unknown[] = upstream.before[i];
++            for (let f: number = 0; f < SOURCE_FIELDS.length; f++) {
++                if (SOURCE_FIELDS[f] in s) {
++                    s[SOURCE_FIELDS[f]] = was[f];
++                }
++            }
++        }
++        Model.pickedCount = picked0;
++        Model.pickedEntityTypecode.set(pickedList0);
++        setClick(click0);
++        World.clickX = clickX0;
++        World.clickY = clickY0;
++        World.groundX = groundX0;
++        World.groundZ = groundZ0;
++        Pix3D.cycle = cycle0;
++        Pix3D.texCycle.set(texCycle0);
++
++        // 3. this build's frame
++        IncrRender.touch = (source: object): void => IncrVerify.touch(source);
++        this.touching = true;
++        let what: string;
++        try {
++            what = draw();
++        } finally {
++            this.touching = false;
++            IncrRender.touch = null;
++        }
++        const mine = this.takeTouched();
++
++        // 4. compare
++        stats.frames++;
++        const partial: boolean = what === 'partial';
++        if (partial) {
++            stats.partial++;
++        } else {
++            stats.full++;
++        }
++
++        let bad: number = 0;
++        let first: number = -1;
++        let x0: number = 1e9;
++        let x1: number = -1;
++        let y0: number = 1e9;
++        let y1: number = -1;
++        const w: number = Pix2D.width;
++        for (let i: number = 0; i < n; i++) {
++            if (out[i] !== oracle[i]) {
++                if (bad++ === 0) {
++                    first = i;
++                }
++                const x: number = i % w;
++                const y: number = (i / w) | 0;
++                if (x < x0) x0 = x;
++                if (x > x1) x1 = x;
++                if (y < y0) y0 = y;
++                if (y > y1) y1 = y;
++            }
++        }
++        if (bad > 0) {
++            stats.badFrames++;
++            if (partial) {
++                stats.badPartial++;
++            }
++            stats.badPixels += bad;
++            if (stats.mismatches.length < 50) {
++                stats.mismatches.push({ frame: stats.frames, what, px: bad, box: [x0, x1, y0, y1], first: [first % w, (first / w) | 0], mine: out[first], upstream: oracle[first], inRegion: IncrRender.regionHas(first % w, (first / w) | 0) });
++            }
++        }
++
++        const problems: string[] = [];
++        const pickedM: Int32Array = Model.pickedEntityTypecode.slice(0, Model.pickedCount);
++        if (pickedM.length !== pickedU.length || pickedM.some((v: number, i: number): boolean => v !== pickedU[i])) {
++            problems.push(`picked ${pickedM.join(',')} vs ${pickedU.join(',')}`);
++        }
++        if (getClick() !== clickU || World.groundX !== groundXU || World.groundZ !== groundZU) {
++            problems.push(`ground ${getClick()} ${World.groundX},${World.groundZ} vs ${clickU} ${groundXU},${groundZU}`);
++        }
++        if ((Pix3D.texCycle[17] >= cycle0) !== tex17U || (Pix3D.texCycle[24] >= cycle0) !== tex24U) {
++            problems.push(`textures ${Pix3D.texCycle[17] >= cycle0},${Pix3D.texCycle[24] >= cycle0} vs ${tex17U},${tex24U}`);
++        }
++        const mineSet: Set<Source> = new Set(mine.list);
++        const upstreamSet: Set<Source> = new Set(upstream.list);
++        for (let i: number = 0; i < upstream.list.length; i++) {
++            const s: Source = upstream.list[i];
++            if (!mineSet.has(s)) {
++                problems.push(`source ${s.constructor?.name} drawn by upstream only`);
++                continue;
++            }
++            for (let f: number = 0; f < SOURCE_FIELDS.length; f++) {
++                const name: string = SOURCE_FIELDS[f];
++                if (name in s && s[name] !== upstreamAfter[i][f]) {
++                    problems.push(`source ${s.constructor?.name} ${name} ${String(s[name])} vs ${String(upstreamAfter[i][f])}`);
++                }
++            }
++        }
++        for (const s of mine.list) {
++            if (!upstreamSet.has(s)) {
++                problems.push(`source ${s.constructor?.name} drawn by this build only`);
++            }
++        }
++        if (problems.length > 0) {
++            stats.badState++;
++            if (stats.stateMismatches.length < 50) {
++                stats.stateMismatches.push(`frame ${stats.frames} (${what}): ${problems.slice(0, 4).join('; ')}`);
++            }
++        }
++
++        return what;
++    }
++}
++
++// debug builds: the desktop tests' handle (web/test/e2e.mjs, hud.mjs): IncrRender.verify on, the stats read
++if (LC_INCR_VERIFY) {
++    (globalThis as unknown as Record<string, unknown>).__lcIncr = { IncrRender, IncrVerify, last: (): string => World.incrLast };
++}
+diff --git a/src/dash3d/Model.ts b/src/dash3d/Model.ts
+index 8450000..9ef6c96 100644
+--- a/src/dash3d/Model.ts
++++ b/src/dash3d/Model.ts
+@@ -8,6 +8,7 @@ import Packet from '#/io/Packet.js';
+ import { Int32Array2d, TypedArray1d } from '#/util/Arrays.js';
+ import PointNormal from '#/dash3d/PointNormal.js';
+ import ModelSource from '#/dash3d/ModelSource.js';
++import IncrRender from '#/dash3d/IncrRender.js'; // custom (ios): patch 0029
+ import type OnDemandProvider from '#/io/OnDemandProvider.js';
+ 
+ class Metadata {
+@@ -1714,7 +1715,20 @@ export default class Model extends ModelSource {
+         }
+     }
+ 
++    // custom (ios): patch 0029: a placement of a scene model (not a source's, which is part of the source's item) is one
++    // draw item of the incremental 3D render
+     override worldRender(yaw: number, sinEyePitch: number, cosEyePitch: number, sinEyeYaw: number, cosEyeYaw: number, relativeX: number, relativeY: number, relativeZ: number, typecode: number): void {
++        if (IncrRender.track && !IncrRender.inSource) {
++            IncrRender.beginModel(this, yaw, relativeX, relativeY, relativeZ, typecode);
++            this.worldRender2(yaw, sinEyePitch, cosEyePitch, sinEyeYaw, cosEyeYaw, relativeX, relativeY, relativeZ, typecode);
++            IncrRender.endItem();
++            return;
++        }
++
++        this.worldRender2(yaw, sinEyePitch, cosEyePitch, sinEyeYaw, cosEyeYaw, relativeX, relativeY, relativeZ, typecode);
++    }
++
++    private worldRender2(yaw: number, sinEyePitch: number, cosEyePitch: number, sinEyeYaw: number, cosEyeYaw: number, relativeX: number, relativeY: number, relativeZ: number, typecode: number): void {
+         const zPrime: number = (relativeZ * cosEyeYaw - relativeX * sinEyeYaw) >> 16;
+         const midZ: number = (relativeY * sinEyePitch + zPrime * cosEyePitch) >> 16;
+         const radiusCosEyePitch: number = (this.radius * cosEyePitch) >> 16;
+@@ -1787,6 +1801,12 @@ export default class Model extends ModelSource {
+             }
+         }
+ 
++        // custom (ios): patch 0029: in pass 1, a placement its reference frame drew the same way keeps that frame's box
++        // and is drawn later, if its region needs it; never one the pointer may pick here (render2 picks in order)
++        if (Pix3D.incrMode === 1 && !picking && IncrRender.deferModel()) {
++            return;
++        }
++
+         const centerX: number = Pix3D.originX;
+         const centerY: number = Pix3D.originY;
+ 
+diff --git a/src/dash3d/ModelSource.ts b/src/dash3d/ModelSource.ts
+index d778ab5..1e94ff3 100644
+--- a/src/dash3d/ModelSource.ts
++++ b/src/dash3d/ModelSource.ts
+@@ -1,12 +1,32 @@
+ import Linkable2 from '#/datastruct/Linkable2.js';
+ import type PointNormal from '#/dash3d/PointNormal.js';
+ import type Model from '#/dash3d/Model.js';
++import IncrRender from '#/dash3d/IncrRender.js'; // custom (ios): patch 0029
++
++// custom (ios): patch 0029: true in debug builds only (web/client/build.mjs)
++declare const LC_INCR_VERIFY: boolean;
+ 
+ export default class ModelSource extends Linkable2 {
+     public pointNormal: (PointNormal | null)[] | null = null;
+     public minY: number = 1000;
+ 
+     worldRender(yaw: number, sinEyePitch: number, cosEyePitch: number, sinEyeYaw: number, cosEyeYaw: number, relativeX: number, relativeY: number, relativeZ: number, typecode: number): void {
++        // custom (ios): patch 0029: one draw item of the incremental 3D render, keyed by what getTempModel returned
++        // (IncrRender.beginSource); its model is part of it (Model.worldRender), so it can be left for later there too
++        if (LC_INCR_VERIFY && IncrRender.touch !== null) {
++            IncrRender.touch(this); // (debug builds: IncrVerify notes what this source held before the frame)
++        }
++        if (IncrRender.track) {
++            const model = this.getTempModel();
++            if (model) {
++                this.minY = model.minY;
++                IncrRender.beginSource(this, model, yaw, relativeX, relativeY, relativeZ, typecode);
++                model.worldRender(yaw, sinEyePitch, cosEyePitch, sinEyeYaw, cosEyeYaw, relativeX, relativeY, relativeZ, typecode);
++                IncrRender.endItem();
++            }
++            return;
++        }
++
+         const model = this.getTempModel();
+         if (model) {
+             this.minY = model.minY;
+diff --git a/src/dash3d/Pix3D.ts b/src/dash3d/Pix3D.ts
+index f572305..94f398a 100644
+--- a/src/dash3d/Pix3D.ts
++++ b/src/dash3d/Pix3D.ts
+@@ -4,6 +4,9 @@ import Pix8 from '#/graphics/Pix8.js';
+ import JagFile from '#/io/JagFile.js';
+ import { Int32Array2d, TypedArray1d } from '#/util/Arrays.js';
+ 
++// custom (ios): patch 0029: true in debug builds only (web/client/build.mjs)
++declare const LC_INCR_VERIFY: boolean;
++
+ export default class Pix3D extends Pix2D {
+     static lowMem: boolean = false;
+     static lowDetail: boolean = true;
+@@ -36,6 +39,207 @@ export default class Pix3D extends Pix2D {
+     // client's garbage; JSC paid for the long argument list. The same int32 values, read back as they were passed.
+     private static readonly textureArgs: Int32Array = new Int32Array(6);
+ 
++    // custom (ios): the incremental 3D render (patch 0029, dash3d/IncrRender.ts). While World.renderAll works for it,
++    // each triangle entry point first asks incrTriangle what to do. incrMode 1 records the triangle (its arguments, hclip,
++    // trans and the box of pixels it can write) and draws nothing; 3 records it and draws it. Either way its box is
++    // added to the item's. 0, always outside that, is upstream. incrReplay draws recorded triangles again, each only
++    // where it meets the draw region (incrDraw: a bit per 16 px tile).
++    static incrMode: number = 0;
++    static incrGen: number = 0; // bumped by whatever changes how every triangle draws (colours, textures, clipping)
++    static readonly incrTexVersion: Int32Array = new Int32Array(50); // per texture: bumped when its texels are dropped
++    static incrCmd: Int32Array = new Int32Array(1 << 16);
++    static incrCmdLen: number = 0;
++    // the current item's box (incrX0 > incrX1: none yet) and flags (1: a blended triangle)
++    static incrX0: number = 0;
++    static incrX1: number = -1;
++    static incrY0: number = 0;
++    static incrY1: number = -1;
++    static incrFlags: number = 0;
++    // the draw region: a bit per tile, incrWords int32 words per row of tiles
++    static incrDraw: Int32Array = new Int32Array(0);
++    static incrWords: number = 0;
++    static readonly INCR_TILE_SHIFT: number = 4;
++    // debug builds: the area of the boxes of the triangles drawn again (their whole box, also outside the region)
++    static incrDrawnArea: number = 0;
++    // while a partial frame draws its region: per row, the region's first column and the one after its last (from its
++    // tiles in that row of tiles). A span outside them is not drawn: it writes no pixel of the region, and no pixel of
++    // the region reads one outside it (IncrRender's blend rule), so this changes no pixel the region keeps. A span that
++    // meets them is drawn whole (cutting it would move a texture's or a shade's steps).
++    static incrRowMin: Int32Array | null = null;
++    static incrRowEnd: Int32Array = new Int32Array(0);
++    static incrInvWidth: number = 0;
++    // the box incrBox found, clamped to the frame
++    private static ibX0: number = 0;
++    private static ibX1: number = 0;
++    private static ibY0: number = 0;
++    private static ibY1: number = 0;
++
++    // custom (ios): the box of pixels a triangle can write, clamped to the frame (false: it writes none). Its rows lie
++    // between the vertices' (the edges step one row at a time from the top vertex to the bottom one), and its spans
++    // between the vertices' x: each edge's 16.16 x moves from one vertex towards the next by a slope rounded towards
++    // zero, and a span ends before its right edge. Beyond +-16383 a vertex's x << 16, or a slope's, can overflow int32
++    // and put a span anywhere in its row: then the box is the frame's width. A blended span (trans) also reads the pixel
++    // right of each one it writes (gouraudRaster/flatRaster: dst[off++] = ... dst[off]); a span's last pixel is at most
++    // x1 - 1, so that read stays inside the box too.
++    private static incrBox(xA: number, xB: number, xC: number, yA: number, yB: number, yC: number): boolean {
++        let x0: number = xA < xB ? (xA < xC ? xA : xC) : xB < xC ? xB : xC;
++        let x1: number = xA > xB ? (xA > xC ? xA : xC) : xB > xC ? xB : xC;
++        const y0: number = yA < yB ? (yA < yC ? yA : yC) : yB < yC ? yB : yC;
++        const y1: number = yA > yB ? (yA > yC ? yA : yC) : yB > yC ? yB : yC;
++
++        const w: number = Pix2D.width;
++        const h: number = Pix2D.height;
++        if (x0 < -16383 || x1 > 16383) {
++            x0 = 0;
++            x1 = w - 1;
++        }
++
++        if (x1 < 0 || y1 < 0 || x0 >= w || y0 >= h) {
++            return false;
++        }
++
++        this.ibX0 = x0 < 0 ? 0 : x0;
++        this.ibX1 = x1 >= w ? w - 1 : x1;
++        this.ibY0 = y0 < 0 ? 0 : y0;
++        this.ibY1 = y1 >= h ? h - 1 : y1;
++        return true;
++    }
++
++    // custom (ios): whether a box (clamped to the frame) touches the draw region
++    static incrHit(x0: number, x1: number, y0: number, y1: number): boolean {
++        const shift: number = Pix3D.INCR_TILE_SHIFT;
++        const words: number = this.incrWords;
++        const draw: Int32Array = this.incrDraw;
++        const tx0: number = x0 >> shift;
++        const tx1: number = x1 >> shift;
++        const w0: number = tx0 >> 5;
++        const w1: number = tx1 >> 5;
++        const ty1: number = y1 >> shift;
++
++        for (let ty: number = y0 >> shift; ty <= ty1; ty++) {
++            const row: number = ty * words;
++            for (let w: number = w0; w <= w1; w++) {
++                const bits: number = draw[row + w];
++                if (bits === 0) {
++                    continue;
++                }
++
++                const lo: number = w === w0 ? tx0 & 31 : 0;
++                const hi: number = w === w1 ? tx1 & 31 : 31;
++                if ((bits & (-1 >>> (31 - hi)) & (-1 << lo)) !== 0) {
++                    return true;
++                }
++            }
++        }
++
++        return false;
++    }
++
++    // custom (ios): asked first by each triangle entry point while incrMode is not 0. 0: it writes no pixel; bit 1:
++    // recorded (the caller appends the rest of its arguments after the six written here); bit 2: draw it now
++    private static incrTriangle(type: number, xA: number, xB: number, xC: number, yA: number, yB: number, yC: number): number {
++        if (!this.incrBox(xA, xB, xC, yA, yB, yC)) {
++            return 0; // it writes no pixel (nor would upstream's)
++        }
++
++        if (this.incrX0 > this.incrX1) {
++            this.incrX0 = this.ibX0;
++            this.incrX1 = this.ibX1;
++            this.incrY0 = this.ibY0;
++            this.incrY1 = this.ibY1;
++        } else {
++            if (this.ibX0 < this.incrX0) {
++                this.incrX0 = this.ibX0;
++            }
++            if (this.ibX1 > this.incrX1) {
++                this.incrX1 = this.ibX1;
++            }
++            if (this.ibY0 < this.incrY0) {
++                this.incrY0 = this.ibY0;
++            }
++            if (this.ibY1 > this.incrY1) {
++                this.incrY1 = this.ibY1;
++            }
++        }
++        if (type !== 2 && this.trans !== 0) {
++            this.incrFlags |= 1; // it blends: it reads the pixel right of each one it writes
++        }
++
++        // record [type, x0, x1, y0, y1, hclip | trans << 1, xA, xB, xC, yA, yB, yC, ...the rest of its arguments]
++        let len: number = this.incrCmdLen;
++        if (len + 32 > this.incrCmd.length) {
++            const grown: Int32Array = new Int32Array(this.incrCmd.length * 2);
++            grown.set(this.incrCmd);
++            this.incrCmd = grown;
++        }
++        const cmd: Int32Array = this.incrCmd;
++        cmd[len++] = type;
++        cmd[len++] = this.ibX0;
++        cmd[len++] = this.ibX1;
++        cmd[len++] = this.ibY0;
++        cmd[len++] = this.ibY1;
++        cmd[len++] = (this.hclip ? 1 : 0) | (this.trans << 1);
++        cmd[len++] = xA;
++        cmd[len++] = xB;
++        cmd[len++] = xC;
++        cmd[len++] = yA;
++        cmd[len++] = yB;
++        cmd[len++] = yC;
++        this.incrCmdLen = len;
++        return this.incrMode === 3 ? 3 : 1;
++    }
++
++    // custom (ios): room for n more recorded ints (the buffer grows; what it held is kept)
++    static incrReserve(n: number): void {
++        const need: number = this.incrCmdLen + n + 32;
++        if (need > this.incrCmd.length) {
++            const grown: Int32Array = new Int32Array(Math.max(this.incrCmd.length * 2, need));
++            grown.set(this.incrCmd.subarray(0, this.incrCmdLen));
++            this.incrCmd = grown;
++        }
++    }
++
++    // custom (ios): draws the recorded triangles in [start, end) whose box touches the draw region, in their order
++    // (incrMode 0)
++    static incrReplay(start: number, end: number): void {
++        const cmd: Int32Array = this.incrCmd;
++        let i: number = start;
++
++        while (i < end) {
++            const type: number = cmd[i];
++            const next: number = i + (type === 0 ? 15 : type === 1 ? 13 : 25);
++
++            if (this.incrHit(cmd[i + 1], cmd[i + 2], cmd[i + 3], cmd[i + 4])) {
++                if (LC_INCR_VERIFY) {
++                    this.incrDrawnArea += (cmd[i + 2] - cmd[i + 1] + 1) * (cmd[i + 4] - cmd[i + 3] + 1);
++                }
++                const ht: number = cmd[i + 5];
++                this.hclip = (ht & 1) !== 0;
++                this.trans = ht >> 1;
++
++                const a: number = i + 6;
++                if (type === 0) {
++                    this.gouraudTriangle(cmd[a], cmd[a + 1], cmd[a + 2], cmd[a + 3], cmd[a + 4], cmd[a + 5], cmd[a + 6], cmd[a + 7], cmd[a + 8]);
++                } else if (type === 1) {
++                    this.flatTriangle(cmd[a], cmd[a + 1], cmd[a + 2], cmd[a + 3], cmd[a + 4], cmd[a + 5], cmd[a + 6]);
++                } else {
++                    this.textureTriangle(
++                        cmd[a], cmd[a + 1], cmd[a + 2],
++                        cmd[a + 3], cmd[a + 4], cmd[a + 5],
++                        cmd[a + 6], cmd[a + 7], cmd[a + 8],
++                        cmd[a + 9], cmd[a + 10], cmd[a + 11],
++                        cmd[a + 12], cmd[a + 13],
++                        cmd[a + 14], cmd[a + 15],
++                        cmd[a + 16], cmd[a + 17],
++                        cmd[a + 18]
++                    );
++                }
++            }
++
++            i = next;
++        }
++    }
++
+     static {
+         for (let i: number = 1; i < 512; i++) {
+             this.divTable[i] = (32768 / i) | 0;
+@@ -54,6 +258,7 @@ export default class Pix3D extends Pix2D {
+     }
+ 
+     static setRenderClipping(): void {
++        this.incrGen++; // custom (ios): patch 0029
+         this.scanline = new Int32Array(Pix2D.height);
+         for (let y: number = 0; y < Pix2D.height; y++) {
+             this.scanline[y] = Pix2D.width * y;
+@@ -63,6 +268,7 @@ export default class Pix3D extends Pix2D {
+     }
+ 
+     static override setClipping(width: number, height: number): void {
++        this.incrGen++; // custom (ios): patch 0029
+         this.scanline = new Int32Array(height);
+         for (let y: number = 0; y < height; y++) {
+             this.scanline[y] = width * y;
+@@ -72,11 +278,13 @@ export default class Pix3D extends Pix2D {
+     }
+ 
+     static clearTexels(): void {
++        this.incrGen++; // custom (ios): patch 0029
+         this.texelPool = null;
+         this.activeTexels.fill(null);
+     }
+ 
+     static initPool(size: number): void {
++        this.incrGen++; // custom (ios): patch 0029
+         if (this.texelPool) {
+             return;
+         }
+@@ -93,6 +301,7 @@ export default class Pix3D extends Pix2D {
+     }
+ 
+     static unpackTextures(textures: JagFile): void {
++        this.incrGen++; // custom (ios): patch 0029
+         this.numTextures = 0;
+ 
+         for (let i: number = 0; i < 50; i++) {
+@@ -142,6 +351,7 @@ export default class Pix3D extends Pix2D {
+     }
+ 
+     static pushTexture(id: number): void {
++        this.incrTexVersion[id]++; // custom (ios): patch 0029
+         if (this.activeTexels[id] && this.texelPool) {
+             this.texelPool[this.poolSize++] = this.activeTexels[id];
+             this.activeTexels[id] = null;
+@@ -220,6 +430,7 @@ export default class Pix3D extends Pix2D {
+     }
+ 
+     static initColourTable(brightness: number): void {
++        this.incrGen++; // custom (ios): patch 0029
+         const randomBrightness: number = brightness + Math.random() * 0.03 - 0.015;
+ 
+         let offset: number = 0;
+@@ -334,6 +545,22 @@ export default class Pix3D extends Pix2D {
+         yA: number, yB: number, yC: number,
+         colourA: number, colourB: number, colourC: number
+     ): void {
++        // custom (ios): the incremental 3D render (patch 0029)
++        if (this.incrMode !== 0) {
++            const what: number = this.incrTriangle(0, xA, xB, xC, yA, yB, yC);
++            if ((what & 1) !== 0) {
++                const cmd: Int32Array = this.incrCmd;
++                let len: number = this.incrCmdLen;
++                cmd[len++] = colourA;
++                cmd[len++] = colourB;
++                cmd[len++] = colourC;
++                this.incrCmdLen = len;
++            }
++            if ((what & 2) === 0) {
++                return;
++            }
++        }
++
+         let xStepAB: number = 0;
+         let colourStepAB: number = 0;
+         if (yB !== yA) {
+@@ -909,6 +1136,14 @@ export default class Pix3D extends Pix2D {
+         colourA: number, colourB: number,
+         dst: Int32Array, off: number, len: number
+     ): void {
++        // custom (ios): patch 0029, a span outside the region of a partial frame (incrRowMin)
++        if (this.incrRowMin !== null) {
++            const row: number = ((off + 0.5) * this.incrInvWidth) | 0;
++            if (xA >= this.incrRowEnd[row] || xB <= this.incrRowMin[row]) {
++                return;
++            }
++        }
++
+         let rgb: number;
+ 
+         if (this.lowDetail) {
+@@ -1059,6 +1294,17 @@ export default class Pix3D extends Pix2D {
+         yA: number, yB: number, yC: number,
+         colour: number
+     ): void {
++        // custom (ios): the incremental 3D render (patch 0029)
++        if (this.incrMode !== 0) {
++            const what: number = this.incrTriangle(1, xA, xB, xC, yA, yB, yC);
++            if ((what & 1) !== 0) {
++                this.incrCmd[this.incrCmdLen++] = colour;
++            }
++            if ((what & 2) === 0) {
++                return;
++            }
++        }
++
+         let xStepAB: number = 0;
+         if (yB !== yA) {
+             xStepAB = (((xB - xA) << 16) / (yB - yA)) | 0;
+@@ -1550,6 +1796,14 @@ export default class Pix3D extends Pix2D {
+         dst: Int32Array, off: number,
+         colour: number
+     ): void {
++        // custom (ios): patch 0029, a span outside the region of a partial frame (incrRowMin)
++        if (this.incrRowMin !== null) {
++            const row: number = ((off + 0.5) * this.incrInvWidth) | 0;
++            if (xA >= this.incrRowEnd[row] || xB <= this.incrRowMin[row]) {
++                return;
++            }
++        }
++
+         if (this.hclip) {
+             if (xB > Pix2D.sizeX) {
+                 xB = Pix2D.sizeX;
+@@ -1633,6 +1887,38 @@ export default class Pix3D extends Pix2D {
+         const texels: Int32Array | null = this.getTexels(texture);
+         this.opaque = !this.texTrans[texture];
+ 
++        // custom (ios): the incremental 3D render (patch 0029), after getTexels: which textures upstream asked for
++        // this frame decides which animate (Client.textureRunAnims), so an item that asks for 17 or 24, even for a
++        // triangle that writes no pixel, is never deferred (IncrRender) and is redrawn when that texture moves
++        if (this.incrMode !== 0) {
++            if (texture === 17 || texture === 24) {
++                this.incrFlags |= texture === 17 ? 2 : 4;
++            }
++
++            const what: number = this.incrTriangle(2, xA, xB, xC, yA, yB, yC);
++            if ((what & 1) !== 0) {
++                const cmd: Int32Array = this.incrCmd;
++                let len: number = this.incrCmdLen;
++                cmd[len++] = shadeA;
++                cmd[len++] = shadeB;
++                cmd[len++] = shadeC;
++                cmd[len++] = originX;
++                cmd[len++] = originY;
++                cmd[len++] = originZ;
++                cmd[len++] = txB;
++                cmd[len++] = txC;
++                cmd[len++] = tyB;
++                cmd[len++] = tyC;
++                cmd[len++] = tzB;
++                cmd[len++] = tzC;
++                cmd[len++] = texture;
++                this.incrCmdLen = len;
++            }
++            if ((what & 2) === 0) {
++                return;
++            }
++        }
++
+         const verticalX: number = originX - txB;
+         const verticalY: number = originY - tyB;
+         const verticalZ: number = originZ - tzB;
+@@ -2499,6 +2785,14 @@ export default class Pix3D extends Pix2D {
+         texels: Int32Array | null,
+         shadeA: number, shadeB: number
+     ): void {
++        // custom (ios): patch 0029, a span outside the region of a partial frame (incrRowMin)
++        if (this.incrRowMin !== null) {
++            const row: number = ((off + 0.5) * this.incrInvWidth) | 0;
++            if (xA >= this.incrRowEnd[row] || xB <= this.incrRowMin[row]) {
++                return;
++            }
++        }
++
+         // custom (ios): u, v, w and the strides from textureArgs; curU and curV were always passed as 0
+         const args: Int32Array = this.textureArgs;
+         let curU: number = 0;
+diff --git a/src/dash3d/World.ts b/src/dash3d/World.ts
+index adfb038..f36740d 100644
+--- a/src/dash3d/World.ts
++++ b/src/dash3d/World.ts
+@@ -16,6 +16,8 @@ import LinkList from '#/datastruct/LinkList.js';
+ import Pix2D from '#/graphics/Pix2D.js';
+ import Pix3D from '#/dash3d/Pix3D.js';
+ import Model from '#/dash3d/Model.js';
++import IncrRender from '#/dash3d/IncrRender.js'; // custom (ios): patch 0029
++import IncrVerify from '#/dash3d/IncrVerify.js'; // custom (ios): patch 0029, debug builds
+ 
+ import { Int32Array3d, TypedArray1d, TypedArray2d, TypedArray3d, TypedArray4d } from '#/util/Arrays.js';
+ import type ModelSource from '#/dash3d/ModelSource.js';
+@@ -81,6 +83,9 @@ const TEXTURE_AVERAGE = Uint16Array.of(
+ 
+ const OCCLUDER_LEVELS = 4;
+ 
++// custom (ios): patch 0029: true in debug builds only (web/client/build.mjs), where IncrRender.verify can check every frame
++declare const LC_INCR_VERIFY: boolean;
++
+ export default class World {
+     static lowMem: boolean = true;
+ 
+@@ -124,6 +129,13 @@ export default class World {
+ 
+     private static spriteBuffer: (Sprite | null)[] = new TypedArray1d(100, null);
+ 
++    // custom (ios): the incremental 3D render (patch 0029, IncrRender). incrGen is bumped by every change to the
++    // scene's tiles and locs (dynamic sprites aside), so the next frame is drawn in full; incrBypass draws upstream's
++    // frame without it (tests); incrLast says what the last renderAll did ('partial' or 'full:<why>').
++    static incrGen: number = 0;
++    static incrBypass: boolean = false;
++    static incrLast: string = '';
++
+     private static xClip: number = 0;
+     private static yClip: number = 0;
+     private static xClip2: number = 0;
+@@ -158,6 +170,7 @@ export default class World {
+     }
+ 
+     resetMap(): void {
++        World.incrGen++; // custom (ios): patch 0029
+         for (let level: number = 0; level < this.maxTileLevel; level++) {
+             for (let x: number = 0; x < this.maxTileX; x++) {
+                 for (let z: number = 0; z < this.maxTileZ; z++) {
+@@ -184,6 +197,7 @@ export default class World {
+     }
+ 
+     fillBaseLevel(level: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         this.minLevel = level;
+ 
+         for (let stx: number = 0; stx < this.maxTileX; stx++) {
+@@ -194,6 +208,7 @@ export default class World {
+     }
+ 
+     pushDown(stx: number, stz: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         const below: Square | null = this.squares[0][stx][stz];
+ 
+         for (let level: number = 0; level < 3; level++) {
+@@ -225,10 +240,12 @@ export default class World {
+     }
+ 
+     static setOcclude(level: number, type: number, minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         World.occluders[level][World.numOccluders[level]++] = new Occlude((minX / 128) | 0, (maxX / 128) | 0, (minZ / 128) | 0, (maxZ / 128) | 0, type, minX, maxX, minZ, maxZ, minY, maxY);
+     }
+ 
+     setLayer(level: number, stx: number, stz: number, drawLevel: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         const tile: Square | null = this.squares[level][stx][stz];
+         if (!tile) {
+             return;
+@@ -246,6 +263,7 @@ export default class World {
+         colour2SW: number, colour2SE: number, colour2NE: number, colour2NW: number,
+         overlay: number, underlay: number
+     ): void {
++        World.incrGen++; // custom (ios): patch 0029
+         if (shape === TerrainOverlayShape.PLAIN) {
+             for (let l: number = level; l >= 0; l--) {
+                 if (!this.squares[l][x][z]) {
+@@ -301,6 +319,7 @@ export default class World {
+     }
+ 
+     setGroundDecor(model: ModelSource | null, tileLevel: number, tileX: number, tileZ: number, y: number, typecode: number, typecode2: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         if (model === null) {
+             return;
+         }
+@@ -316,6 +335,7 @@ export default class World {
+     }
+ 
+     delGroundDecor(level: number, x: number, z: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         const tile: Square | null = this.squares[level][x][z];
+         if (!tile) {
+             return;
+@@ -325,6 +345,7 @@ export default class World {
+     }
+ 
+     setObj(stx: number, stz: number, y: number, level: number, typecode: number, topObj: ModelSource | null, middleObj: ModelSource | null, bottomObj: ModelSource | null): void {
++        World.incrGen++; // custom (ios): patch 0029
+         let stackOffset: number = 0;
+ 
+         const tile: Square | null = this.squares[level][stx][stz];
+@@ -351,6 +372,7 @@ export default class World {
+     }
+ 
+     delObj(level: number, x: number, z: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         const tile: Square | null = this.squares[level][x][z];
+         if (!tile) {
+             return;
+@@ -360,6 +382,7 @@ export default class World {
+     }
+ 
+     setWall(level: number, tileX: number, tileZ: number, y: number, angle1: number, angle2: number, model1: ModelSource | null, model2: ModelSource | null, typecode1: number, typecode2: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         if (!model1 && !model2) {
+             return;
+         }
+@@ -377,6 +400,7 @@ export default class World {
+     }
+ 
+     delWall(level: number, x: number, z: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         const tile: Square | null = this.squares[level][x][z];
+         if (!tile) {
+             return;
+@@ -386,6 +410,7 @@ export default class World {
+     }
+ 
+     setDecor(level: number, tileX: number, tileZ: number, y: number, offsetX: number, offsetZ: number, typecode: number, model: ModelSource | null, info: number, angle: number, type: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         if (!model) {
+             return;
+         }
+@@ -403,6 +428,7 @@ export default class World {
+     }
+ 
+     delDecor(level: number, x: number, z: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         const tile: Square | null = this.squares[level][x][z];
+         if (!tile) {
+             return;
+@@ -412,6 +438,7 @@ export default class World {
+     }
+ 
+     moveDecor(level: number, x: number, z: number, offset: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         const tile: Square | null = this.squares[level][x][z];
+         if (!tile) {
+             return;
+@@ -429,6 +456,7 @@ export default class World {
+     }
+ 
+     addScenery(level: number, tileX: number, tileZ: number, y: number, model: ModelSource | null, typecode: number, info: number, width: number, length: number, yaw: number): boolean {
++        World.incrGen++; // custom (ios): patch 0029
+         if (!model) {
+             return true;
+         }
+@@ -476,6 +504,7 @@ export default class World {
+     }
+ 
+     delLoc(level: number, x: number, z: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         const tile: Square | null = this.squares[level][x][z];
+         if (!tile) {
+             return;
+@@ -587,6 +616,7 @@ export default class World {
+     }
+ 
+     shareLight(ambient: number, contrast: number, lightSrcX: number, lightSrcY: number, lightSrcZ: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         const lightMagnitude: number = Math.sqrt(lightSrcX * lightSrcX + lightSrcY * lightSrcY + lightSrcZ * lightSrcZ) | 0;
+         const attenuation: number = (contrast * lightMagnitude) >> 8;
+ 
+@@ -856,6 +886,7 @@ export default class World {
+     }
+ 
+     static resetVisCalc(pitchDistance: Int32Array, frustumStart: number, frustumEnd: number, viewportWidth: number, viewportHeight: number): void {
++        World.incrGen++; // custom (ios): patch 0029
+         this.xClip = 0;
+         this.yClip = 0;
+         this.xClip2 = viewportWidth;
+@@ -959,6 +990,25 @@ export default class World {
+     }
+ 
+     renderAll(eyeX: number, eyeY: number, eyeZ: number, maxLevel: number, eyeYaw: number, eyePitch: number): void {
++        // custom (ios): the incremental 3D render (patch 0029) draws the frame, calling back here for upstream's
++        // traversal (IncrRender.inside); World.incrBypass: upstream's frame alone
++        if (!IncrRender.inside && !World.incrBypass) {
++            if (LC_INCR_VERIFY && IncrRender.verify > 0) {
++                World.incrLast = IncrVerify.frame(
++                    this, eyeX, eyeY, eyeZ, maxLevel, eyeYaw, eyePitch,
++                    (): boolean => World.click,
++                    (click: boolean): void => {
++                        World.click = click;
++                    },
++                    (): string => IncrRender.frame(this, eyeX, eyeY, eyeZ, maxLevel, eyeYaw, eyePitch, this.minLevel, World.incrGen, World.lowMem, World.click)
++                );
++                return;
++            }
++
++            World.incrLast = IncrRender.frame(this, eyeX, eyeY, eyeZ, maxLevel, eyeYaw, eyePitch, this.minLevel, World.incrGen, World.lowMem, World.click);
++            return;
++        }
++
+         if (eyeX < 0) {
+             eyeX = 0;
+         } else if (eyeX >= this.maxTileX * 128) {
+@@ -1926,7 +1976,22 @@ export default class World {
+         }
+     }
+ 
++    // custom (ios): patch 0029: a ground tile is one draw item of the incremental 3D render; one its reference frame drew
++    // the same way keeps that frame's box and is drawn later, if at all (IncrRender)
+     private renderQuickGround(ground: QuickGround, level: number, tileX: number, tileZ: number, sinEyePitch: number, cosEyePitch: number, sinEyeYaw: number, cosEyeYaw: number): void {
++        if (IncrRender.track) {
++            if (IncrRender.beginGround(1, ground, level, tileX, tileZ, ground.texture)) {
++                return;
++            }
++            this.drawQuickGround(ground, level, tileX, tileZ, sinEyePitch, cosEyePitch, sinEyeYaw, cosEyeYaw);
++            IncrRender.endItem();
++            return;
++        }
++
++        this.drawQuickGround(ground, level, tileX, tileZ, sinEyePitch, cosEyePitch, sinEyeYaw, cosEyeYaw);
++    }
++
++    private drawQuickGround(ground: QuickGround, level: number, tileX: number, tileZ: number, sinEyePitch: number, cosEyePitch: number, sinEyeYaw: number, cosEyeYaw: number): void {
+         let x3: number;
+         let x0: number = (x3 = (tileX << 7) - World.cx);
+         let z1: number;
+@@ -2092,7 +2157,21 @@ export default class World {
+         }
+     }
+ 
++    // custom (ios): patch 0029, as renderQuickGround
+     private renderGround(tileX: number, tileZ: number, ground: Ground, sinEyePitch: number, cosEyePitch: number, sinEyeYaw: number, cosEyeYaw: number): void {
++        if (IncrRender.track) {
++            if (IncrRender.beginGround(2, ground, tileX, tileZ, 0, -1)) {
++                return;
++            }
++            this.drawGround(tileX, tileZ, ground, sinEyePitch, cosEyePitch, sinEyeYaw, cosEyeYaw);
++            IncrRender.endItem();
++            return;
++        }
++
++        this.drawGround(tileX, tileZ, ground, sinEyePitch, cosEyePitch, sinEyeYaw, cosEyeYaw);
++    }
++
++    private drawGround(tileX: number, tileZ: number, ground: Ground, sinEyePitch: number, cosEyePitch: number, sinEyeYaw: number, cosEyeYaw: number): void {
+         let vertexCount: number = ground.vertexX.length;
+ 
+         for (let i: number = 0; i < vertexCount; i++) {
+diff --git a/src/graphics/PixMap.ts b/src/graphics/PixMap.ts
+index 03e2fc6..e601d08 100644
+--- a/src/graphics/PixMap.ts
++++ b/src/graphics/PixMap.ts
+@@ -41,6 +41,11 @@ export default class PixMap {
+         PixMap.generation++;
+     }
+ 
++    // custom (ios): patch 0029: an invalidate also draws the next 3D frame in full (IncrRender)
++    static incrGeneration(): number {
++        return PixMap.generation;
++    }
++
+     constructor(width: number, height: number, ctx: CanvasRenderingContext2D = canvas2d, own: boolean = false) {
+         this.width = width;
+         this.height = height;

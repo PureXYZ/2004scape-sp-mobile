@@ -20,6 +20,8 @@
 //   still), after a logout and after the screen sizes it reads the canvases back: each must hold exactly the client's
 //   frame (client patch 0026 sends a canvas only the pixels that changed: their rect on iOS, the whole frame on Android,
 //   which it checks too).
+// With a debug build, every frame from the first login to the end is also checked against upstream's full render of
+// it, pixels and the state a frame leaves (client patch 0029's IncrVerify: the 3D scene drawn only where it changed).
 // It starts from settings an earlier version stored (a 450 ms hold). Screenshots of every state go to
 // build/tmp/hud/ (hud-<port>/ for another --port).
 //
@@ -514,6 +516,9 @@ try {
     // (a finger rests on Settings through the login: that it still works afterwards is checked where Settings opens below)
     const inGame = await login(USER, true, true);
     check('a new character logs in with just a name (the username field\'s key logs in)', inGame.ok, `${inGame.ms} ms`);
+    // a debug build checks every frame from here on against upstream's full render of it (client patch 0029's
+    // IncrVerify; read at the end); a release build has no such check
+    const incrVerify = await evaluate('!!globalThis.__lcIncr && (globalThis.__lcIncr.IncrVerify.reset(), globalThis.__lcIncr.IncrRender.verify = 1, true)');
     await sleep(2500);
     await screenshot('ingame');
     // what the checks below read from the client: the options a click runs (doAction)
@@ -1807,9 +1812,9 @@ try {
     const settingsAgain = await section('tapoptions');
     check('...Escape closes Settings; it opens again on Tap options', settingsClosed && settingsAgain.shown && same(settingsAgain.on, ['tapoptions']), JSON.stringify({ settingsClosed, settingsAgain }));
 
-    // ---- Settings › About (host.js about): the version line, the disclaimer, the credits; Licences shows licenses.txt
-    // (LICENSE + THIRD_PARTY_NOTICES.md, scripts/lib/notices.mjs) in a sheet over Settings that scrolls; Escape and Close
-    // close it, leaving Settings on About
+    // ---- Settings › About (host.js about): the version line, the commits (" (debug)" after them in a debug build), the
+    // disclaimer, the credits; Licences shows licenses.txt (LICENSE + THIRD_PARTY_NOTICES.md, scripts/lib/notices.mjs)
+    // in a sheet over Settings that scrolls; Escape and Close close it, leaving Settings on About
     await tapElement('#nav-about');
     await sleep(300);
     const version = fs.readFileSync(path.join(IOS, 'VERSION'), 'utf8').trim();
@@ -1820,7 +1825,7 @@ try {
     await screenshot('about');
     const DISCLAIMER = '2004Scape is an unofficial fan project. It is not affiliated with, endorsed by or connected to Jagex Ltd or the Lost City project. RuneScape is a registered trademark of Jagex Ltd. The game data the app is built from is the intellectual property of Jagex Ltd. This project is free: no ads, no payments, no accounts.';
     check(`Settings › About: "2004Scape ${version} · Lost City 274", the commits, the disclaimer and the credits (Lost City, 2004SP Progressive, llama.cpp, Qwen, Claude), in the safe area`,
-        aboutPage.shown && aboutPage.others === 1 && inSafeArea(aboutPage.panel) && aboutPage.fits && aboutPage.version === `2004Scape ${version} · Lost City 274` && /^Offline\. Built from Engine-TS [0-9a-f]+, Content [0-9a-f]+, Client-TS [0-9a-f]+\.$/.test(aboutPage.built)
+        aboutPage.shown && aboutPage.others === 1 && inSafeArea(aboutPage.panel) && aboutPage.fits && aboutPage.version === `2004Scape ${version} · Lost City 274` && /^Offline\. Built from Engine-TS [0-9a-f]+, Content [0-9a-f]+, Client-TS [0-9a-f]+( \(debug\))?\.$/.test(aboutPage.built)
         && aboutPage.disclaimer === DISCLAIMER && ['Lost City', '2004SP Progressive', 'llama.cpp', 'Qwen', 'Claude'].every(name => aboutPage.credits.includes(name)), JSON.stringify(aboutPage));
     await tapElement('#about-licences');
     await waitFor(`document.getElementById('licences-text').textContent.length > 1000`, 5000);
@@ -1940,6 +1945,12 @@ try {
 
     const walk2 = await walkNear([[2, 0], [-2, 0], [0, 2], [0, -2], [1, 1], [-1, -1], [2, 1], [-2, -1], [1, -2], [-1, 2], [3, 0], [0, 3], [-3, 0], [0, -3]]);
     check('walking still works after switching layouts and screens', walk2.ok, `${JSON.stringify(walk2.from)} → ${JSON.stringify(walk2.now)} (target ${JSON.stringify(walk2.to)})`);
+
+    if (incrVerify) {
+        const verified = await evaluate(`(() => { const I = globalThis.__lcIncr; I.IncrRender.verify = 0; const v = I.IncrVerify.stats;
+            return { frames: v.frames, partial: v.partial, full: v.full, badFrames: v.badFrames, badPixels: v.badPixels, badState: v.badState, first: v.mismatches[0] ?? null, state: v.stateMismatches[0] ?? null }; })()`);
+        check('the 3D scene drawn only where it changed: every frame of the play-through equals upstream\'s full render of it, pixels and state (patch 0029, debug build)', verified.partial >= 500 && verified.badFrames === 0 && verified.badState === 0, JSON.stringify(verified));
+    }
 
     const fps = await evaluate(`${C}.fps`);
     check('frame rate', fps >= 25, `${fps} fps (headless Chrome)`);

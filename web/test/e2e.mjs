@@ -24,6 +24,9 @@
 // AUDIO_IDLE_SUSPEND is 'off' and on Android; with 'ambient' (as shipped) or 'all', suspended after 10 s where that says,
 // the next song resuming it with the same samples.
 //
+// With a debug build, in the world: 8 s of 3D frames, the camera still, turned by a drag and still again, each checked
+// against upstream's full render of it, pixels and the state a frame leaves (client patch 0029's IncrVerify).
+//
 // --no-jmod: Settings › World › Jmod Off (stored before the page loads, like --bots): the character is a normal player
 // (staff level 0 in the client, no "::" chips on the chat keyboard). Every run checks the staff level it asked for.
 //
@@ -1243,6 +1246,27 @@ try {
         staff.setting === JMOD && staff.kind === 'chat' && (JMOD ? staff.staff === 2 && staff.chips[0] === '::' : staff.staff === 0 && staff.chips.length === 0),
         JSON.stringify(staff)
     );
+
+    // ---------------------------------------------------------------- the incremental 3D render (client patch 0029)
+    // A debug build checks each frame against upstream's full render of it (IncrVerify): 8 s here, the camera still,
+    // then turned by a drag (full frames while it turns), then still again. A release build has no such check.
+    if (await evaluate('!!globalThis.__lcIncr')) {
+        await evaluate('(() => { const I = globalThis.__lcIncr; I.IncrVerify.reset(); I.IncrRender.verify = 1; })()');
+        await sleep(3000);
+        const game = await evaluate(`(() => { const r = document.getElementById('surface-game')?.getBoundingClientRect(); return r ? { x: r.left + r.width / 2, y: r.top + r.height / 3 } : null; })()`);
+        if (game) {
+            await S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: game.x, y: game.y }] });
+            for (let i = 1; i <= 10; i++) {
+                await S('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: game.x + i * 6, y: game.y }] });
+                await sleep(30);
+            }
+            await S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        }
+        await sleep(5000);
+        const verified = await evaluate(`(() => { const I = globalThis.__lcIncr; I.IncrRender.verify = 0; const v = I.IncrVerify.stats;
+            return { frames: v.frames, partial: v.partial, full: v.full, badFrames: v.badFrames, badPixels: v.badPixels, badState: v.badState, first: v.mismatches[0] ?? null, state: v.stateMismatches[0] ?? null }; })()`);
+        check('the 3D scene drawn only where it changed: every frame equals upstream\'s full render of it, pixels and state (patch 0029, debug build)', verified.partial >= 100 && verified.full >= 1 && verified.badFrames === 0 && verified.badState === 0, JSON.stringify(verified));
+    }
 
     if (BOTS !== null) {
         // ------------------------------------------------------------ to Lumbridge, where the bots start (BOTS.md §4.4)

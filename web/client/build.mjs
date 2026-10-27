@@ -217,7 +217,9 @@ export async function buildClient({ out, debug = false, webclientDir = DEFAULT_W
             'process.env.SECURE_ORIGIN': JSON.stringify('false'),
             'process.env.LOGIN_RSAN': JSON.stringify(rsa.LOGIN_RSAN),
             'process.env.LOGIN_RSAE': JSON.stringify(rsa.LOGIN_RSAE),
-            'process.env.BUILD_TIME': JSON.stringify(new Date().toISOString())
+            'process.env.BUILD_TIME': JSON.stringify(new Date().toISOString()),
+            // patch 0029: the incremental 3D render's verify mode (IncrRender.verify) is in debug builds only
+            LC_INCR_VERIFY: debug ? 'true' : 'false'
         },
         // release: minify whitespace/syntax/identifiers but never property names (the host reads client fields by
         // name) and drop console.*; debug: readable output, linked source map, console kept
@@ -257,7 +259,7 @@ export async function buildClient({ out, debug = false, webclientDir = DEFAULT_W
         target: ['safari16'],
         tsconfig: path.join(tree, 'tsconfig.json'),
         nodePaths: [path.join(WEB_DIR, 'node_modules')],
-        define: { 'process.env.SECURE_ORIGIN': JSON.stringify('false') },
+        define: { 'process.env.SECURE_ORIGIN': JSON.stringify('false'), LC_INCR_VERIFY: 'false' },
         minify: !debug,
         drop: debug ? [] : ['console'],
         sourcemap: debug ? 'linked' : false,

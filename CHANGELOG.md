@@ -25,6 +25,16 @@ is now used by the client and the World map too.
   as often as before (about half as often walking, alone or with 500 bots), at 1.5 to 3 more frames a second. The 3D
   renderer makes no garbage per frame. On Android the HUD updates right after each game frame instead of on every
   display frame.
+- **Less drawing standing still.** While the camera does not move, the 3D world is drawn again only where something in
+  it changed (a player or NPC moving or animating, a fire, the fountain's water), with the same pixels as when it is
+  drawn whole. Standing at Varrock West with 500 bots, WebKit's web process (the page and the engine) works about 23 %
+  less and the page's main thread in Chrome about 38 % less; at Lumbridge without bots 19 % and 29 % less. Walking and
+  turning the camera are as before. It holds about 5 to 7 MB more memory (the last frame and what it drew). Every frame
+  of the test play-throughs was checked against a full drawing of it, in WebKit and in Chrome, and a new test suite
+  (`web/test/render-verify`) plays 35 scenarios for it (people and NPCs coming and going, 500 bots, doors, fires, water,
+  fights, menus, every panel, other screen sizes, low detail) and compares each frame with a full drawing of it, pixel
+  by pixel and in what the frame leaves behind (the options menu, where a tap walks, the water's animation): over
+  400,000 frames drawn in part, in WebKit, in Chrome and as the Android app's page, and none differed.
 - **Less memory.** Collision zones with nothing in them share one array, the scripts' bytecode is kept in typed arrays,
   and the music lets go of the sound it has played: the engine's heap after start is about 39 MB smaller in
   JavaScriptCore. The 30 MB of files the engine reads only to start are freed as soon as the world has started instead

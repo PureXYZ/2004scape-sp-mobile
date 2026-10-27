@@ -262,7 +262,9 @@ in the HUD `#canvas` stays in the page (opacity 0, no pointer events) for exactl
 Without a layout set the client is the classic 765×503 canvas, unchanged. `setSurfaceLayout({game, map, side, chat,
 width, height, insets})` makes the in-game areas draw into four canvases of their own (`#surface-game`/`-map`/`-side`/
 `-chat`), which the page places and scales with CSS. Each draw sends its canvas only the pixels that changed (patch
-0026; on Android the whole frame, and only when a pixel changed):
+0026; on Android the whole frame, and only when a pixel changed). While the camera is still, the world's 3D scene is
+itself drawn again only where something in it changed, with the pixels a full render gives (patch 0029,
+`dash3d/IncrRender.ts`):
 
 | Area | Size (game px) | Virtual rect (input) | HUD placement |
 |---|---|---|---|

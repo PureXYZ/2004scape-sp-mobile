@@ -227,6 +227,7 @@ node web/test/e2e.mjs --platform android  # the page as the Android app runs it
 node web/test/hud.mjs                     # the mobile HUD with real touches, every screen size (--platform android too)
 node web/test/gallery/capture.mjs         # once: real game pixels for the gallery
 node web/test/gallery/gallery.mjs         # the HUD in every state at every phone size, in seconds (--platform android too)
+node web/test/render-verify/run.mjs       # every 3D frame against upstream's full render (--engine both; README there; hours)
 node web/test/upstream.test.mjs           # the upstream pins, the resolver and fetch-upstream
 node web/test/bzip2.test.mjs              # libbzip2 for the client's archives: the same bytes as its own decoder, and the fallback
 node web/client/test/typecheck.mjs        # the patched client type-checks like upstream
@@ -333,7 +334,7 @@ The individual device tests (`smoke.mjs`, `keyboard.mjs`, `shell.mjs`, `lm.mjs`,
 This project is not a fork: it builds unmodified Lost City sources at the commits [upstream.json](../upstream.json)
 pins (Engine-TS, Content and Client-TS, all on their `274` branches). Its own changes to them are:
 
-- `web/client/patches/*.patch`: 28 patches to Client-TS, made against the commit in `web/client/patches/BASE`, plus
+- `web/client/patches/*.patch`: 29 patches to Client-TS, made against the commit in `web/client/patches/BASE`, plus
   whole-module overrides in `web/client/overrides/` ([web/client/README.md](../web/client/README.md)).
 - `web/engine/`: shims that let Engine-TS run in a browser worker; no engine source is patched
   ([web/engine/README.md](../web/engine/README.md)).
