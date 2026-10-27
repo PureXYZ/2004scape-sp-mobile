@@ -29,7 +29,7 @@ The vendored code keeps that licence: [LICENSE](LICENSE) here, and the full text
 | `src/tasks/` | The tasks: upstream's (one per activity) and the port's new ones (newbie, party, duel, outing, errand, minigames, …) |
 | `src/port/` | New modules: what the mod patched into the engine, and everything the port added (below) |
 | `data/` | Bundled as JSON imports: upstream's `chat_responses.json` and `bot_phrases.json` (the player names cut out of its lines marked `{name}`), and the port's `names.json`, `walk_graph.json` (made by `test/walk-graph-build.mjs`), `line_tags.json` (where each idle line fits, made by `test/line-tags-build.mjs`), the `lines2004*.json` files (lines in a late-2004 voice by moment), `threads.json`, `practices.json`, `social.json`, `party.json`, `duel.json` and `street_prices.json` (December 2004 street prices, each with its source) |
-| `content/` | The four script patches for the bots (Progressive's three, and the port's: a bot's PvP arrows are used up), their `BASE` commit, and the overlay compiler |
+| `content/` | The five script patches for the bots (Progressive's three, and the port's two: a bot's PvP arrows are used up, death cures a poison still on its way), their `BASE` commit, and the overlay compiler |
 | `test/` | Unit tests, the content-name check, the world simulator, the humanlike report ([Tests](#tests)); `model-data/` makes the chat model |
 | `tsconfig.json` | `tsc -p web/engine/bots`: the library against the upstream engine's sources |
 | `UPSTREAM` | Where the vendored files came from |
@@ -491,6 +491,7 @@ Every test file's header says exactly what it checks. In short:
 | `test/chat.test.mjs`, `test/chat-filter.test.mjs`, `test/lines.test.mjs`, `test/talk.test.mjs`, `test/threads.test.mjs` | Addressing, intents, the marketplace, "come here", typed replies; every line through the real 274 word filter and chat codec; what bots say unprompted; threads, witnesses, the voice cap |
 | `test/trade.test.mjs`, `test/economy.test.mjs` | Trades through the screens (sales with change, overpayment, buy-backs, timeouts); prices, rares, stock by trade bank, adverts |
 | `test/pk.test.mjs`, `test/pkfight.test.mjs` | PK gear on free worlds, target claims, prayers, the bow; fights between PKers: eating, potions, the KO, escapes |
+| `test/poison.test.mjs` | Content patch 0005: death cures a poison still on its way (the vanilla scripts poison the respawned player again; the overlay does not) |
 | `test/habits.test.mjs`, `test/texture.test.mjs`, `test/fixes.test.mjs` | Breaks, lingers, leaving, human timing; misclicks, danger, rudeness; stuck walks, futile loops, dungeons, the junk sale |
 | `test/social.test.mjs`, `test/tiles.test.mjs`, `test/hangout.test.mjs` | Regulars, lures, cliques; own tiles and the level of detail; hang-outs |
 | `test/teleport.test.mjs`, `test/randomevents.test.mjs` | Teleport spells, wrong turns, White Wolf Mountain, alching, law runs; every random event's answer |

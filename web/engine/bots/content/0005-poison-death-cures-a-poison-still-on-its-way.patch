@@ -1,0 +1,20 @@
+fix: death cures a poison still on its way (poison.rs2)
+
+Not a bot hunk: an upstream bug (Content 274, also in 289). A poison splat that kills leaves the
+death for the next tick (the queue's last entry); a poisonous NPC's hit in that tick (its %death
+check still false) queues poison_player behind the death. clear_poison cleared poison_damage but not
+poison_player, so the player was poisoned again at Lumbridge ("You have been poisoned!"). It now
+clears both; its other caller, the end of a duel, also drops a poison still queued.
+
+diff --git a/scripts/skill_combat/scripts/poison.rs2 b/scripts/skill_combat/scripts/poison.rs2
+index e043e14..8f5f852 100644
+--- a/scripts/skill_combat/scripts/poison.rs2
++++ b/scripts/skill_combat/scripts/poison.rs2
+@@ -63,6 +63,7 @@ if (stat(hitpoints) = 0) {
+ 
+ [proc,clear_poison]
+ clearqueue(poison_damage);
++clearqueue(poison_player);
+ %poison = 0;
+ cleartimer(poison);
+ 

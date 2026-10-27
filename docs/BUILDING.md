@@ -380,8 +380,8 @@ pins (Engine-TS, Content and Client-TS, all on their `274` branches). Its own ch
   whole-module overrides in `web/client/overrides/` ([web/client/README.md](../web/client/README.md)).
 - `web/engine/`: shims that let Engine-TS run in a browser worker; no engine source is patched
   ([web/engine/README.md](../web/engine/README.md)).
-- `web/engine/bots/content/*.patch`: three script patches for the bots, against the Content commit in
-  `web/engine/bots/content/BASE` ([BOTS.md](BOTS.md#8-maintenance)).
+- `web/engine/bots/content/*.patch`: five script patches (Progressive's three for the bots, the port's two: a bot's PvP arrows,
+  a poison fix; all apply with the bots on only), against the Content commit in `web/engine/bots/content/BASE` ([BOTS.md](BOTS.md#8-maintenance)).
 
 `web/test/upstream.test.mjs` checks that both `BASE` files name the commits `upstream.json` pins.
 

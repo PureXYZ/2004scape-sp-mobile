@@ -139,11 +139,12 @@ host.js  init {node:{…}, bots:{count:N}} ─► boot.js ── N = 0 ──►
   `ScriptRunner.HANDLERS` entries (§4.3). The engine's script opcodes are never edited or renumbered.
 - **A content-script overlay.** Progressive changes three scripts: `trade.rs2` (a trade request to a bot reaches the
   bot), `death.rs2` (bots keep their items; a human killer gets coins) and `engine.rs2` (declares the two commands). Only
-  those hunks are kept, with one of the port's own (`pvp_ranged.rs2`: a bot's arrows in PvP are used up, not dropped),
+  those hunks are kept, with two of the port's own (`pvp_ranged.rs2`: a bot's arrows in PvP are used up, not dropped;
+  `poison.rs2`: death cures a poison still on its way),
   as patches in `web/engine/bots/content/` against the Content commit in its `BASE`, compiled at build time with the
   engine's own script compiler, with the two commands at **explicit opcodes `P_ISBOT = 10100` and
   `P_BOT_INTERACT_TRADE = 10101`** (`port/BotScriptCommands.ts`). Only the scripts that differ from the vanilla
-  `script.dat` ship (`engine/vfs/bots/scripts.bin`, 26 scripts, about 16 KB); they replace their vanilla entries after
+  `script.dat` ship (`engine/vfs/bots/scripts.bin`, 29 scripts, about 16 KB); they replace their vanilla entries after
   every `ScriptProvider.load` (also `::reload`), each after a name and CRC check.
 - **Saves** go to one store per profile (§4.5); the Characters list (`players/<profile>/*.sav`) never sees a bot.
 
@@ -154,7 +155,7 @@ host.js  init {node:{…}, bots:{count:N}} ─► boot.js ── N = 0 ──►
 | `web/engine/bots/src/` | The bot library: upstream's files under their own names, ported to 274, and the port's modules in `src/port/` |
 | `web/engine/bots/src/tasks/` | The tasks a bot runs (one per activity: woodcutting, combat, vendor, PK, party guest, …) |
 | `web/engine/bots/data/` | Upstream's `chat_responses.json` and `bot_phrases.json`, and the port's data: `names.json`, the walking graph, line tags, the 2004 lines, prices, threads, set pieces' data. Bundled as JSON imports |
-| `web/engine/bots/content/` | The three script patches, `BASE`, and the overlay compiler (`compile.mjs`, `compile.mts`) |
+| `web/engine/bots/content/` | The five script patches (Progressive's three for the bots, the port's two: a bot's PvP arrows, the poison fix), `BASE`, and the overlay compiler (`compile.mjs`, `compile.mts`) |
 | `web/engine/bots/test/` | The library's tests, the world simulator and the humanlike report; `model-data/` holds the chat model's training tools |
 | `web/engine/bots/README.md`, `UPSTREAM` | The library's guide (every change from upstream with its reason) and its provenance |
 | `web/engine/src/entry-bots.ts`, `web/engine/src/runtime/bots/` | The glue: hooks, script commands, overlay, bot store, save routing, names, friends, the chat model's channel |
