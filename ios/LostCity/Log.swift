@@ -6,7 +6,8 @@ import Foundation
 /// pty (`xcrun devicectl device process launch --console`, `xcrun simctl launch --console-pty`)
 /// it is block-buffered by default, so lines would otherwise arrive in 4 KB bursts, or never if
 /// the app is killed. Lines are also appended to `Library/Caches/Logs/lostcity.log` (rotated at
-/// 2 MB), so a session that ran without a console can be inspected afterwards:
+/// 2 MB; Settings › Saved data › Delete everything empties it), so a session that ran without a console can be
+/// inspected afterwards:
 ///
 ///     xcrun devicectl device copy from --device <udid> --domain-type appDataContainer \
 ///       --domain-identifier io.github.purexyz.scape2004 --source Library/Caches/Logs/lostcity.log --destination .
@@ -50,6 +51,12 @@ nonisolated enum Log {
     static func flush() {
         fflush(stdout)
         LogFile.shared.flush()
+    }
+
+    /// Empties the log file: both files and the lines not yet written (Settings › Saved data › Delete everything).
+    static func clear() {
+        LogFile.shared.clear()
+        info("host", "log cleared (Delete everything)")
     }
 
     private static func timestamp() -> String {
@@ -110,6 +117,20 @@ nonisolated private final class LogFile: @unchecked Sendable {
 
     func flush() {
         queue.sync { writeBuffer() }
+    }
+
+    /// Drops the lines not yet written and both files, and starts an empty one.
+    func clear() {
+        queue.async { [self] in
+            buffer.removeAll()
+            try? handle?.close()
+            handle = nil
+            try? FileManager.default.removeItem(at: rotatedURL)
+            try? FileManager.default.removeItem(at: url)
+            size = 0
+            openFile()
+            buffer.append(Data("===== log cleared \(Date()) =====\n".utf8))
+        }
     }
 
     private func openFile() {

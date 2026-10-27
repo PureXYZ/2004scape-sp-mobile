@@ -559,7 +559,10 @@ if (live.length >= 4) {
 
     // the app's log: one line per settled reply
     const settled = log().slice(l0).filter(e => e.outcome !== 'pending');
-    check('the app\'s log: one line for each settled reply, with its outcome', outcomes.length === settled.length && outcomes.every(l => /^\[bots\] model #\d+ /.test(l)) && outcomes.some(l => /: error \(failed: test\) → "/.test(l)) && outcomes.some(l => /asked again after confession/.test(l)), { outcomes: outcomes.length, settled: settled.length, sample: outcomes.slice(0, 4) });
+    check('the app\'s log: one line for each settled reply, with its outcome', outcomes.length === settled.length && outcomes.every(l => /^\[bots\] model #\d+ /.test(l)) && outcomes.some(l => /: error \(failed: test\) → the rules' line$/.test(l)) && outcomes.some(l => /asked again after confession/.test(l)), { outcomes: outcomes.length, settled: settled.length, sample: outcomes.slice(0, 4) });
+    // (2026-10-27) no words in it: neither what the human said nor what the bot said
+    const words = settled.flatMap(e => [e.heard, e.said, e.ruleText].filter(text => typeof text === 'string' && text.length >= 4 && !e.bot.replace(/_/g, ' ').includes(text.toLowerCase())));
+    check('the app\'s log: no chat words (the human\'s line, the reply)', words.length > 0 && outcomes.every(l => !l.includes('"') && !words.some(text => l.includes(text))), { words: words.slice(0, 4), sample: outcomes.slice(0, 4) });
     BotModelNs.setModelOutcomeLog(null);
     BotModelNs.resetModelForTest();
 }

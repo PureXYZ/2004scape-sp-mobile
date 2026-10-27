@@ -92,6 +92,7 @@ The rules that apply to every route:
 | `{type:'haptic', style, intensity?}` | `light` `medium` `heavy` `soft` `rigid` (impact), `selection`, `success` `warning` `error`. Unknown styles play medium. The page sends none while Settings › Vibration is off; the haptics native plays itself (a refused keystroke, `fatal`) check the stored `haptics` setting instead (absent means on) |
 | `{type:'settings', values}` | **Shallow-merged** into the stored object; a `null` value deletes the key. Stored in UserDefaults as JSON (max 64 KB). The document-start script is reinstalled, so even a crash reload sees the new values |
 | `{type:'fatal', message}` | The page shows its own 2004 error screen with Restart, so native shows nothing: it logs the message, plays the `error` haptic (unless Vibration is off), lets the screen lock and hides the keyboard and any loading cover still up |
+| `{type:'clear-log'}` | Saved data › Delete everything: `Log.clear()` deletes `lostcity.log` and `lostcity.1.log` and drops the lines not yet written; an empty log starts with `log cleared`. |
 | `{type:'lm', id, mode, think, local, online, maxChars, timeoutMs, fallback?}` | **Bots**: `BotChatModel.handle`; the answer comes as `LostCityHost.bots.lmReply` (ARCHITECTURE.md §7.1) |
 | `{type:'lm-key', action:'set'\|'remove'}` | **Bots**: `set` presents a `UIAlertController` with a secure field ("Claude API key"; the keyboard bridge gives up first responder while it is up); Save keeps a key that can be one in the Keychain. The page hears a status (`LostCityHost.bots.lmStatus`) |
 | `{type:'lm-warm'}` | **Bots**: loads the on-device model in the background (the player starts to chat with a model chosen, or enters the world while no quick load is on record: `BotChatModel`'s `ModelLoadRecord`, the status's `lastLoadMs`) |
@@ -219,7 +220,7 @@ chat line) it is filtered as `chat`, counted from an empty line.
 
 - **stdout is line-buffered,** so every line reaches `devicectl … --console` or `simctl launch --console-pty` as it is written.
 - **Line format:** `HH:MM:SS.mmm [tag] message`.
-- **Lines are also written to `Library/Caches/Logs/lostcity.log`.** It rotates at 2 MB to `lostcity.1.log` and is flushed every 0.3 s and on background. Fetch it with:
+- **Lines are also written to `Library/Caches/Logs/lostcity.log`.** It rotates at 2 MB to `lostcity.1.log` and is flushed every 0.3 s and on background; Settings › Saved data › Delete everything empties both (`{type:'clear-log'}`). Fetch it with:
 
   ```
   xcrun devicectl device copy from --device <udid> --domain-type appDataContainer \

@@ -88,6 +88,12 @@ object Log {
     fun flush() {
         file?.flush()
     }
+
+    /** Empties the log file: both files and the lines not yet written (Settings › Saved data › Delete everything). */
+    fun clear() {
+        file?.clear()
+        info("host", "log cleared (Delete everything)")
+    }
 }
 
 /**
@@ -135,6 +141,23 @@ private class LogFile(private val directory: File) {
             executor.submit { writeBuffer() }.get(1, TimeUnit.SECONDS)
         } catch (_: Exception) {
             // a slow disk: the scheduled write still happens
+        }
+    }
+
+    /** Drops the lines not yet written and both files, and starts an empty one. */
+    fun clear() {
+        executor.execute {
+            buffer.setLength(0)
+            try {
+                stream?.close()
+            } catch (_: Exception) {
+            }
+            stream = null
+            rotated.delete()
+            file.delete()
+            size = 0
+            open()
+            buffer.append("===== log cleared ${java.util.Date()} =====\n")
         }
     }
 

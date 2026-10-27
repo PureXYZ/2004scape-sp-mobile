@@ -241,6 +241,18 @@ export const STATES = {
         await page.evaluate(`document.querySelector('#savedata-characters .data-row:nth-child(2) .data-btn').click()`);
         await sleep(200);
     },
+    // (2026-10-27) Delete everything's "Are you sure?": the longest box text there (the log and the :: commands too)
+    'savedata-everything': async page => {
+        await tapSel(page, '#btn-settings');
+        await page.evaluate(`document.getElementById('nav-savedata').click()`);
+        await page.waitFor(`document.querySelectorAll('#savedata-characters .data-row').length === 3`, 5000, 50);
+        await page.evaluate(`document.getElementById('savedata-everything').click()`);
+        const asked = await page.waitFor(`!document.getElementById('confirm').hidden`, 3000, 50);
+        if (!asked.ok) {
+            throw new Error('Delete everything did not ask first');
+        }
+        await fits(page, '#confirm .settings-panel');
+    },
     howto: async page => {
         await tapSel(page, '#btn-settings');
         await page.evaluate(`document.getElementById('settings-howto').click()`);
@@ -504,6 +516,12 @@ const STATE_INIT = {
         ios: `window.webkit = { messageHandlers: { native: { postMessage() {} } } };
         window.LostCityNative = { platform: 'ios', settings: { seenHowToPlay: true }, lm: ${BOTCHAT_LM} };`,
         android: `window.LostCityNative.lm = ${BOTCHAT_LM};`
+    },
+    // (in an app: the box names the app's log too)
+    'savedata-everything': {
+        ios: `window.webkit = { messageHandlers: { native: { postMessage() {} } } };
+        window.LostCityNative = { platform: 'ios', settings: { seenHowToPlay: true } };`,
+        android: ''
     }
 };
 

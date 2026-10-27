@@ -1550,8 +1550,12 @@ try {
     if (await evaluate(`document.getElementById('settings').hidden || document.getElementById('section-savedata').hidden`)) {
         await openSavedData(); // (after Reset world: at the title)
     }
+    await evaluate(`(localStorage.setItem('lostcity.cmdHistory', '["::e2e"]'), localStorage.setItem('lostcity.amounts', '["28"]'))`);
+    // (an app's {type:'clear-log'} goes out just before the reload: noted where the reload keeps it)
+    await evaluate(`(() => { const h = window.LostCityNativeBridge?.native; if (!h) return; const post = h.postMessage; h.postMessage = m => { if (m?.type === 'clear-log') sessionStorage.setItem('e2e.clearLog', String(Number(sessionStorage.getItem('e2e.clearLog') ?? 0) + 1)); return post(m); }; })()`);
     await tapId('savedata-everything');
     const askedAll = await evaluate(`document.getElementById('confirm-title').textContent`);
+    const askedAllText = await evaluate(`document.getElementById('confirm-text').textContent`);
     await tapId('confirm-ok');
     const backAll = await afterReload('everything');
     const saidAll = await notice('Everything was deleted.');
@@ -1560,6 +1564,12 @@ try {
     const title = await evaluate(`({ hint: !document.getElementById('title-hint').hidden, continueAs: !document.getElementById('btn-continue').hidden })`);
     await screenshot('7c-everything-deleted.png');
     check('Saved data: Delete everything restarts with no character and no bots\' store; "Everything was deleted."; the title asks for a name', askedAll === 'Delete everything?' && backAll && saidAll.ok && left.length === 0 && !fs.existsSync(botStoreFile) && fs.existsSync(`${userSave}.bak`) && title.hint && !title.continueAs, JSON.stringify({ askedAll, backAll, said: saidAll.ok, left, store: fs.existsSync(botStoreFile), title }));
+    // (2026-10-27) and the :: commands and amounts typed lately; settings kept
+    const keptAfterAll = await evaluate(`({ history: localStorage.getItem('lostcity.cmdHistory'), amounts: localStorage.getItem('lostcity.amounts'), settings: localStorage.getItem('lostcity.settings') !== null, clearLog: sessionStorage.getItem('e2e.clearLog') })`);
+    check('Saved data: Delete everything also forgets the :: commands and amounts (the box says so), keeps the settings', /the recent :: commands/.test(askedAllText) && keptAfterAll.history === null && keptAfterAll.amounts === null && keptAfterAll.settings, JSON.stringify({ askedAllText, keptAfterAll }));
+    if (ANDROID) {
+        check('android: Delete everything tells the app to empty its log, once ({type:\'clear-log\'}; the box names the log)', keptAfterAll.clearLog === '1' && /the app's log/.test(askedAllText), JSON.stringify({ askedAllText, clearLog: keptAfterAll.clearLog }));
+    }
     const savedDataErrors = consoleLines.slice(savedDataFrom).filter(line => /\[(error|exception)\]/.test(line));
     check('Saved data: no console errors', savedDataErrors.length === 0, savedDataErrors.slice(0, 5).join(' | '));
 

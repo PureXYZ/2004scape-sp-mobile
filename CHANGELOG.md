@@ -5,6 +5,11 @@ with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
 ## [Unreleased]
 
+- **Delete everything deletes more, and the log keeps no chat.** Settings › Saved data › Delete everything now also
+  empties the app's log and forgets the recent `::` commands and typed amounts (the box says so). Your settings, the
+  Claude key and remembered server passwords are kept, and the deleted saves still stay as `.bak` files until saved
+  over. The log's line for each bot reply a model wrote no longer has what you said or what the bot said back: only
+  which bot, how it was asked, and how it went.
 - **Fixed: the minimap's zoom slider ran under other controls on some screens.** On a 1920×1080 Android phone at 420
   dpi the chatbox, lifted above the keyboard while typing, ran under the slider's magnifier and its + mark; it now stops
   short of them, wherever the magnifier is. Where the minimap is at its smallest (an iPhone or SE with Display Zoom,

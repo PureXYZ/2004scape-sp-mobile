@@ -730,6 +730,7 @@ class GameSession(private val app: LostCityApp) {
                 Log.info("host", "settings rejected: values must be a JSON object under 64 KB")
             }
             "fatal" -> pageFailed(message.string("message") ?: "Unknown error")
+            "clear-log" -> Log.clear()
             "debug" -> if (BuildConfig.DEBUG) handleDebug(message) else Log.info("host", "unhandled native message: debug")
             else -> {
                 val handler = messageHandlers[type]

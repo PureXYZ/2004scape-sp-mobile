@@ -282,14 +282,17 @@ export function setModelOutcomeLog(fn: ((line: string) => void) | null): void {
     outcomeLog = fn;
 }
 
-/** e.g. `[bots] model #12 Lumby Larry named "whats ur fav quest": said in 3 ticks "uhh dragon slayer"` */
+/**
+ * e.g. `[bots] model #12 Lumby Larry named: said in 3 ticks`, `[bots] model #13 Zezima private: timeout → the rules' line`.
+ * (2026-10-27) No words: neither the human's line nor the bot's reply goes to the log (privacy).
+ */
 function logOutcome(entry: ModelLogEntry, said: string | null): void {
     if (!outcomeLog) return;
-    const quote = (text: string): string => JSON.stringify(text.length > 48 ? `${text.slice(0, 47)}…` : text);
     const how = entry.outcome === 'used' ? `said in ${(entry.replyAt ?? World.currentTick) - entry.t} ticks` : `${entry.outcome}${entry.reason ? ` (${entry.reason})` : ''}`;
     const retried = entry.retried ? `, asked again after ${entry.retried}` : '';
+    const instead = entry.outcome === 'used' ? '' : said === null ? ' → nothing' : " → the rules' line";
     try {
-        outcomeLog(`[bots] model #${entry.id} ${toDisplayName(entry.bot)} ${entry.via}${entry.candidate ? ' (not understood)' : ''} ${quote(entry.heard)}: ${how}${retried}${entry.outcome === 'used' ? '' : ' →'} ${said === null ? 'nothing' : quote(said)}`);
+        outcomeLog(`[bots] model #${entry.id} ${toDisplayName(entry.bot)} ${entry.via}${entry.candidate ? ' (not understood)' : ''}: ${how}${retried}${instead}`);
     } catch {
         // (a log line never stops a reply)
     }

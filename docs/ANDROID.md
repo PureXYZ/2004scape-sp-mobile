@@ -205,7 +205,8 @@ it. `AssetRouter` (+ `GameAssets`, `Mime`, `BodyHeader`), `SaveStore` (+ `FileOp
 - **Memory.** `onTrimMemory` at BACKGROUND or worse (and RUNNING_LOW/CRITICAL below API 34) and `onLowMemory` are a
   memory warning, at most one per 10 s (the renderer-gone path is the real safety net).
 - **Logs.** logcat tag `LostCity` (`adb logcat -s LostCity:V`), and `Android/data/io.github.purexyz.scape2004/files/Logs/lostcity.log`
-  (2 MB, rotated to `lostcity.1.log`; readable with `adb pull` on a release build too). A debug build launched
+  (2 MB, rotated to `lostcity.1.log`; readable with `adb pull` on a release build too; Saved data › Delete everything
+  empties both: `{type:'clear-log'}` → `Log.clear()`). A debug build launched
   with `--ez lostcity.verbose true` writes the verbose lines too (kept until `false`). Like every launch extra
   (`lostcity.settings`, `lostcity.webViewFloor`), a release build ignores it, and the switch a debug build kept: the
   activity is exported, so any app could send it (lm.mjs `release` checks).

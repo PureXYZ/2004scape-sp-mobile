@@ -344,6 +344,8 @@ final class GameViewController: UIViewController {
             }
         case "fatal":
             pageFailed(message["message"] as? String ?? "Unknown error")
+        case "clear-log":
+            Log.clear()
         case "lm":
             botChat.handle(message)
         case "lm-warm":

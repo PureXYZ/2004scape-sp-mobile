@@ -426,7 +426,8 @@ persona's way of having no answer (`NO_ANSWER` in `port/BotChat`: to a question 
 for a question to nobody; "ya?" to its name alone), so a model that fails never leaves the human unanswered. In two
 conversations at once, a line nothing understands is answered by the bot the human talked with last. A line that asks for no answer (`wantsNoAnswer`: "ok", "lol", "ty",
 a smiley) gets none, and a model's now and then. Each settled reply is one line in the app's log
-(`setModelOutcomeLog`: said, or which fallback and why, and what was said).
+(`setModelOutcomeLog`: said, or which fallback and why, and whether the rules' line was said; since 2026-10-27 no
+words, neither the human's line nor the reply).
 
 **The guard** (`port/BotModelGuard.guardReply`) refuses a model's line unless it is one line of the chat's characters
 within 80, passes the word filter, has no assistant talk, nothing after 2004 (slang included), never owns up to being a

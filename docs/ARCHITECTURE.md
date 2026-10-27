@@ -211,7 +211,10 @@ many quit, read from the store itself). Each action asks first in a 2004-style c
   `bots.sav` is deleted, and the page reloads: a new bot world, the characters kept (their friend lists were in the
   store). Off while there is no store.
 - **Delete everything**: the same, deleting every character and the store (read from `/save-index` after the engine
-  stopped: the pause may have written a first save). Settings are kept.
+  stopped: the pause may have written a first save), and (2026-10-27) the rest the game kept: the `::` commands and
+  amounts typed lately (`localStorage` `lostcity.cmdHistory`, `lostcity.amounts`) and native's log (`{type:'clear-log'}`,
+  §7). Settings (the server list among them), the Claude key and the remembered server passwords are kept; so are the
+  `.bak` copies, the undo.
 
 Anything still listed after the deletes is deleted once more (a write the engine had started may land late). After the
 reload the status line says what happened ("The world was reset.", "Everything was deleted.", or that something could
@@ -488,6 +491,7 @@ Page → native: `window.webkit.messageHandlers.native.postMessage(msg)`
 | `{type:'haptic', style}` | `UIImpactFeedbackGenerator` / selection feedback. The page sends none while Settings › Vibration is off, and native's own haptics (a refused key, a fatal error) follow that setting too. |
 | `{type:'settings', values}` | Persist settings (native stores them; injected again on next launch). At boot the page checks them against the Settings sheet: a value it no longer offers becomes the nearest offered number (an earlier version's 450 ms hold: 400) or the default, saved once. |
 | `{type:'fatal', message}` | Unrecoverable error. The page shows its own 2004 error screen with Restart; native logs it, plays the error haptic (unless Vibration is off) and lets the screen lock (no alert). |
+| `{type:'clear-log'}` | Settings › Saved data › Delete everything: native empties its log (`Log.clear`: both files and the lines not yet written; the next line is `log cleared`). |
 | `{type:'lm', id, mode, think, local, online, maxChars, timeoutMs, fallback?}` | **Bots**: a bot's reply for the chat model to write (§7.1; `think`: Settings › Bot chat › Think first). Answered through `LostCityHost.bots.lmReply`. |
 | `{type:'lm-key', action}` | **Bots**: `set` opens native's secure box for the Claude key; `remove` deletes it (§7.1). Answered with a status. |
 | `{type:'lm-warm'}` | **Bots**: the player starts to chat with the on-device model chosen (and it is not loaded), or enters the world while no quick load is on record: native loads it in the background (§7.1). |

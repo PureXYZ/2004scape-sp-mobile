@@ -3574,9 +3574,10 @@
         async deleteEverything() {
             const n = this.characters.length;
             const who = n === 0 ? 'The bots' : `${n === 1 ? 'Your character' : `All ${n} characters`}${this.store ? ' and the bots' : ''}`;
+            const rest = isNative ? 'the app\'s log and the recent :: commands' : 'the recent :: commands';
             const ok = await confirmBox({
                 title: 'Delete everything?',
-                text: `${who} will be gone, as before the first launch. Your settings are kept.\n\nThe game restarts. The old saves stay ${isNative ? T.whereShort : 'in the save folder'} as .bak files until they are saved over.`,
+                text: `${who} will be gone, as before the first launch, and so will ${rest}. Your settings are kept.\n\nThe game restarts. The old saves stay ${isNative ? T.whereShort : 'in the save folder'} as .bak files until they are saved over.`,
                 action: 'Delete everything'
             });
             if (ok) {
@@ -3610,8 +3611,24 @@
                 const left = new Set((await saveIndex()).map(f => f.path));
                 failed = await deleteSaves(paths.filter(path => left.has(path)));
             }
+            if (everything) {
+                // (2026-10-27) and the rest the game kept: the :: commands and amounts typed lately, and the app's log
+                // (native starts it again, empty; the lines below are its first)
+                for (const key of [HISTORY_KEY, AMOUNTS_KEY]) {
+                    try {
+                        localStorage.removeItem(key);
+                    } catch {
+                        // storage unavailable: nothing was kept there either
+                    }
+                }
+                postNative({ type: 'clear-log' });
+            }
             if (failed.length) {
                 console.error(`[host] Saved data: could not delete ${failed.join(', ')}`);
+            } else if (everything) {
+                // (no names: the new log keeps nothing of the characters)
+                const n = paths.length - 1; // (the characters' saves, then the bots' store)
+                console.log(`[host] Saved data: deleted everything (${n} character${n === 1 ? '' : 's'}, the bots, the :: commands${isNative ? ', the log' : ''})`);
             } else {
                 console.log(`[host] Saved data: deleted ${paths.join(', ') || 'nothing'}`);
             }
