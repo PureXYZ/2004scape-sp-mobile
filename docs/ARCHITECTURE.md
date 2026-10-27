@@ -295,7 +295,11 @@ in the HUD `#canvas` stays in the page (opacity 0, no pointer events) for exactl
 Without a layout set the client is the classic 765×503 canvas, unchanged. `setSurfaceLayout({game, map, side, chat,
 width, height, insets})` makes the in-game areas draw into four canvases of their own (`#surface-game`/`-map`/`-side`/
 `-chat`), which the page places and scales with CSS. Each draw sends its canvas only the pixels that changed (patch
-0026; on Android the whole frame, and only when a pixel changed). While the camera is still, the world's 3D scene is
+0026; on Android the whole frame, and only when a pixel changed). WebKit can drop a canvas's pixels without a word (an
+iPhone's inventory panel came back as bare stone, its tab selected), so every canvas the client shows gets the frame it
+last sent again, whole, every 2 s and at once when the page is shown again, and the HUD has a surface's frame sent at
+once when it shows the panel, the chatbox or the minimap again (patch 0032, `PixMap.keepShown`, `resendSurface`; the
+title screen and the classic layout's pieces too). While the camera is still, the world's 3D scene is
 itself drawn again only where something in it changed, with the pixels a full render gives (patch 0029,
 `dash3d/IncrRender.ts`):
 

@@ -1,0 +1,150 @@
+ios: a canvas that lost its pixels gets them again
+
+On an iPhone the inventory panel came back as bare stone with its tab selected: WebKit had dropped the side panel's
+canvas pixels while the app was in the foreground (no visibilitychange, no contextrestored, no memory warning, no
+crash in the app's log), and patch 0026 sends a PixMap's changed pixels only, so redrawing the same inventory sent
+nothing; only another tab (most pixels different) painted it again, and even then the pixels the two tabs share stayed
+blank. The world and the minimap draw every frame and get their whole frame every 100 draws; the side panel, the
+chatbox, the title screen's pieces and the classic layout's frame pieces draw only when their content changes, so a
+lost canvas stayed blank until then, also after the page was shown again (PixMap.invalidate only acts at a draw).
+
+Now every frame the client calls PixMap.keepShown() for each PixMap on screen (the surfaces of the mobile layout, every
+piece of the classic canvas in game, the title screen's): the frame it last sent goes to its canvas again, whole, when
+2 s (KEEP_MS) have passed since it last went whole or the PixMaps were invalidated since (a page shown again: at once).
+`paint` holds that frame converted, so it costs a putImageData and no conversion, and `shown` stays what the canvas
+shows, so the rects after it stay right; it does not change PixMap.generation (no full 3D frame, patch 0029). A
+retarget forgets it until the next draw (the new canvas, perhaps another position). Host API resendSurface(area): the
+HUD sends a surface's frame at once when it shows the panel, the chatbox or the minimap again.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 5a79bcf..3f1680d 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -1793,6 +1793,8 @@ export class Client extends GameShell {
+             this.imageTitle7?.draw(128, 171);
+             this.imageTitle8?.draw(562, 171);
+         }
++
++        this.keepCanvasesShown([this.imageTitle0, this.imageTitle1, this.imageTitle2, this.imageTitle3, this.imageTitle4, this.imageTitle5, this.imageTitle6, this.imageTitle7, this.imageTitle8]); // custom (ios)
+     }
+ 
+     private async prepareTitle(): Promise<void> {
+@@ -4444,6 +4446,13 @@ export class Client extends GameShell {
+             this.areaGame?.setPixels();
+         }
+ 
++        // custom (ios): the surfaces, or in the classic layout every piece of the canvas
++        if (this.surfaceLayout) {
++            this.keepCanvasesShown([this.areaGame, this.areaMap, this.areaSide, this.areaChat]);
++        } else {
++            this.keepCanvasesShown([this.areaBacktop1, this.areaBackleft1, this.areaBackleft2, this.areaBackright1, this.areaBackright2, this.areaBackvmid1, this.areaBackvmid2, this.areaBackvmid3, this.areaBackhmid1, this.areaBackhmid2, this.areaBackbase1, this.areaBackbase2, this.areaGame, this.areaMap, this.areaSide, this.areaChat]);
++        }
++
+         this.worldUpdateNum = 0;
+     }
+ 
+@@ -12262,6 +12271,27 @@ export class Client extends GameShell {
+         this.redrawFrame = true;
+     }
+ 
++    // custom (ios): host API. Send a surface's frame to its canvas again, whole (PixMap.resend): the HUD does it for a
++    // surface it shows again, which may have lost its pixels meanwhile.
++    public resendSurface(area: 'game' | 'map' | 'side' | 'chat'): void {
++        if (!this.surfaceLayout) {
++            return;
++        }
++
++        const pixmap: PixMap | null = area === 'game' ? this.areaGame : area === 'map' ? this.areaMap : area === 'side' ? this.areaSide : this.areaChat;
++        pixmap?.resend();
++    }
++
++    // custom (ios): every frame, what each canvas should show goes to it again, whole, every few seconds and after an
++    // invalidate (PixMap.keepShown): a PixMap drawn only when its content changes would stay blank after the browser
++    // dropped its canvas's pixels
++    private keepCanvasesShown(pixmaps: (PixMap | null)[]): void {
++        const now: number = performance.now();
++        for (const pixmap of pixmaps) {
++            pixmap?.keepShown(now);
++        }
++    }
++
+     // custom (ios): host API. How much of each viewport edge the HUD covers (viewport px), see freeLeft.
+     public setViewportInsets(insets: ViewportInsets | null): void {
+         const w: number = this.viewportWidth;
+diff --git a/src/graphics/PixMap.ts b/src/graphics/PixMap.ts
+index e601d08..7aeb9b8 100644
+--- a/src/graphics/PixMap.ts
++++ b/src/graphics/PixMap.ts
+@@ -36,6 +36,19 @@ export default class PixMap {
+     private static generation: number = 0;
+     private static readonly FULL_EVERY: number = 100;
+ 
++    // custom (ios): a canvas can also lose its pixels without a word: on an iPhone WebKit dropped the side panel's while
++    // the app was in the foreground (no visibilitychange, no contextrestored, no memory warning), and a PixMap drawn only
++    // when its content changes (the side panel, the chatbox, the title screen's and the classic frame's pieces) then
++    // stayed blank, its redraws of the same pixels sending nothing. So the client calls keepShown() every frame for each
++    // PixMap that shows: the frame it last sent goes again, whole, once KEEP_MS have passed since it last went whole or
++    // the PixMaps were invalidated since (a page shown again: at once, not at the next change); resend() sends it now
++    // (the HUD, for a surface it shows again). `paint` holds that frame converted, so it costs no conversion.
++    private sentX: number = 0;
++    private sentY: number = 0;
++    private sentAt: number = -1; // when the whole frame last went to this canvas, -1: nothing sent to it yet
++    private sentGeneration: number = -1;
++    private static readonly KEEP_MS: number = 2000;
++
+     // custom (ios): every PixMap sends its whole frame at its next draw (see changesOnly)
+     static invalidate(): void {
+         PixMap.generation++;
+@@ -69,6 +82,7 @@ export default class PixMap {
+         this.ctx = ctx;
+         this.own = own;
+         this.shownGeneration = -1; // custom (ios): the next draw sends the whole frame
++        this.sentAt = -1; // custom (ios): nothing on the new canvas to keep shown until then (see keepShown)
+     }
+ 
+     draw(x: number, y: number): void {
+@@ -79,6 +93,36 @@ export default class PixMap {
+ 
+         this.prepareCanvas();
+         this.ctx.putImageData(this.img, this.own ? 0 : x, this.own ? 0 : y);
++        this.wholeSent(this.own ? 0 : x, this.own ? 0 : y); // custom (ios)
++    }
++
++    // custom (ios): see sentAt
++    keepShown(now: number): void {
++        if (this.sentAt >= 0 && (now - this.sentAt >= PixMap.KEEP_MS || this.sentGeneration !== PixMap.generation)) {
++            this.resend(now);
++        }
++    }
++
++    // custom (ios): see sentAt
++    resend(now: number = performance.now()): void {
++        if (this.sentAt < 0) {
++            return;
++        }
++
++        this.ctx.putImageData(this.img, this.sentX, this.sentY);
++        this.wholeSent(this.sentX, this.sentY, now);
++        if (this.own || this.changesOnly) {
++            // the canvas shows `shown` again: the next draw sends only what changed from it
++            this.shownGeneration = PixMap.generation;
++            this.drawsSinceWhole = 0;
++        }
++    }
++
++    private wholeSent(x: number, y: number, now: number = performance.now()): void {
++        this.sentX = x;
++        this.sentY = y;
++        this.sentAt = now;
++        this.sentGeneration = PixMap.generation;
+     }
+ 
+     // custom (ios): see changesOnly
+@@ -95,6 +139,7 @@ export default class PixMap {
+             this.shownY = y;
+             this.shownGeneration = PixMap.generation;
+             this.drawsSinceWhole = 0;
++            this.wholeSent(x, y);
+             return;
+         }
+ 

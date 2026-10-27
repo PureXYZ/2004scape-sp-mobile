@@ -5,6 +5,11 @@ with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
 ## [Unreleased]
 
+- **Fixed: the inventory could show only its stone background.** After a while the side panel sometimes came back
+  empty, its tab still selected, and opening the tab again did not help (another tab and back did). The phone had
+  dropped the panel's picture and the game only sent what changed. Now the panel, the chatbox, the minimap, the world,
+  the title screen and the classic layout's pieces get their whole picture again within 2 seconds, and at once when
+  the panel or the chatbox opens or the app comes back.
 - **Minimap zooms out further.** The minimap's zoom slider now goes out to half the 2004 zoom (it stopped at three
   quarters), showing about 32 tiles around you; the 2004 zoom is now the middle of the groove. Past the edge of the area
   the game has loaded, the map is black.

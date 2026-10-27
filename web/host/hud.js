@@ -736,6 +736,13 @@
         if (state.shown.map && !show.map) {
             api.client()?.cancelPointerOn?.(el['surface-map']);
         }
+        // a surface shown again gets its whole frame at once: WebKit can drop a canvas's pixels without a word, and a
+        // redraw of the same tab sends only what changed (client patch 0032), so the panel came back as bare stone
+        for (const [shown, area] of [['panel', 'side'], ['chat', 'chat'], ['map', 'map']]) {
+            if (!state.shown[shown] && show[shown]) {
+                api.client()?.resendSurface?.(area);
+            }
+        }
         state.shown = { panel: show.panel, chat: show.chat, map: show.map };
 
         if (key === state.geometryKey) {
