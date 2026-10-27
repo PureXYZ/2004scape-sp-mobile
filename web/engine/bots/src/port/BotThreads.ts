@@ -27,7 +27,6 @@
 // busy place's talk (port/BotVoice).
 // Every roll is Math.random (seeded in the sims) or the names' seeds; nothing reads the wall clock. Per tick nothing: a
 // thread is a few scheduled lines.
-import WordEnc from '#/cache/wordenc/WordEnc.js';
 import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
 import { CoordGrid } from '#/engine/CoordGrid.js';
@@ -50,6 +49,7 @@ import { formatGp } from '#/engine/bot/port/BotPrices.js';
 import type { Persona } from '#/engine/bot/port/BotPersona.js';
 import type { SlotValues } from '#/engine/bot/port/BotSlots.js';
 import threadsJson from '../../data/threads.json';
+import { botFilter } from '#/engine/bot/port/BotFilter.js';
 
 // ── the data ─────────────────────────────────────────────────────────────────
 
@@ -282,7 +282,7 @@ function fill(template: string, values: Record<string, string | number | null | 
         }
         return String(v);
     });
-    return ok && WordEnc.filter(text) === text ? text : null;
+    return ok && botFilter(text) === text ? text : null;
 }
 
 /** a line of `templates` filled (a few tries: one the filter reads across is drawn again), or null */
@@ -706,7 +706,7 @@ export function drawThread(a: Player, b: Player, depth: number): ThreadLine[] | 
         if (round === 1) {
             const segue = pick(DATA.segue);
             const opened = `${segue}${drawn.turns[0].text}`;
-            if (segue && WordEnc.filter(opened) === opened && opened.length <= 60) drawn.turns[0] = { ...drawn.turns[0], text: opened };
+            if (segue && botFilter(opened) === opened && opened.length <= 60) drawn.turns[0] = { ...drawn.turns[0], text: opened };
             stats.changed++;
         }
         const prevMem = mem.get(id);

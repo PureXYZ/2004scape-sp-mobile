@@ -5,7 +5,7 @@
 //   node --expose-gc --experimental-vm-modules web/engine/test/bots.test.mjs [--real] [--only=build|vm|jsc] [--nojit]
 //        [--bots=N] [--no-build] [--verbose]
 //
-//  1. build: both bundles; engine.js, boot.js and the 37 vanilla files byte-identical with and without the bots build;
+//  1. build: both bundles; engine.js, boot.js and the 38 vanilla files byte-identical with and without the bots build;
 //     no bot code or marker in engine.js; scripts.bin made from the staged script.dat; no local folder named in the
 //     output (the scripts' source paths are relative); the library guards (a Node built-in, process.env or the
 //     database in the library fail the build, also with the library behind a symlink);
@@ -126,7 +126,7 @@ if (!args.includes('--no-build') && (!only || only === 'build')) {
     const engineJs = fs.readFileSync(path.join(OUT, 'engine/engine.js'), 'utf8');
     const botsJs = fs.readFileSync(path.join(OUT, 'engine/engine-bots.js'), 'utf8');
     const markers = ['LCBOTS01', '[bots]', 'P_ISBOT'];
-    report('build: engine.js has the 37 vanilla files and no bot marker; engine-bots.js has all', manifest.length === 37 && markers.every(m => !engineJs.includes(m) && botsJs.includes(m)), { files: manifest.length });
+    report('build: engine.js has the 38 vanilla files and no bot marker; engine-bots.js has all', manifest.length === 38 && markers.every(m => !engineJs.includes(m) && botsJs.includes(m)), { files: manifest.length });
     const header = decodeScriptsBin(fs.readFileSync(path.join(OUT, 'engine/vfs/bots/scripts.bin')));
     report('build: scripts.bin was diffed against the staged script.dat', header.datSha256 === sha(path.join(OUT, 'engine/vfs/data/pack/server/script.dat')) && header.scripts.length > 0, { scripts: header.scripts.length, commands: header.commands });
     // the script compiler writes absolute source paths; build.mjs ships them relative (scripts.bin's too)

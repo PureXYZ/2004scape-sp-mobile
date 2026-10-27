@@ -2,8 +2,8 @@
 // Engine worker build: bundles Engine-TS 274 for a browser module worker and stages the files it reads at runtime.
 //
 //   node web/engine/build.mjs --out <Game dir> [--debug] [--engine-dir <dir>] [--content-dir <dir>]
-//                             [--no-bots | --bots-lib <dir>] [--rebuild-bot-scripts]
-//   import { buildEngine } from './web/engine/build.mjs'; await buildEngine({ out, debug, engineDir, contentDir, bots });
+//                             [--no-bots | --bots-lib <dir>] [--rebuild-bot-scripts] [--autotest]
+//   import { buildEngine } from './web/engine/build.mjs'; await buildEngine({ out, debug, engineDir, contentDir, bots, autotest });
 //
 // Writes (ARCHITECTURE.md §2):
 //   <out>/engine/boot.js              module-worker bootstrap (src/boot.js)
@@ -11,7 +11,8 @@
 //   <out>/engine/bzip2.wasm           optional WASM bzip2 (the bundle falls back to a TS decoder)
 //   <out>/engine/vfs-manifest.json    [[vfsPath, urlRelativeToEngineDir], ...]
 //   <out>/engine/vfs/...              runtime data except the cache, incl. the generated world.json (script.dat
-//                                     with relative source paths: 'content/scripts/...', relativiseScriptPack)
+//                                     with relative source paths: 'content/scripts/...', relativiseScriptPack) and
+//                                     data/derived/startup-tables.json (startup-tables.mjs, from the staged cache)
 //   <out>/cache/main_file_cache.*     the cache, shared with the client
 // and, unless bots: false (docs/BOTS.md §2):
 //   <out>/engine/engine-bots.js[.map] the same engine + the bot library (bots/src, '#/engine/bot/*') + the glue
@@ -24,6 +25,8 @@
 // plugin (unknown built-ins and server-only packages fail the build), `Buffer` is injected only into engine (and
 // bot library) files that use it as a value, and process.exit/memoryUsage/platform are rewritten with `define`.
 // engine.js is the same with or without the bots build: nothing of the bots is reachable from src/entry.ts.
+// A test build (autotest: scripts/build-web.mjs --autotest) bundles src/autotest/entry.ts and entry-bots.ts instead: the
+// same entries plus the engine's measurements for app-test --soak (src/autotest/perf.ts); a normal build has none of it.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,6 +39,7 @@ import { CONTENT_DIR, ENGINE_DIR } from '../../scripts/lib/upstream.mjs';
 import * as esbuild from 'esbuild';
 
 import { compileBotScripts, decodeScriptsBin, encodeScriptsBin, readCommandNumbers, readScriptPack, relativiseScriptPack, splitHeader } from './bots/content/compile.mjs';
+import { STARTUP_TABLES, startupTablesJson } from './startup-tables.mjs';
 
 const HERE = realDir(path.dirname(fileURLToPath(import.meta.url))); // (real: compared with esbuild's paths)
 const IOS = path.resolve(HERE, '../..');
@@ -44,10 +48,12 @@ const SHIMS = path.join(SRC, 'shims');
 /** The bot library ('#/engine/bot/*'), ported to 274 (docs/BOTS.md §3). Tests point `bots.lib` at a stub. */
 export const BOTS_LIB = path.join(HERE, 'bots/src');
 // the glue: only src/entry-bots.ts reaches it
-const BOTS_GLUE = [path.join(SRC, 'entry-bots.ts'), path.join(SRC, 'runtime/bots') + path.sep];
+const BOTS_GLUE = [path.join(SRC, 'entry-bots.ts'), path.join(SRC, 'autotest/entry-bots.ts'), path.join(SRC, 'runtime/bots') + path.sep];
 // strings only the bots bundle contains (the bot store's magic, the glue's log prefix, the script command it registers):
 // engine.js must have none
 const BOT_MARKERS = ['LCBOTS01', '[bots]', 'P_ISBOT'];
+// the test build's measurements answer this message (src/autotest/perf.ts): only a test build's bundles name it
+export const PERF_MARKER = 'lctest-perf';
 // what boot.js preloads for engine-bots.js on top of vfs-manifest.json
 const BOTS_VFS = [['/engine/data/bot/scripts.bin', 'vfs/bots/scripts.bin']];
 
@@ -293,6 +299,12 @@ function copy(src, dst) {
     fs.copyFileSync(src, dst, fs.constants.COPYFILE_FICLONE);
 }
 
+/** A test build's bundle answers 'lctest-perf' (src/autotest/perf.ts), a normal build's never names it. */
+function checkPerfMarker(name, text, autotest) {
+    if (autotest && !text.includes(PERF_MARKER)) throw new Error(`${name} of a test build (autotest) lacks its measurements (no '${PERF_MARKER}')`);
+    if (!autotest && text.includes(PERF_MARKER)) throw new Error(`${name} names '${PERF_MARKER}': the test build's measurements (src/autotest) must not reach a normal build`);
+}
+
 function scanBundle(text) {
     // anything left here would fail at runtime in the worker (or silently take a Node code path)
     return {
@@ -363,7 +375,7 @@ export function bundleOptions(engineDir, report = { redirects: new Map(), inject
 
 // ---- build --------------------------------------------------------------------------------------------------
 
-export async function buildEngine({ out, debug = false, engineDir, contentDir, bots = {} } = {}) {
+export async function buildEngine({ out, debug = false, engineDir, contentDir, bots = {}, autotest = false } = {}) {
     if (!out) throw new Error('buildEngine: `out` (the Game directory) is required');
     out = path.resolve(out);
     engineDir = realDir(engineDir ?? ENGINE_DIR);
@@ -389,7 +401,7 @@ export async function buildEngine({ out, debug = false, engineDir, contentDir, b
     const report = { redirects: new Map(), injectedBuffer: [] };
     const result = await esbuild.build({
         ...bundleOptions(engineDir, report),
-        entryPoints: [path.join(SRC, 'entry.ts')],
+        entryPoints: [path.join(SRC, autotest ? 'autotest/entry.ts' : 'entry.ts')],
         outfile: path.join(engineOut, 'engine.js'),
         minify: !debug,
         sourcemap: debug ? 'linked' : false,
@@ -410,6 +422,7 @@ export async function buildEngine({ out, debug = false, engineDir, contentDir, b
     // bots-off is today's engine by construction: no bot module and no bot marker may reach engine.js
     const leaked = [...botInputs(result.metafile, engineDir, bots ? realDir(bots.lib ?? BOTS_LIB) : null).map(f => path.relative(HERE, f)), ...BOT_MARKERS.filter(m => bundleText.includes(m))];
     if (leaked.length) throw new Error(`engine.js must not contain bot code (it comes only with engine-bots.js): ${leaked.join(', ')}`);
+    checkPerfMarker('engine.js', bundleText, autotest);
 
     // -- bootstrap: debug keeps the commented source, release is minified; import('./engine.js') stays as written
     const bootSrc = fs.readFileSync(path.join(SRC, 'boot.js'), 'utf8');
@@ -436,19 +449,27 @@ export async function buildEngine({ out, debug = false, engineDir, contentDir, b
     fs.writeFileSync(path.join(engineOut, 'vfs/data/config/world.json'), worldJson);
     manifest.push(['/engine/data/config/world.json', 'vfs/data/config/world.json']);
     dataBytes += worldJson.length;
+    // what Midi.load/AnimFrame.load work out from this cache at every World.start (runtime/startup-tables.ts)
+    const tables = await startupTablesJson({ engineDir, cacheDir: cacheOut });
+    fs.mkdirSync(path.dirname(path.join(engineOut, STARTUP_TABLES[1])), { recursive: true });
+    fs.writeFileSync(path.join(engineOut, STARTUP_TABLES[1]), tables.json);
+    manifest.push(STARTUP_TABLES);
+    dataBytes += tables.json.length;
     fs.writeFileSync(path.join(engineOut, 'vfs-manifest.json'), JSON.stringify(manifest, null, debug ? 1 : 0) + '\n');
 
     // -- the bots build (docs/BOTS.md §2), beside the files above and never changing them
-    const botsInfo = bots ? await buildBots({ engineOut, debug, engineDir, contentDir, bots, vanillaText: bundleText }) : null;
+    const botsInfo = bots ? await buildBots({ engineOut, debug, engineDir, contentDir, bots, vanillaText: bundleText, autotest }) : null;
 
     const size = f => fs.statSync(path.join(engineOut, f)).size;
     const bundleBytes = size('engine.js');
     const info = {
         debug,
+        autotest,
         ms: Date.now() - t0,
         bundle: { bytes: bundleBytes, gzip: zlib.gzipSync(bundleText).length, inputs: Object.keys(result.metafile.inputs).length },
         boot: { bytes: size('boot.js') },
         data: { files: manifest.length, bytes: dataBytes },
+        startupTables: { bytes: tables.json.length, reused: tables.reused, ms: tables.ms },
         redirects: Object.fromEntries([...report.redirects].map(([k, v]) => [k, [...v].sort()])),
         injectedBuffer: report.injectedBuffer.sort(),
         processRefs: scan.processRefs,
@@ -457,7 +478,7 @@ export async function buildEngine({ out, debug = false, engineDir, contentDir, b
     return info;
 }
 
-async function buildBots({ engineOut, debug, engineDir, contentDir, bots, vanillaText }) {
+async function buildBots({ engineOut, debug, engineDir, contentDir, bots, vanillaText, autotest }) {
     const t0 = Date.now();
     const lib = realDir(bots.lib ?? BOTS_LIB);
     if (!fs.existsSync(path.join(lib, 'BotManager.ts'))) throw new Error(`bots: ${lib} is not a bot library (no BotManager.ts)`);
@@ -505,7 +526,7 @@ async function buildBots({ engineOut, debug, engineDir, contentDir, bots, vanill
     const report = { redirects: new Map(), injectedBuffer: [] };
     const result = await esbuild.build({
         ...bundleOptions(engineDir, report, { botsLib: lib }),
-        entryPoints: [path.join(SRC, 'entry-bots.ts')],
+        entryPoints: [path.join(SRC, autotest ? 'autotest/entry-bots.ts' : 'entry-bots.ts')],
         outfile: path.join(engineOut, 'engine-bots.js'),
         minify: !debug,
         sourcemap: debug ? 'linked' : false,
@@ -529,6 +550,7 @@ async function buildBots({ engineOut, debug, engineDir, contentDir, bots, vanill
     if (extraProcess.length) throw new Error(`engine-bots.js references ${extraProcess.join(', ')} beyond engine.js's (no process in the worker; docs/BOTS.md §5)`);
     const absent = BOT_MARKERS.filter(m => !text.includes(m));
     if (absent.length) throw new Error(`engine-bots.js lacks the bots glue (no ${absent.join(', ')})`);
+    checkPerfMarker('engine-bots.js', text, autotest);
 
     const inputs = Object.keys(result.metafile.inputs).map(i => path.resolve(engineDir, i));
     return {
@@ -553,15 +575,15 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     };
     const out = opt('--out');
     if (!out) {
-        console.error('usage: node web/engine/build.mjs --out <Game dir> [--debug] [--engine-dir <dir>] [--content-dir <dir>] [--no-bots | --bots-lib <dir>] [--rebuild-bot-scripts]');
+        console.error('usage: node web/engine/build.mjs --out <Game dir> [--debug] [--engine-dir <dir>] [--content-dir <dir>] [--no-bots | --bots-lib <dir>] [--rebuild-bot-scripts] [--autotest]');
         process.exit(2);
     }
     try {
         const bots = args.includes('--no-bots') ? false : { lib: opt('--bots-lib'), rebuildScripts: args.includes('--rebuild-bot-scripts') };
-        const info = await buildEngine({ out, debug: args.includes('--debug'), engineDir: opt('--engine-dir'), contentDir: opt('--content-dir'), bots });
+        const info = await buildEngine({ out, debug: args.includes('--debug'), engineDir: opt('--engine-dir'), contentDir: opt('--content-dir'), bots, autotest: args.includes('--autotest') });
         console.log(
             `engine: ${(info.bundle.bytes / 1024).toFixed(0)} KB bundle (${(info.bundle.gzip / 1024).toFixed(0)} KB gzip, ${info.bundle.inputs} modules), ` +
-                `${info.data.files} data files (${(info.data.bytes / 1048576).toFixed(1)} MB), ${info.debug ? 'debug' : 'release'}, ${info.ms} ms`
+                `${info.data.files} data files (${(info.data.bytes / 1048576).toFixed(1)} MB), ${info.debug ? 'debug' : 'release'}${info.autotest ? ', test build (autotest)' : ''}, ${info.ms} ms`
         );
         if (info.bots) {
             const b = info.bots;

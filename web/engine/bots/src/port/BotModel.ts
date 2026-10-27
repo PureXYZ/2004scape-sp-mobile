@@ -30,6 +30,7 @@ import type { SituationRequest } from '#/engine/bot/port/BotModelPrompt.js';
 import type { ChatModelMode, LocalPrompt, ModelFallback, ModelModeMessage, ModelReplyMessage, ModelRequestMessage, OnlinePrompt, ReplyVia, Situation } from '#/engine/bot/port/BotModelTypes.js';
 import { MAX_LINE } from '#/engine/bot/port/BotSay.js';
 import { scheduleInTicks } from '#/engine/bot/port/BotSchedule.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 let mode: ChatModelMode = 'rules';
 const present = { local: false, online: false };
@@ -374,7 +375,7 @@ function handleReply(msg: ModelReplyMessage): void {
 /** the display names of everyone in the world (the guard's (e)) */
 function onlineNames(): string[] {
     const out: string[] = [];
-    for (const p of World.playerLoop.all()) out.push(p.displayName || toDisplayName(p.username));
+    for (const p of worldPlayers()) out.push(p.displayName || toDisplayName(p.username));
     return out;
 }
 

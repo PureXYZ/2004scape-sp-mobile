@@ -125,8 +125,17 @@ final class Harness {
         let hasLocal = model.local.available
         print("INFO local model: \(modelInfo?.name ?? "none") (available \(hasLocal))")
 
-        // warm: the model loads ahead of the first request (the page asks when the player enters the world)
+        // the last load's time (the status's lastLoadMs), kept in its own UserDefaults suite here: none before a load
+        let defaults = UserDefaults(suiteName: "lm-harness")!
+        defaults.removeObject(forKey: ModelLoadRecord.key)
+        model.loadRecord = ModelLoadRecord(defaults: defaults, versions: "lm-harness 1")
+        var lastLoadMs: Any? { (model.status["local"] as? [String: Any])?["lastLoadMs"] }
+        check("status: no lastLoadMs before the model has loaded here", lastLoadMs == nil, "\(model.status["local"] ?? "?")")
+
+        // warm: the model loads ahead of the first request (the page asks when the player starts to chat, and on entering
+        // the world until a load has been quick)
         if hasLocal {
+            let statusesBefore = statuses.count
             model.warm()
             var waited = 0
             while !model.local.isLoaded, waited < 600 {
@@ -134,6 +143,14 @@ final class Harness {
                 waited += 1
             }
             check("warm: the model loads ahead of the first request", model.local.isLoaded, "load \(model.local.lastLoad.map { "\($0.map { Int($0) })" } ?? "?") ms (total, model, context)")
+            try? await Task.sleep(for: .milliseconds(100)) // (the loaded change reaches the main queue)
+            let loadMs = model.local.lastLoad?.first ?? -1
+            let pushed = statuses.dropFirst(statusesBefore).last?["local"] as? [String: Any]
+            // (kept for these versions only: after an app or system update the next load is the slow one again)
+            let otherVersions = ModelLoadRecord(defaults: defaults, versions: "lm-harness 2").lastLoadMs
+            check("status: lastLoadMs is the load's time, in the status and kept in the record",
+                  lastLoadMs as? Double == loadMs.rounded() && pushed?["lastLoadMs"] as? Double == loadMs.rounded() && ModelLoadRecord(defaults: defaults, versions: "lm-harness 1").lastLoadMs == loadMs && otherVersions == nil,
+                  "lastLoadMs \(lastLoadMs ?? "none"), load \(loadMs) ms, pushed \(pushed?["lastLoadMs"] ?? "none"), other versions \(otherVersions.map { "\($0)" } ?? "none")")
         }
 
         // no key: the status says so; Claude online with the fallback answers from the model in the app (or not at all)

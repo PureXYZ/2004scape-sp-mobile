@@ -34,6 +34,10 @@ final class GameViewController: UIViewController {
     private static let keepAwakeAfterInput: Duration = .seconds(5 * 60)
     private var inGame = false
     private var lastUserActivity = ContinuousClock.now
+    #if DEBUG
+    /// A test run's soak (debug `keep-awake`): the screen stays on outside the world too, e.g. while it measures the title.
+    private var testKeepAwake = false
+    #endif
     private var keepAwakeTimer: Timer?
     /// The navigation started by `loadGame`: only its failure leaves the screen without a page.
     private var gameLoad: WKNavigation?
@@ -176,6 +180,9 @@ final class GameViewController: UIViewController {
         keyboard.reset()
         lifecycle.reset()
         inGame = false
+        #if DEBUG
+        testKeepAwake = false
+        #endif
         setKeepAwake(false)
         pageSerial += 1
         uncovering = false
@@ -261,6 +268,12 @@ final class GameViewController: UIViewController {
     }
 
     private func updateKeepAwake() {
+        #if DEBUG
+        if testKeepAwake {
+            setKeepAwake(true)
+            return
+        }
+        #endif
         setKeepAwake(inGame && ContinuousClock.now - lastUserActivity < Self.keepAwakeAfterInput)
     }
 
@@ -531,6 +544,15 @@ final class GameViewController: UIViewController {
             alert.dismiss(animated: false) { [weak self] in self?.keyAlertClosed(typed: typed) }
         case "activity":
             userActivity()  // (a long in-app test keeps the screen awake)
+        case "keep-awake":
+            // A soak keeps the screen on outside the world too (app-test --soak: the title); {on: false} lets it sleep again.
+            testKeepAwake = message["on"] as? Bool ?? true
+            updateKeepAwake()
+            reply = UIApplication.shared.isIdleTimerDisabled
+        case "launch-test":
+            // What the test driver launched the app with (app-test --soak: `-LostCityTest <base64 JSON>`, the soak and which
+            // launch of a series this is; the argument domain only, never stored), or null.
+            reply = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["LostCityTest"] as? String ?? NSNull()
         default:
             Log.info("debug", "unknown debug action: \(message)")
         }

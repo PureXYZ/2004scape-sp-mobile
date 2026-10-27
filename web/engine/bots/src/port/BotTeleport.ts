@@ -56,6 +56,7 @@ import { isNewbie } from '#/engine/bot/port/BotNewbie.js';
 import { personaOf } from '#/engine/bot/port/BotPersona.js';
 import { moveItems } from '#/engine/bot/port/BotInventoryCompat.js';
 import texture from '../../data/lines2004-texture.json';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 // ── the rule's numbers (the spec's defaults) ─────────────────────────────────
 
@@ -319,7 +320,7 @@ function freeToCast(player: Player): boolean {
  * nor takes a wrong turn (BotAction's walk): either left the friend behind, out of run energy, its follow ended.
  */
 export function leadsAFriend(player: Player): boolean {
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p === player || !p.is_bot || p.level !== player.level || Math.max(Math.abs(p.x - player.x), Math.abs(p.z - player.z)) > 20) continue;
         const sub = (p as unknown as { _bot?: { subTask?: { leaderPlayer?: Player; target?: Player } | null } })._bot?.subTask;
         if (sub && (sub.leaderPlayer === player || sub.target === player)) return true;

@@ -101,7 +101,7 @@ import {
 import { canTravel, CollisionType } from '#/engine/routefinder/index.js';
 import { elementalsWanted } from '#/engine/bot/port/BotTeleport.js';
 import type { SkillStep, WindSpellTier } from '#/engine/bot/tasks/BotTaskBase.js';
-import { findNpcFiltered, npcMatchesName, interactHeldOp, _wornContains, _equipLoot, climbDownNear, tryOpenGateNear } from '#/engine/bot/BotAction.js';
+import { findNpcFiltered, npcMatchesName, npcWithin, interactHeldOp, _wornContains, _equipLoot, climbDownNear, tryOpenGateNear } from '#/engine/bot/BotAction.js';
 import { bankStop } from '#/engine/bot/port/BotHabits.js';
 import NpcType from '#/cache/config/NpcType.js';
 import ObjType from '#/cache/config/ObjType.js';
@@ -1436,7 +1436,7 @@ export class RangedMagicTask extends BotTask {
     }
 
     private _isNpcAlive(player: Player, npc: Npc): boolean {
-        return findNpcFiltered(player.x, player.z, player.level, n => n === npc, 30) !== null;
+        return npcWithin(npc, player.x, player.z, player.level, 30);
     }
 
     // ── NPC claim ─────────────────────────────────────────────────────────────

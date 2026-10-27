@@ -3,6 +3,45 @@
 All notable changes to 2004Scape. Versions follow `VERSION` (major.minor.patch); each one is a GitHub release `v<version>`
 with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
+## [Unreleased]
+
+Performance work that changes nothing a player can see or hear: the same game state and bot behaviour, the same pixels
+and sound samples, 600 ms ticks, and saves that are byte for byte the same. Each change was checked against the code it
+replaces, and main and this build were run side by side from the same seeds at 0, 500 and 1,000 bots. The numbers below
+are from a Mac (M2), in WebKit as the iPhone runs it and in Chrome as Android's WebView does, except the audio line's
+and the chat model's, from an iPhone 13 mini, and Android's frame stalls, from the Android emulator. On that iPhone the
+whole phone uses about 20 % less CPU standing in the world or at the title (11 % walking), the title is up 0.8 s sooner,
+and the game holds 50 to 80 MB less memory while playing. The only new text is in Settings › About's licences: libbzip2
+is now used by the client and the World map too.
+
+- **Faster start.** The client unpacks its archives with the engine's libbzip2 instead of its JavaScript decoder, the
+  engine starts while the page builds its controls, and song lengths and animation timings come from a table made at
+  build time instead of being worked out at every start. The title is up in about 0.56 s instead of 1.25 s (WebKit;
+  Chrome 0.67 s instead of 1.42 s), and the page's peak memory while starting is about 160 MB lower.
+- **Lighter drawing.** Each canvas gets only the pixels that changed since its last frame, and none when nothing moved:
+  WebKit's GPU process works about 55 % less at the title and about 75 % less standing in the world, at the same frame
+  rate. On Android a canvas gets its whole frame when any of its pixels changed, and none when nothing moved (only the
+  changed part made the frames stall there): on the emulator a frame of 100 ms or more comes a third to three quarters
+  as often as before (about half as often walking, alone or with 500 bots), at 1.5 to 3 more frames a second. The 3D
+  renderer makes no garbage per frame. On Android the HUD updates right after each game frame instead of on every
+  display frame.
+- **Less memory.** Collision zones with nothing in them share one array, the scripts' bytecode is kept in typed arrays,
+  and the music lets go of the sound it has played: the engine's heap after start is about 39 MB smaller in
+  JavaScriptCore. The 30 MB of files the engine reads only to start are freed as soon as the world has started instead
+  of at the engine's next full garbage collection, up to a minute or so later. The World map no longer loads four grids
+  that only the 2004 applet's keys draw, keys the phone's map does not have: 9 MB less from its first opening on.
+- **Audio at rest.** With Settings › Sound on Mute, the game's audio stops after 10 s with nothing playing and starts
+  again with the next sound: on an iPhone 13 mini a silent stretch costs about 23 points of a core less, and a sound with
+  no touch before it comes out about 7 ms later (about 40 ms after minutes of silence). Play, the default, is as before.
+- **The chat model when you chat.** With the bots and the on-device chat model, the model now loads when you start
+  typing (or open a private message), not each time you enter the world, and a Jmod's `::` command does not load it:
+  an iPhone 13 mini keeps about 100 MB less for the 5 minutes after entering the world in a session without chat.
+  Measured on that phone, no bot's reply came later (43 trials). The first load after an install or an update, the slow
+  one, still starts on entering the world.
+- **A cheaper world tick.** The engine's loops run without generators and skip work whose result is already there; the
+  bots' route and zone searches, player lists, word filter and walking graph do the same work with less. A tick with 500
+  bots takes about 21 % less time in JavaScriptCore (about 26 % in V8), with 1,000 bots about 18 % (32 %).
+
 ## [1.0.0] - 2026-10-20
 
 The first public release: Lost City (RuneScape revision 274, as of 2004) as a single-player game that runs entirely on

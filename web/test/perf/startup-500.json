@@ -1,0 +1,5 @@
+{
+    "description": "Start-up with 500 bots, 5 clean launches: the bots' engine and store load before the title. No phases.",
+    "bots": 500,
+    "startup": { "launches": 5 }
+}

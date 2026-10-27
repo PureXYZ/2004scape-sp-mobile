@@ -48,6 +48,7 @@ import { personaOf } from '#/engine/bot/port/BotPersona.js';
 import { botReactionTicks } from '#/engine/bot/port/BotTiming.js';
 import { wildernessLevelAt } from '#/engine/bot/port/BotContent.js';
 import { pkTryEquipFromInventory, wieldsSpecialWeapon, type PkProfile } from '#/engine/bot/port/BotPkGear.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 // ── the items (274 debugnames, resolved once) ───────────────────────────────────────────────────────────────────────
 
@@ -513,7 +514,7 @@ export function pkRecharge(player: Player): void {
 
 /** a player with an attack on this one (any: also one it may not hit back, a third player's fight in single combat) */
 export function pkHitBy(player: Player): Player | null {
-    for (const p of World.playerLoop.all() as Iterable<Player>) {
+    for (const p of worldPlayers()) {
         if (p === player || p.slot === -1 || p.target !== player) continue;
         if (p.targetOp === ServerTriggerType.APPLAYER2 || p.targetOp === ServerTriggerType.OPPLAYER2) return p;
     }

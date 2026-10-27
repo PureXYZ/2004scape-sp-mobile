@@ -5,7 +5,7 @@ iOS, Android System WebView on Android), next to the web client. Single player, 
 (§2 layout, §4 page↔engine protocol, §5 saves, §8 world config).
 
 ```
-node web/engine/build.mjs --out build/Game [--debug] [--no-bots]   # or: import { buildEngine } from './web/engine/build.mjs'
+node web/engine/build.mjs --out build/Game [--debug] [--no-bots] [--autotest]   # or: import { buildEngine } from './web/engine/build.mjs'
 node web/engine/test/all.mjs [--skip-chrome] [--port P]    # every test below, ~10 min (the bots against the real library and the stub)
 ```
 
@@ -17,28 +17,33 @@ With bots (`docs/BOTS.md`) the build also writes `engine-bots.js`, which boot.js
 | File | What |
 |---|---|
 | `engine/boot.js` | Module-worker bootstrap (3.5 KB). Preloads the vfs, merges `init.config` into `world.json`, imports `engine.js` (or, with `init.config.bots.count > 0`, `engine-bots.js` after also preloading `vfs-manifest-bots.json`), forwards the worker console. |
-| `engine/engine.js` (+ `.map` in debug) | The bundle: `src/entry.ts` + 432 engine sources + 3 npm packages (fflate, kleur, ttlcache) + `src/shims`. Release 453 KB (123 KB gzip, 101 KB brotli); debug 960 KB + linked map. |
-| `engine/bzip2.wasm` | The engine's libbzip2 build (87 KB). Optional: without it (or without WebAssembly) a TypeScript decoder is used. |
-| `engine/vfs-manifest.json` | `[[vfsPath, urlRelativeToEngineDir], …]` – 37 entries. |
-| `engine/vfs/**` | 31 runtime files (21.5 MB) incl. the generated `data/config/world.json`. |
+| `engine/engine.js` (+ `.map` in debug) | The bundle: `src/entry.ts` + 432 engine sources + 3 npm packages (fflate, kleur, ttlcache) + `src/shims`. Release 464 KB (128 KB gzip, 104 KB brotli); debug 980 KB + linked map. |
+| `engine/bzip2.wasm` | The engine's libbzip2 build (87 KB). Optional: without it (or without WebAssembly) a TypeScript decoder is used. The host page loads it too, for the client's jag archives (`web/host/bzip2.js`). |
+| `engine/vfs-manifest.json` | `[[vfsPath, urlRelativeToEngineDir], …]` – 38 entries. |
+| `engine/vfs/**` | 32 runtime files (21.6 MB) incl. the generated `data/config/world.json` and `data/derived/startup-tables.json`. |
 | `cache/main_file_cache.{dat,idx0..4}` | The cache (8.9 MB), shared with the client; the manifest points at `../cache/…`. |
 | `engine/engine-bots.js` (+ `.map` in debug) | Unless `bots: false`: `src/entry-bots.ts` = the same entry and engine + the bot library (`bots/src`, `#/engine/bot/*`) + the glue (`src/runtime/bots`). |
-| `engine/vfs-manifest-bots.json` | What boot.js preloads on top of the 37 for `engine-bots.js`: 1 entry. |
+| `engine/vfs-manifest-bots.json` | What boot.js preloads on top of the 38 for `engine-bots.js`: 1 entry. |
 | `engine/vfs/bots/scripts.bin` | The bots' content-script overlay (24 scripts, 14.5 KB; `bots/content/compile.mjs`). |
 
-`buildEngine({ out, debug = false, engineDir, contentDir, bots = {} })` (the directories default to the upstream
+`buildEngine({ out, debug = false, engineDir, contentDir, bots = {}, autotest = false })` (the directories default to the upstream
 checkouts `scripts/lib/upstream.mjs` resolves) returns
-`{ ms, bundle: {bytes, gzip, inputs}, data: {files, bytes}, redirects, injectedBuffer, processRefs, bots }`. It deletes and
-rewrites `<out>/engine` and `<out>/cache` only. Build time ≈ 0.15 s (files are APFS clones), + ~0.1 s for the bots
-bundle. `bots`: `false` = the vanilla files only; `{ lib, overlay, rebuildScripts }` = the bot library (default
+`{ ms, bundle: {bytes, gzip, inputs}, data: {files, bytes}, startupTables: {bytes, reused, ms}, redirects, injectedBuffer,
+processRefs, bots }`. It deletes and rewrites `<out>/engine` and `<out>/cache` only. Build time ≈ 0.15 s (files are APFS
+clones), + ~0.1 s for the bots bundle; the start-up tables come from `build/tmp/startup-tables` (14 ms) unless the
+cache, the loaders or `startup-tables.mjs` itself changed (~0.4 s to make them again). `bots`: `false` = the vanilla files only; `{ lib, overlay, rebuildScripts }` = the bot library (default
 `bots/src`), a `compileBotScripts()` result to use (else it is compiled or taken from the cache), force a recompile.
+`autotest: true` (`scripts/build-web.mjs --autotest`, the in-app test's build) bundles `src/autotest/entry.ts` and
+`src/autotest/entry-bots.ts` in place of the two entries: the same entries plus the engine's measurements for
+`app-test --soak` (below, [Test builds](#test-builds-autotest)); the build fails if a test build's bundle lacks them or a
+normal build's names them (`'lctest-perf'`).
 `info.bots` = `{ ms, lib, bundle: {bytes, gzip, inputs, libModules}, data, overlay: {key, reused, scripts, bytes, base,
 patches, vanillaScriptDat}, commands, injectedBuffer, processRefs }`.
 
 ### Runtime file set (what the engine reads – verified, not guessed)
 
 `test/vm.test.mjs` records every vfs path the engine touches during the full session and fails if any staged file is
-never read: all **37** are used.
+never read: all **38** are used.
 
 | vfs path | Size | Reader |
 |---|---|---|
@@ -49,7 +54,8 @@ never read: all **37** are used.
 | `/engine/data/pack/server/*.dat` (21) + `script.idx` | 7.4 MB | `World.reload()` loaders, `Component`, `ScriptProvider` |
 | `/engine/data/pack/.cache/maps-server.zip` → `vfs/data/pack/maps-server.zip` | 15.3 MB | `GameMap.ts:66` (no dot-dir in the app bundle) |
 | `/content/maps/{multiway,free2play}.csv` | 140 KB | `GameMap.ts:58-64` – without `<srcDir>/maps` the map silently does not load |
-| `/engine/data/pack/main_file_cache.{dat,idx0-4}` → `../cache/…` | 8.9 MB | `FileStream` (CRC table, anims, midi) |
+| `/engine/data/derived/startup-tables.json` | 181 KB | `runtime/startup-tables.ts` (`Midi.load`, `AnimFrame.load`) – made from the staged cache by `startup-tables.mjs` |
+| `/engine/data/pack/main_file_cache.{dat,idx0-4}` → `../cache/…` | 8.9 MB | `FileStream`: the CRC table (`CrcTable.ts`, archive 0), the start-up tables' guard (idx2/3); anims and midi only without a table |
 
 Not staged: `flo.dat` (never loaded by World), other `.idx`, `client/{media,textures,sounds,versionlist}`, other
 `.cache` zips, `public.pem` (n/e swapped – `private.pem` is authoritative and equals the client's built-in key).
@@ -59,7 +65,7 @@ Not staged: `flo.dat` (never loaded by World), other `.idx`, `client/{media,text
 ```
 page                     boot.js                               engine.js (src/entry.ts)
  new Worker(boot.js) ──►  installs console→{type:'log'}
- {type:'init',config} ─►  fetch vfs-manifest + 37 files ─► globalThis.__LC_VFS__   (progress: preload)
+ {type:'init',config} ─►  fetch vfs-manifest + 38 files ─► globalThis.__LC_VFS__   (progress: preload)
                           deep-merge config into world.json
                           import('./engine.js') ──────────► modules evaluate (read pem/world.json/cache; bzip2 init)
               ◄─ booted   attach({post}); replay queued msgs    (progress: import)
@@ -115,6 +121,32 @@ page                     boot.js                               engine.js (src/en
   that) re-fetches them with a synchronous XHR from their manifest URL and they are dropped again afterwards.
   `fs.readFileSync` returns zero-copy views (all binary readers on the graph copy or only read), which keeps 15 MB +
   6 MB of garbage out of the start-up peak.
+* **Tick** (`runtime/tick.ts`, imported after World): patches for the cost of a tick that keep every call, state,
+  random draw and client byte the same (seeded worlds hashed every tick against main: V8 and JSC idle with 5 players
+  and with 250 and 500 bots, V8 with 1000). (1) The collection loops - `World.npcs`, `playerLoop.all()`, the queue and zone
+  lists, a zone's contents - run on plain iterator objects instead of generators (`runtime/iterators.ts`: the
+  generators' steps at the same moments; `EntityList` stops after the highest id it filled; `test/iterators.test.mjs`
+  compares 48 000 programs with upstream's generators). (2) `HuntType.get(-1)` without the read outside the array,
+  (3) `ScriptRunner.HANDLERS` as a packed array instead of a dictionary-mode object, (4) rsbuf's per-tick reset of
+  only the ids its renderers wrote (`runtime/rsbuf.ts`, `test/rsbuf.test.mjs`): three V8 slow paths ((2) and (3) in
+  `runtime/lookups.ts`). (5) `processInfo` leaves out `rsbuf.computeNpc` for npcs whose rsbuf mirror already holds what
+  the call would write (`runtime/npc-info.ts`, `test/tick.test.mjs`).
+  JSC instructions a tick, all of them: −31.5 % idle, −12.3 % with 500 bots, −10.6 % with 1000.
+* **Memory** (`runtime/memory.ts`): the 89 527 collision zones (of 123 676) that never hold a flag share one
+  all-zero array until their first non-zero write; the scripts' bytecode and line tables are typed arrays
+  (`Uint16Array` opcodes, `Int32Array` operands; a string instruction's operand hole reads 0, which nothing reads).
+  The Map keeps the same keys and values, the scripts the same values (`test/collision.test.mjs`,
+  `test/script-arrays.test.mjs`). JSC heap after start −25 MB and −6 MB; peak RSS −27 MB and +4 MB (within noise).
+* **Start-up tables** (`startup-tables.mjs` at build time, `runtime/startup-tables.ts`): `World.start` gunzipped all
+  345 MIDI files (`Midi.load`) and 336 animation files (`AnimFrame.load`, through `SeqType.load`) only to keep 345
+  song lengths and 10 100 frame delays. The build runs the engine's own two loaders (bundled with these shims) over
+  the staged cache and stages what they leave as `vfs/data/derived/startup-tables.json`: `Midi.lengths`, each frame's
+  delay, base and length, `AnimFrame.order` and what the loaders printed. At run time both loaders take the table's
+  values and print the same lines; the frames' transform arrays are not kept (the server reads only `.delay`,
+  `SeqType.ts:108`). Without the table, with an unreadable one or one made from another cache (the archive's file
+  count and the CRC of its index file), the original loaders run. `test/startup-tables.test.mjs` compares every value
+  (and every `SeqType`) with the loaders'. JSC: boot to two ticks after a login 12.7 → 8.2 G instructions (−35 %),
+  `World.start` 498 → 262 ms, heap −6.7 MB, peak RSS +12 MB (384 → 396); V8: 22.3 → 10.8 G, peak RSS 885 → 457 MB.
 * **bzip2** (`shims/bzip2.ts`): "auto". At start-up the engine's `bzip2.wasm` decodes the jag archives through
   `shims/bzip2-wasm.ts`, a 100-line **synchronous** loader that replaces emscripten's glue: in JSC the glue's
   instance (≈33 MB of `gcHeapSize`) stayed reachable forever after every reference was dropped, and instances made by
@@ -157,7 +189,7 @@ byte for byte and runs the vanilla session against it).
 
 ```
 init {…, bots:{count:N}} ─► boot.js: N = integer clamped to 0..1000 (absent or junk: 0)
-   N = 0 ─► vfs-manifest.json (37 files) ──────────────────────► import engine.js        (src/entry.ts)
+   N = 0 ─► vfs-manifest.json (38 files) ──────────────────────► import engine.js        (src/entry.ts)
    N > 0 ─► + vfs-manifest-bots.json (vfs/bots/scripts.bin) ───► import engine-bots.js   (src/entry-bots.ts:
             world.json bots.count = N                                entry.ts, then runtime/bots)
         ◄─ booted {…, files, bundle:'engine.js'|'engine-bots.js', bots:N}
@@ -236,7 +268,10 @@ retried (15 s, the next occasion, a `resume`), and reported apart: `lifecycle-do
 Characters list (`players/<profile>/*.sav`) never sees a bot.
 
 **Names** (`runtime/bots/routing.ts`). `isReservedName` = a human save in `players/<profile>/` (one `GET /save-index` at
-start), a human saved or logged in this session, or a human online. A human logging in with the name of a bot in the
+start), a human saved or logged in this session, or a human online. Inside `BotManager.tick` "a human online" comes from
+one map of the players made at the tick's first question, with `World.getPlayerByUsername`'s answers (no player leaves
+and no human joins during the tick): a newcomer asks it of every unused name, about 2,800 at 1000 bots, each a walk over
+every player before. A human logging in with the name of a bot in the
 world (the login thread already answered "new player") is held: the bot is retired (normal logout path), its final
 save reaches the store, the name is released (`BotManager.release`) and the login answered – a fresh character
 (measured: 28 ms at 100 ms ticks). A bot leaving for a human drops the combat logout lock. After 17 world ticks, about
@@ -246,7 +281,7 @@ refused like an account that is online (World answers 5).
 ## Protocol notes (ARCHITECTURE.md §4)
 
 Implemented as specified. Compatible additions, all optional for the page:
-* `{type:'progress'}` stages: `preload` (with `fraction` 0–1 and "Loading game data (n/37)"), `import`, `start` with
+* `{type:'progress'}` stages: `preload` (with `fraction` 0–1 and "Loading game data (n/38)"), `import`, `start` with
   `detail` = `Starting the world`, `Loading game configuration`, `Loading scripts`, `Loading the world map` (World.start
   is one synchronous call; these are posted from inside it).
 * `lifecycle` also accepts the native names `background`/`terminate` (→ pause) and `foreground` (→ resume).
@@ -255,6 +290,21 @@ Implemented as specified. Compatible additions, all optional for the page:
   until `resume`. `lifecycle-done` has `ok:false, error` when a save could not be written (it stays in memory).
 * Saves run synchronously inside the worker, so `lifecycle-done` for `pause`/`save` is sent after native storage
   answered every PUT.
+
+### Test builds (autotest)
+
+A test build (`build-web.mjs --autotest`) answers one more message, `{type:'lctest-perf', reqId, since}`, for the in-app
+test's soak phases (`web/test/autotest.js`, `app-test --soak`, docs/BUILDING.md §4). `src/autotest/perf.ts` wraps
+`World.cycle` once more, outside `runtime/ticker.ts` and the bots glue (World looks the method up on every reschedule),
+and `World.start`; neither changes what it calls. It keeps the last 4,096 ticks: each tick's start (epoch ms,
+`performance.timeOrigin + now`, so the page can put it on its own clock), the ticker's duration, the whole timer callback
+(with the bots glue's after-tick work: the bot store's writes), `World.lastCycleStats` (the 12 WorldStat phases, whole
+ms) and, in `engine-bots.js`, the bots' share (`BotManager.tick` as `runtime/bots/hooks.ts` times it). The reply has the
+ticks from `since` on (`from`, `ticks`, `start`, `tickMs`, `callbackMs`, `phases` 12 a tick, `extraMs`), the start-up's
+marks (`evaluated`: the engine's modules ran; `worldStart`, `worldStarted`; `firstTickStart`, `firstTickEnd`; `ready`
+sent), the ticker's state and clamps, the players and NPCs, and in `engine-bots.js` the counts of `BotManager.stats()`,
+the glue's phase and the store's writes. A normal build has none of this: its bundles are byte-identical to a build
+without `src/autotest`.
 
 ## Configuration (`world.json`, ARCHITECTURE.md §8)
 
@@ -288,13 +338,21 @@ Implemented as specified. Compatible additions, all optional for the page:
 
 | Command | What |
 |---|---|
-| `node --expose-gc --experimental-vm-modules web/engine/test/vm.test.mjs [--debug] [--player]` | (a) `boot.js` → `engine.js` as `vm.SourceTextModule`s in a context with only web globals (no `process`/`Buffer`/`require`/`setImmediate` – asserted), messages through `structuredClone`+transfer, `fetch`/sync `XMLHttpRequest` served from the build output and a temp Documents dir (atomic write + `.bak`, failure injection). Runs `lib/session.mjs` (64 checks) and asserts all 37 staged files are read and every PUT body was an ArrayBuffer. The `--debug` run also sends `start` before `booted` (queued by boot.js). `--measure [--no-flat-strings] [--no-release]` boots only and reports heap/ticks; `--soak=N` keeps a player online for N ticks at 20 ms. |
+| `node --expose-gc --experimental-vm-modules web/engine/test/vm.test.mjs [--debug] [--player]` | (a) `boot.js` → `engine.js` as `vm.SourceTextModule`s in a context with only web globals (no `process`/`Buffer`/`require`/`setImmediate` – asserted), messages through `structuredClone`+transfer, `fetch`/sync `XMLHttpRequest` served from the build output and a temp Documents dir (atomic write + `.bak`, failure injection). Runs `lib/session.mjs` (64 checks) and asserts all 38 staged files are read and every PUT body was an ArrayBuffer. The `--debug` run also sends `start` before `booted` (queued by boot.js). `--measure [--no-flat-strings] [--no-release]` boots only and reports heap/ticks; `--soak=N` keeps a player online for N ticks at 20 ms. |
+| `node --expose-gc --experimental-vm-modules web/engine/test/vfs-release.test.mjs [--no-build] [--bots=N] [--no-transfer]` | The start-up files' release (`vfs.evictReloadable`), in the vm sandbox with WeakRefs to every preloaded buffer: at `ready` each evicted file's buffer is detached (`transfer(0)`: its bytes freed without a collection) and after two full GCs none is reachable, so no reader can meet a detached buffer; the same after `::reload` (26 files fetched again and let go again); only `world.json` stays. `--bots=N`: `engine-bots.js` with N bots of the real library playing on the released files. `--no-transfer`: a runtime without `ArrayBuffer.prototype.transfer` (an Android WebView before Chrome 114): nothing detached, as before, and the same reachability. |
 | `node web/engine/test/jsc.test.mjs [--only=jit\|nojit]` | (b) the same session inside the macOS JavaScriptCore shell (`jsc-harness.mjs` supplies the missing web APIs, nothing from Node), with the JIT and with `--useJIT=false --useWasm=false` (≈ iOS Lockdown Mode). `--measure` likewise. |
 | `node web/engine/test/chrome.test.mjs [--port P]` | (c) a real module Web Worker in headless Chrome 154, loaded from a static server on 127.0.0.1:47310 (CDP 47311; `--port`: P and P+1) implementing the scheme handler's routes; protocol-level checks (43). |
 | `node web/engine/test/bzip2.test.mjs` | WASM loader and TS decoder vs the engine's emscripten decoder (236 comparisons). |
 | `node web/engine/test/forge-lite.test.mjs` | forge-lite vs node-forge (key fields, 3000 RSA round trips, `Packet.rsadec` of a client block). |
+| `node web/engine/test/iterators.test.mjs` | `runtime/iterators.ts` vs upstream's own generators (bundled from the pinned sources): 48 000 seeded programs of unlinks, adds, nested and reverse walks, breaks, resets, validity flips, throwing `isValid`, `next`/`return` by hand; four wrong iterators caught. |
+| `node web/engine/test/rsbuf.test.mjs` | `runtime/rsbuf.ts` vs upstream's renderer resets: 120 seeded programs, every slot hashed after each reset; a reset that misses `cache()`'s ids is caught. |
+| `node web/engine/test/tick.test.mjs` | `runtime/npc-info.ts` vs upstream's `processInfo`: a stand-in World runs the npc loop taken from the pinned `World.ts` on the pinned rsbuf; 40 seeded programs (npcs that rest with stale hitmarks and says, walk, run, teleport, turn, change type, despawn and come back on their nid; observers that come and go) give the same `npcInfo()` bytes and observer counts every tick; five wrong patches caught; the source shapes it relies on (only `World.processInfo/addNpc/removeNpc` call `computeNpc/addNpc/removeNpc`, every mirror field `computeNpc` writes is compared or reset). `runtime/lookups.ts`: `HuntType.get` for every id, the packed `HANDLERS` at every opcode. |
+| `node web/engine/test/collision.test.mjs` | `runtime/memory.ts`'s shared zero zones vs upstream's `CollisionEngine`: 2 000 seeded programs (all writes and `change*` helpers, all four levels), every read and every zone after every step; a write into the shared array is caught. |
+| `node web/engine/test/script-arrays.test.mjs` | `runtime/memory.ts`'s typed script arrays vs upstream's `ScriptFile.decode` over all 10 938 scripts: every value, `lineNumber()` for every pc, the other fields; the operand holes all at `PUSH_CONSTANT_STRING`. |
+| `node web/engine/test/startup-tables.test.mjs` | `runtime/startup-tables.ts` vs the loaders over the engine's cache: every `Midi`, `AnimFrame` and `SeqType` value and printed line; six bad tables fall back; a wrong delay is caught. |
 | `node web/engine/test/gjstr.test.mjs` | flat `gjstr` vs the original, 200 000 fuzzed cases (string, pos, exceptions). |
 | `node --expose-gc --experimental-vm-modules web/engine/test/bots.test.mjs [--real] [--only=build\|vm\|jsc] [--nojit] [--bots=N]` | (d) the bots, against the stub library (`test/fixtures/stub-bots`, scripted, so the glue's checks can be exact) or the real one (`--real`): the build checks (below), then the boots of `lib/bots-session.mjs` (six on one Documents folder, a vanilla build asked for bots, and a broken library), each in a fresh process, in the vm sandbox (`lib/vm-worker.mjs`, shared with (a)) and in JavaScriptCore with the JIT (`--nojit` adds the slow no-JIT run). `--only=vm`/`jsc` reuse the last build (`--only=build` makes one). |
+| `node --expose-gc --experimental-vm-modules web/engine/test/perf.test.mjs` | the test build's measurements ([Test builds](#test-builds-autotest)) in the vm sandbox: a test build with the stub bots answers `lctest-perf` and a normal build never names it; the start-up marks in order and World.start's agreeing with `ready.ms`; every tick from 0 with its start, durations and 12 phases, 100 ms apart from start to start (`World.tickRate` 100); `since`; no tick counted while paused; with 5 stub bots and a human, the bots' share within each tick and their numbers (17 checks). |
 | `node web/engine/test/measure.mjs [--runs=3]` | the numbers below. `--bots [--real] [--counts=0,25,50,100,250,500,750,1000] [--ticks=100] [--rate=300] [--runtimes=vm,jsc,jsc-nojit] [--searches=N]`: the bots matrix (the real AI with `--real`, else the stub; the bots' path searches per tick, how many ticks used the whole budget; `--searches` sets that budget). |
 | (in `all.mjs`) | type-check with the upstream engine's TypeScript: `tsconfig.json` (the glue with the real bot library) and `test/fixtures/stub-bots/tsconfig.json` (the same with the stub), each through a copy whose paths point at the resolved upstream folder (`scripts/lib/upstream.mjs` `derivedTsconfig`). |
 | `node web/engine/test/all.mjs [--skip-chrome] [--port P]` | everything above except measure and soak; the type-check and (d) run against both the real bot library and the stub; ~10 min. |
@@ -316,12 +374,12 @@ written); **crash in a tick** (exactly one `{type:'exit', code:1}`, the connecte
 connection closed, nothing but logs afterwards, ticking stopped, later `lifecycle` → `ok:false`). The clock-based
 and engine-internal checks are skipped in Chrome (no hooks into a real worker).
 
-(d) `bots.test.mjs` first builds both bundles and checks: every vanilla file (`engine.js`, `boot.js`, the 37 and their
+(d) `bots.test.mjs` first builds both bundles and checks: every vanilla file (`engine.js`, `boot.js`, the 38 and their
 manifest) byte-identical with and without the bots build, which adds exactly `engine-bots.js`, `vfs-manifest-bots.json`
 and `vfs/bots/scripts.bin`; no bot marker in `engine.js`; `scripts.bin` made from the staged `script.dat`; and that a
 Node built-in, `process.env.X`, the database or a wrong-case import in the library each fail the build. Then
 `lib/bots-session.mjs` (pure JS, 10 bots, ticks at 100 ms):
-- **main** (fresh Documents): `booted` names `engine-bots.js` and 10 bots, 38 files (+ `scripts.bin`); `bots.sav` read
+- **main** (fresh Documents): `booted` names `engine-bots.js` and 10 bots, 39 files (+ `scripts.bin`); `bots.sav` read
   once (404) and `/save-index` once; the overlay in place (`[proc,player_death_lose_items]` opens with 10100/0,
   `[opplayer4,_]` uses 10100/1 and 10101/1); handlers and hooks installed; **nothing spawns in 15 ticks without a
   human**; after a login **staggered** (≤ 5 a tick) and **never before the human's tick or on tick 0**; client-less
@@ -347,42 +405,62 @@ Node built-in, `process.env.X`, the database or a wrong-case import in the libra
 - **bak**: `bots.sav` garbage → loaded from `bots.sav.bak` (warning), the bots back, the next save writes a good one.
 - **corrupt**: both garbage → bots off for the session (one error), the human plays, **nothing under `bots/`
   written**.
-- **off** (`bots.count` 0): **the vanilla 64-check session** plus: `engine.js`, `bots` 0, the 37 vanilla files and
+- **off** (`bots.count` 0): **the vanilla 64-check session** plus: `engine.js`, `bots` 0, the 38 vanilla files and
   nothing of the bots fetched, the vanilla `script.dat` and no overlay, no request under `bots/` and no `/save-index`,
   no bot hook on `World`.
 - **nobundle** (bots asked of a build without them): `engine.js`, the `no-bundle` message.
 - **broken** (a build whose library throws while it loads): `booted` names `engine.js` with 0 bots and the error is
   logged (the `load-failed` message); the world starts and a human logs in.
 
-## Measured (macOS 27, Apple M2; `test/measure.mjs`, best of 2, idle world = 7 322 NPCs, 81 090 locs)
+## Measured (macOS 27, Apple M2; `test/measure.mjs`, best of 3, idle world = 7 322 NPCs, 81 090 locs)
 
-The build machine was shared with other jobs (load average 4–88 during these runs): start and tick times are upper
-bounds; heap numbers are stable across runs.
+The build machine was shared with other jobs: start and tick times are upper bounds; heap numbers are stable across
+runs. Measured 2026-10-23 with the performance changes of 2026-10-23 (`runtime/tick.ts`, `runtime/memory.ts`, the
+start-up tables; these runs also had a maps zip slimmed at build time, taken out since: with the zip as shipped the heap
+after start is the same, 112.0 MB in the peak runs below, and `World.start` was not measured again). Until then the V8
+rows came from a contextified vm sandbox, whose global lookups are far slower than a worker's: on one build that made
+`World.start` ~8 % and the idle tick ~1.6× slower than V8 is (`lib/vm-worker.mjs` now makes an ordinary global object).
 
 | Runtime / variant | `World.start` | JS heap after start (GC) | Idle tick avg / p95 |
 |---|---:|---:|---:|
-| JSC JIT, shipped config | **447 ms** | **147.0 MB** `gcHeapSize` | 10–18 / 23 ms |
-| JSC JIT, without flat strings | 457 ms | 248.1 MB (**−101 MB, −41 %** with the patch) | |
-| JSC JIT, without the post-start release | 440 ms | 210.3 MB (release saves **63 MB**: 30.3 MB vfs + the WASM instance) | |
-| JSC JIT, JS bzip2 only | 529 ms | 147.1 MB | |
-| JSC `--useJIT=false --useWasm=false` | 4.7–5.9 s | 140.3 MB | 52–62 / 111 ms |
-| V8 (Node 24 vm), shipped config | 853 ms | **145.8 MB** `heapUsed` (+35 MB ArrayBuffers: collision maps, packets) | 19–31 / 42 ms |
-| V8, without flat strings | 1 342 ms | 229.2 MB (**−83 MB, −36 %**; start −490 ms) | |
-| V8, without release | 838 ms | 145.8 MB heap, ArrayBuffers 66 MB (vfs is external memory in V8) | |
+| JSC JIT, shipped config | **236 ms** | **107.9 MB** `gcHeapSize` | 13.5 / 17.5 ms |
+| JSC JIT, without flat strings | 270 ms | 195.4 MB (**−87.5 MB, −45 %** with the patch) | |
+| JSC JIT, without the post-start release | 235 ms | 166.5 MB (release saves **58.6 MB**: 25.6 MB vfs + the WASM instance) | |
+| JSC JIT, JS bzip2 only | 277 ms | 108.2 MB | |
+| JSC `--useJIT=false --useWasm=false` | 3.6 s | 102.5 MB | 58 / 72 ms |
+| V8 (Node 24 vm), shipped config | 361 ms | **114.9 MB** `heapUsed` (+13 MB ArrayBuffers: collision zones, packets) | 15.7 / 20.4 ms |
+| V8, without flat strings | 401 ms | 184.6 MB (**−70 MB, −38 %**; start −40 ms) | |
+| V8, without release | 360 ms | 114.9 MB heap, ArrayBuffers 39 MB (vfs is external memory in V8) | |
 
-Soak (vm, `--soak=3000`, one player online, keepalives, 20 ms ticks, includes the tick-1500 autosave): heap 147 MB
-after login, 151.4 MB after 600 ticks of warm-up, then 151.4 → 152.0 MB over the next 2 400 ticks – no growth.
+Before those changes (main 3bae7e3, the same machine and sandbox, `measure.mjs --bots --real`, one run each, 100 ticks
+at 300 ms after the spawn ramp), and the JSC instructions a tick (the slope between two tick counts, 2 interleaved
+runs):
 
-Boot (manifest + 37 files from the local server, then evaluating the bundle): 30–105 ms preload, 21–40 ms eval.
-During the session with one player (JSC JIT): ticks avg 9.6 ms, p50 6.8 ms, p95 16.5 ms, max 144 ms (the `::reload`
-tick); without JIT: avg 76–111 ms, p95 113–153 ms (up to 2× that while the machine was at load 120). Login (new
-player) answers in ~600 ms = next tick. A save round-trip (sync XHR to the fake scheme handler) is < 5 ms. JSC
-`gcHeapSize` at the end of the 64-check JIT session: 155.6 MB.
+| | `World.start` V8 / JSC | JSC heap after start / after the run | tick avg V8 / JSC | JSC instructions a tick |
+|---|---:|---:|---:|---:|
+| 0 bots | 789 → 368 / 471 → 239 ms | 146.2 → 107.8 / 149.2 → 111.2 MB | 21.7 → 18.1 / 17.2 → 16.0 ms | 57.8 → 39.6 M (−31.5 %) |
+| 500 bots | 911 → 370 / 487 → 240 ms | 160.1 → 120.6 / 204.3 → 168.8 MB | 58.9 → 56.0 / 47.2 → 44.6 ms | 268.6 → 235.6 M (−12.3 %) |
+| 1000 bots | 902 → 357 / 485 → 241 ms | 159.5 → 121.2 / 233.1 → 196.0 MB | 80.1 → 74.2 / 61.6 → 59.6 ms | 406.4 → 363.4 M (−10.6 %) |
+
+Peak memory of the start (JSC shell, boot + `World.start` + a login + two ticks; `/usr/bin/time -l`, 4 interleaved
+runs, median and range): main 3bae7e3 375 MB peak footprint (367–392), 385 MB peak RSS, heap after start 150.6 MB;
+these changes 375 MB (364–384), 382 MB, 112.0 MB. So the heap after start is 38.6 MB lower and the peak where it was.
+The WebContent process on a phone was not measured.
+
+Soak (vm, `--soak=3000`, one player online, keepalives, 20 ms ticks, includes the tick-1500 autosave): heap 116.2 MB
+after login, 120.5 MB after 600 ticks of warm-up, then 120.5 → 120.0 MB over the next 2 400 ticks – no growth; ticks
+avg 6.6 ms, p95 8.6 ms.
+
+Boot (manifest + 38 files from the local server, then evaluating the bundle; V8): 10–13 ms preload, 23–28 ms eval.
+During the session with one player (JSC JIT, `jsc.test.mjs`): ticks avg 12.3 ms, p50 10.1 ms, p95 19.4 ms, max 162 ms
+(the `::reload` tick); without JIT: avg 70 ms, p95 84 ms. Login (new player) answers in ~600 ms = next tick. A save
+round-trip (sync XHR to the fake scheme handler) is < 5 ms. JSC `gcHeapSize` at the end of the JIT session: 112.1 MB.
 
 ### Bots (`measure.mjs --bots --real`, the real library)
 
 A human at Lumbridge, the spawn ramp (5 a tick), then 200 ticks at 300 ms; one run each. These numbers predate much of
-the bots' later behaviour; [docs/BOTS.md](../../docs/BOTS.md) §6 has current numbers for 500 to 1000 bots.
+the bots' later behaviour and the performance changes of 2026-10-23 (their V8 lines come from the old contextified sandbox);
+[docs/BOTS.md](../../docs/BOTS.md) §6 has current numbers for 500 to 1000 bots.
 
 | JSC JIT | start | heap after start / after the run | tick avg / p50 / p95 / max | `BotManager.tick` avg / p95 | ramp max | `lifecycle save` |
 |---|---:|---:|---:|---:|---:|---:|
@@ -412,7 +490,7 @@ A human at Lumbridge, the spawn ramp (5 a tick), then 100 ticks at 300 ms; one r
 
 V8 (vm, `heapUsed`): start 881–1064 ms at every count, heap after start 145.2–145.4 MB, after the run 150.3 (0) →
 152.7 MB (100); `BotManager.tick` 0.26 / 2.48 ms avg at 10 / 100 bots; `lifecycle save` 3 ms (0) → 10 ms (100).
-Bundle: `engine-bots.js` with the stub 473 KB (131 KB gzip; `engine.js` 453 KB): the glue adds ~20 KB. A bot's save
+Bundle: `engine-bots.js` with the stub 494 KB (138 KB gzip; `engine.js` 464 KB): the glue and the stub add ~30 KB. A bot's save
 is ~840 bytes, so `bots.sav` with 100 bots is ~83 KB, one PUT per occasion.
 
 ## Design notes (and why)
@@ -420,9 +498,14 @@ is ~840 bytes, so `bots.sav` with 100 bots is ~83 KB, one PUT per occasion.
 1. bzip2 "auto" uses the engine's `bzip2.wasm` through an own synchronous loader instead of `bzip2-wasm.js` +
    emscripten glue, and an own TS decoder instead of the web client's SheetJS one: the glue leaked ~33 MB per worker
    in JSC and SheetJS mis-decodes `title.dat`; both replacements are differentially tested against the original.
-2. 37 runtime files, not 39: `flo.dat` is never read; `bzip2.wasm` is fetched by the bzip2 shim, not via the vfs.
+2. 38 runtime files, not 40: `flo.dat` is never read; `bzip2.wasm` is fetched by the bzip2 shim, not via the vfs.
 3. Everything re-fetchable is released after start (not only the maps zip). This relies on `engine/vfs/**` and
-   `cache/**` staying readable through the scheme handler for the life of the worker (they are bundle files).
+   `cache/**` staying readable through the scheme handler for the life of the worker (they are bundle files). The
+   released files' bytes are freed at once (`shims/vfs.ts` detaches each buffer with `ArrayBuffer.prototype.transfer(0)`,
+   JavaScriptCore from iOS 17.4, V8 from Chrome 114), not at the worker's next full collection, which in WebKit can be a
+   minute later: they were preloaded, so they are old by then and the young collections never take them. Nothing holds
+   them after the release (`test/vfs-release.test.mjs`); without `transfer`, for a view of part of a buffer, or a buffer
+   that cannot be detached, they wait for the collector as before.
 4. Release builds keep `console` calls: the forwarded engine log is the only diagnostic on device. Only the worker's
    own console echo is debug-only.
 5. `player_logout` is acknowledged even if the PUT failed (the save stays in memory, is retried and wins over storage on

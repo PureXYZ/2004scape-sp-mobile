@@ -233,6 +233,29 @@ class BotChatModelTest {
     }
 
     @Test
+    fun theLastLoadTimeIsKeptAndInTheStatus() {
+        val record = MemoryLoadRecord()
+        val chat = model().also { main.run { it.loadRecord = record } }
+        @Suppress("UNCHECKED_CAST") fun local(status: Map<String, Any?>) = status["local"] as Map<String, Any?>
+        assertFalse(local(main.run { chat.status }).containsKey("lastLoadMs"))  // (none yet: the page warms on entering the world)
+        native.loadDelayMs = 40
+        main.run { chat.warm() }
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while (record.lastLoadMs == null && System.nanoTime() < deadline) Thread.sleep(10)
+        main.drain()
+        val loadMs = main.run { chat.local.lastLoad }!!.first()
+        assertEquals(loadMs, record.lastLoadMs)
+        assertTrue(loadMs >= 40)
+        // in the status pushed when it loaded, and in every status after (rounded to the millisecond)
+        assertEquals(Math.round(loadMs).toDouble(), local(statuses.last())["lastLoadMs"])
+        assertEquals(true, local(statuses.last())["loaded"])
+        assertEquals(Math.round(loadMs).toDouble(), local(main.run { chat.status })["lastLoadMs"])
+        // a record from before (another launch): in the status from the start
+        val again = model().also { main.run { it.loadRecord = MemoryLoadRecord(1234.4) } }
+        assertEquals(1234.0, local(main.run { again.status })["lastLoadMs"])
+    }
+
+    @Test
     fun aHotPhoneSaysBusyAndSkipsTheWarmUp() {
         val chat = model()
         main.run {

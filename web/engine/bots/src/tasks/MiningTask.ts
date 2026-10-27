@@ -63,6 +63,7 @@ import { argue, noteEvent } from '#/engine/bot/port/BotChatter.js';
 // (the variety work, round 1, Track D: DO-12 power-dropping; the dwarven mine and the Mining Guild's way down)
 import { dropOne, dropsHere, dropStats } from '#/engine/bot/port/BotPowerDrop.js';
 import { dungeonLeg } from '#/engine/bot/port/BotDungeons.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /**
  * port: the rocks (274 debugnames, without the 1/2 variant) of each ore a mining step gains. Upstream chose rocks by
@@ -662,7 +663,7 @@ export class MiningTask extends BotTask {
     /** port (phase 5a): the player mining this rock now (its target, beside it): the human's, or a bot's; null: nobody yet */
     private _minerOf(rock: Loc, human: boolean): Player | null {
         if (human) for (const h of humansNow()) if (h.target === rock) return h;
-        for (const p of World.playerLoop.all()) {
+        for (const p of worldPlayers()) {
             if (p.target === rock && p.level === rock.level && Math.max(Math.abs(p.x - rock.x), Math.abs(p.z - rock.z)) <= 3) return p;
         }
         return null;

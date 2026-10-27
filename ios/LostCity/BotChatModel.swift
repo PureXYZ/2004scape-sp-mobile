@@ -17,7 +17,8 @@ import os
 /// - At most 3 requests at a time; more are answered 'busy' at once. Each has the page's `timeoutMs` (9 s) in all.
 /// - The status (`LostCityHost.bots.lmStatus`, and `window.LostCityNative.lm` at document start): the on-device model
 ///   (in this build at all, its name and size, whether it is loaded, whether it writes the note: `think` 'never',
-///   'always' or 'option') and the Claude key (set, its last four characters, refused by the API, the last problem).
+///   'always' or 'option', how long its last load took: `lastLoadMs`, `ModelLoadRecord`) and the Claude key (set, its
+///   last four characters, refused by the API, the last problem).
 @MainActor
 final class BotChatModel {
     static let maxInFlight = 3
@@ -27,6 +28,8 @@ final class BotChatModel {
     let online = OnlineModel()
     /// The Claude key, when a request needs it (the Keychain; a test's stand-in).
     var readKey: () -> String? = { ModelKeyStore.read() }
+    /// The on-device model's last load time, kept across launches (the status's `lastLoadMs`; a test's stand-in).
+    var loadRecord = ModelLoadRecord()
     /// A reply for the page (`LostCityHost.bots.lmReply`).
     var onReply: (([String: Any]) -> Void)?
     /// The status changed (`LostCityHost.bots.lmStatus`).
@@ -47,8 +50,8 @@ final class BotChatModel {
 
     init(local: LocalModel = LocalModel()) {
         self.local = local
-        local.onLoadedChange = { [weak self] _ in
-            MainActor.assumeIsolated { self?.statusChanged() }
+        local.onLoadedChange = { [weak self] loaded in
+            MainActor.assumeIsolated { self?.loadedChanged(loaded) }
         }
     }
 
@@ -63,6 +66,9 @@ final class BotChatModel {
         if let reason = local.unavailableReason {
             localStatus["reason"] = reason
         }
+        if let ms = loadRecord.lastLoadMs {
+            localStatus["lastLoadMs"] = ms.rounded()
+        }
         let hint = readKey().map { "…" + String($0.suffix(4)) }
         var onlineStatus: [String: Any] = ["keySet": hint != nil, "model": OnlineModel.model]
         if let hint { onlineStatus["hint"] = hint }
@@ -73,6 +79,13 @@ final class BotChatModel {
 
     private func statusChanged() {
         onStatus?(status)
+    }
+
+    private func loadedChanged(_ loaded: Bool) {
+        if loaded, let ms = local.lastLoad?.first {
+            loadRecord.record(ms)
+        }
+        statusChanged()
     }
 
     // MARK: - The key (Settings › Bot chat)
@@ -300,5 +313,41 @@ nonisolated enum DeviceStats {
         case .critical: "critical"
         @unknown default: "unknown"
         }
+    }
+}
+
+/// The on-device model's last load time on this phone (the status's `local.lastLoadMs`), kept across launches in
+/// UserDefaults with the versions of the app and of iOS it was measured under: after an install, an app update or an
+/// iOS update there is none until the next load, which is the slow one (Metal prepares llama.cpp's shaders: about 15 s
+/// on an iPhone 13 mini, about 1.3 s once they are ready). The page loads the model on entering the world only until a
+/// load has been quick; after that, when the player starts to chat (host.js lm.warm).
+struct ModelLoadRecord {
+    static let key = "LostCity.lm.lastLoad"
+    let defaults: UserDefaults
+    /// What a record holds for: this app's version and build, and the system's.
+    let versions: String
+
+    init(defaults: UserDefaults = .standard, versions: String = ModelLoadRecord.currentVersions) {
+        self.defaults = defaults
+        self.versions = versions
+    }
+
+    /// e.g. "1.0.0 (10000), Version 26.0 (Build 23A341)"
+    static var currentVersions: String {
+        let info = Bundle.main.infoDictionary
+        let app = "\(info?["CFBundleShortVersionString"] as? String ?? "0") (\(info?["CFBundleVersion"] as? String ?? "0"))"
+        return "\(app), \(ProcessInfo.processInfo.operatingSystemVersionString)"
+    }
+
+    /// The last load's time (ms), when it was measured under these versions.
+    var lastLoadMs: Double? {
+        guard let record = defaults.dictionary(forKey: Self.key), record["versions"] as? String == versions,
+              let ms = record["ms"] as? Double, ms > 0
+        else { return nil }
+        return ms
+    }
+
+    func record(_ ms: Double) {
+        defaults.set(["versions": versions, "ms": ms], forKey: Self.key)
     }
 }

@@ -35,6 +35,7 @@ import { isLevelling, type PlannerKey } from '#/engine/bot/port/BotRoster.js';
 import { isNewbie } from '#/engine/bot/port/BotNewbie.js';
 import { wildernessLevelAt } from '#/engine/bot/port/BotContent.js';
 import { PlayerStat } from '#/engine/entity/PlayerStat.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** play ticks between two show-off visits (1.5-3 hours); a bot that owns a status piece every 40-80 minutes (it has something to show) */
 export const SHOWOFF_GAP_TICKS: [number, number] = [9000, 18000];
@@ -93,7 +94,7 @@ function offerFor(player: Player, bank: TradeBank): Offer | null {
     const coins = coinsOwned(player);
     const owned = ownedStatusTiers(player);
     let best: Offer | null = null;
-    for (const vendor of World.playerLoop.all()) {
+    for (const vendor of worldPlayers()) {
         if (vendor === player || vendor.is_bot !== true || vendor.botPlanner !== 'extras_vendor' || vendor.level !== bank.center[2]) continue;
         if (Math.max(Math.abs(vendor.x - bank.center[0]), Math.abs(vendor.z - bank.center[1])) > VENDOR_RANGE) continue;
         if (vendor.botTradeTargetPid !== -1) continue;

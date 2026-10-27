@@ -35,7 +35,6 @@
 //     busy place (port/BotVoice). Talk only: where they go is unchanged (G1).
 // Every roll is Math.random (seeded in the sims) or the names' seeds; no wall clock. Per bot and tick nothing; the pass
 // every 5 ticks is O(bots online) plus O(members²) per clique.
-import WordEnc from '#/cache/wordenc/WordEnc.js';
 import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
 import { BotManager } from '#/engine/bot/BotManager.js';
@@ -59,6 +58,7 @@ import { setCliqueColourSource } from '#/engine/bot/port/BotLooks.js';
 import { DEPTH_FRIENDS, inThread, startThread } from '#/engine/bot/port/BotThreads.js';
 import { voiceFree } from '#/engine/bot/port/BotVoice.js';
 import { logNormal } from '#/engine/bot/port/BotTiming.js';
+import { botFilter } from '#/engine/bot/port/BotFilter.js';
 
 type Kind = 'levelling' | 'extras_pker' | 'extras_edgeville_pker';
 interface Clique {
@@ -485,7 +485,7 @@ function inJokeLine(bot: Player, clique: Clique, other: Player): string | null {
     const joke = inJokeOf(clique.names);
     const nick = nickOf(other);
     const line = joke.includes('{nick}') ? (nick ? joke.replaceAll('{nick}', nick) : null) : joke;
-    if (line !== null && WordEnc.filter(line) === line && isFresh(bot.username, line, bot.x, bot.z, bot.level, World.currentTick)) {
+    if (line !== null && botFilter(line) === line && isFresh(bot.username, line, bot.x, bot.z, bot.level, World.currentTick)) {
         noteSaid(bot, line);
         return line;
     }
@@ -692,7 +692,7 @@ function named(pool: readonly string[], other: Player): string | null {
     const nick = nickOf(other);
     if (!nick) return null;
     const line = pick(pool).replaceAll('{nick}', nick);
-    return WordEnc.filter(line) === line ? line : null;
+    return botFilter(line) === line ? line : null;
 }
 
 /**

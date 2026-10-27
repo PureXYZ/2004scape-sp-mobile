@@ -1,0 +1,157 @@
+ios: music lets go of the buffers it has played
+
+tinymidipcm renders a whole song ahead (about 19 times real time) into AudioBuffers of about 4.6 s and kept every one
+of them in bufferSources until the next song: 176 KB a second of music, 33 MB for a median song. A source now leaves
+bufferSources once it has ended (onended, which fires for stopped sources too), so its buffer can be collected.
+stop() has only the sources still to play to stop, as stopping an ended one did nothing, and its gain steps still
+follow whether a buffer was flushed since the last stop() (`flushed`, what bufferSources.length said).
+
+The rendered chunks are copied from the wasm heap straight into one accumulator kept from chunk to chunk (grown only
+when a chunk does not fit), instead of a new Uint8Array per chunk and a new, longer Float32Array per concatenation:
+about 190 MB of garbage per song start. Chunks rendered after a stop() are not kept: the stop() before the next
+start() dropped them unplayed, and after a stop() with no next song (Music off, logout) the render runs on to the
+song's end.
+
+The render loop and its timing, the synthesizer, and every buffer's samples and start time are as before.
+
+diff --git a/src/3rdparty/tinymidipcm.js b/src/3rdparty/tinymidipcm.js
+index 901cd33..718fdcb 100644
+--- a/src/3rdparty/tinymidipcm.js
++++ b/src/3rdparty/tinymidipcm.js
+@@ -65,14 +65,17 @@ class TinyMidiPCM {
+         _tsf_set_output(this.soundfontPtr, this.channels === 2 ? 0 : 2, this.sampleRate, this.gain);
+     }
+ 
+-    getPCMBuffer() {
++    // custom (ios): the rendered chunk as float32 samples in place, valid until the next render (it was copied into a
++    // new Uint8Array every chunk, only for onPCMData to copy it again). A memory growth replaces the heap's buffer.
++    getPCMView() {
+         this.ensureInitialized();
+ 
+-        const pcm = new Uint8Array(this.bufferSize);
+-
+-        pcm.set(this.wasmModule.HEAPU8.subarray(this.pcmBufferPtr, this.pcmBufferPtr + this.bufferSize));
++        const buffer = this.wasmModule.HEAPU8.buffer;
++        if (this.pcmView?.buffer !== buffer) {
++            this.pcmView = new Float32Array(buffer, this.pcmBufferPtr, this.bufferSize / 4);
++        }
+ 
+-        return pcm;
++        return this.pcmView;
+     }
+ 
+     getMIDIMessagePtr(midiBuffer) {
+@@ -113,7 +116,7 @@ class TinyMidiPCM {
+         const boundRender = function () {
+             midiMessagePtr = this.renderMIDIMessage(midiMessagePtr);
+ 
+-            const pcm = this.getPCMBuffer();
++            const pcm = this.getPCMView(); // custom (ios)
+ 
+             this.onPCMData(pcm);
+ 
+@@ -148,7 +151,15 @@ class TinyMidiPCM {
+     let midiFade = false;
+     // let renderEndSeconds = 0;
+     // let currentMidiBuffer = null;
++    // custom (ios): the samples rendered since the last flush are the first samplesLength of samples, a buffer kept
++    // from chunk to chunk and grown only when a chunk does not fit. Every chunk was concatenated into a new, longer
++    // Float32Array, about 190 MB of garbage per song (it is rendered ahead, about 19 times real time).
+     let samples = new Float32Array();
++    let samplesLength = 0;
++    // custom (ios): between a start() and the next stop(), when flush() runs
++    let playing = false;
++    // custom (ios): a flush since the last stop() (bufferSources no longer says so, see flush)
++    let flushed = false;
+ 
+     let gainNode = window.audioContext.createGain();
+     gainNode.gain.setValueAtTime(0.1, window.audioContext.currentTime);
+@@ -161,11 +172,20 @@ class TinyMidiPCM {
+     const tinyMidiPCM = new TinyMidiPCM({
+         renderInterval,
+         onPCMData: pcm => {
+-            let float32 = new Float32Array(pcm.buffer);
+-            let temp = new Float32Array(samples.length + float32.length);
+-            temp.set(samples, 0);
+-            temp.set(float32, samples.length);
+-            samples = temp;
++            // custom (ios): see samplesLength. A chunk rendered after a stop() is never played, as the stop() before the
++            // next start() drops it, so it is not kept: after a stop() with no next song (Music off, logout) the render
++            // goes on to the song's end, and all of that was kept until the next song.
++            if (!playing) {
++                return;
++            }
++
++            if (samplesLength + pcm.length > samples.length) {
++                let temp = new Float32Array(samplesLength + pcm.length);
++                temp.set(samples.subarray(0, samplesLength), 0);
++                samples = temp;
++            }
++            samples.set(pcm, samplesLength);
++            samplesLength += pcm.length;
+         },
+         onRenderEnd: ms => {
+             // renderEndSeconds = Math.floor(startTime + Math.floor(ms / 1000));
+@@ -181,7 +201,7 @@ class TinyMidiPCM {
+     tinyMidiPCM.setSoundfont(soundfontBuffer);
+ 
+     function flush() {
+-        if (!window.audioContext || !samples.length) {
++        if (!window.audioContext || !samplesLength) {
+             return;
+         }
+ 
+@@ -200,7 +220,7 @@ class TinyMidiPCM {
+         //     }
+         // }
+ 
+-        const length = samples.length / channels;
++        const length = samplesLength / channels;
+         const audioBuffer = window.audioContext.createBuffer(channels, length, sampleRate);
+ 
+         for (let channel = 0; channel < channels; channel++) {
+@@ -219,11 +239,21 @@ class TinyMidiPCM {
+ 
+         bufferSource.buffer = audioBuffer;
+         bufferSource.connect(gainNode);
++        // custom (ios): a source that has played leaves bufferSources, so its AudioBuffer can be collected: the whole
++        // song is rendered ahead, and every buffer of it was kept until the next song (176 KB a second of music, 33 MB
++        // for a median song). stop() has only the sources still to play to stop; stopping an ended one did nothing.
++        bufferSource.onended = () => {
++            const index = bufferSources.indexOf(bufferSource);
++            if (index !== -1) {
++                bufferSources.splice(index, 1);
++            }
++        };
+         bufferSource.start(lastTime);
+         bufferSources.push(bufferSource);
++        flushed = true;
+ 
+         lastTime += audioBuffer.duration;
+-        samples = new Float32Array();
++        samplesLength = 0;
+     }
+ 
+     let flushInterval;
+@@ -245,8 +275,12 @@ class TinyMidiPCM {
+ 
+         // currentMidiBuffer = null;
+         samples = new Float32Array();
++        samplesLength = 0;
++        playing = false;
+ 
+-        if (bufferSources.length) {
++        // custom (ios): the gain's steps as when bufferSources held every source flushed since the last stop()
++        if (flushed) {
++            flushed = false;
+             let temp = gainNode.gain.value;
+             gainNode.gain.setValueAtTime(0, window.audioContext.currentTime);
+             bufferSources.forEach(bufferSource => {
+@@ -263,6 +297,7 @@ class TinyMidiPCM {
+         // startTime = window.audioContext.currentTime;
+         lastTime = window.audioContext.currentTime;
+         flushInterval = setInterval(flush, flushTime);
++        playing = true; // custom (ios)
+         tinyMidiPCM.render(midiBuffer);
+     }
+ 

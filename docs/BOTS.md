@@ -178,7 +178,7 @@ The structure is upstream's; the port added modules beside it rather than rewrit
 
 | Area | Modules |
 |---|---|
-| Running in the engine | `BotPathing` (route searches with a per-tick budget), `BotWalkGraph`, `BotInventoryCompat` (254's all-or-nothing adds), `BotContent` (274's names), `BotWorldRules` (free worlds), `BotSchedule` (delays in ticks), `BotLog`, `BotScriptCommands`, `PlayerBotFields`, `BotSeed` |
+| Running in the engine | `BotPathing` (route searches with a per-tick budget), `BotPathFinder` (274's route search, copied with cheaper reads), `BotZoneScan` (zone searches without generators), `BotAggressors` (who targets whom), `BotPlayers` (the tick's players), `BotWalkGraph`, `BotInventoryCompat` (254's all-or-nothing adds), `BotContent` (274's names), `BotWorldRules` (free worlds), `BotSchedule` (delays in ticks), `BotLog`, `BotScriptCommands`, `PlayerBotFields`, `BotSeed` |
 | The living world | `BotRoster` (names, planners, the pool), `BotSessions`, `BotNewbie`, `BotAge` (a new world's ages), `BotCliques`, `BotLinger` |
 | Who they are | `BotPersona` (talkativeness, typing, reactions, friendliness, carefulness, age, home), `BotLooks`, `BotOutfits`, `BotFashion`, `BotFavourites`, `BotGear` (what they buy and wear) |
 | Behaving like a person | `BotTiming`, `BotHabits` (breaks, lingering, a look, leaving), `BotFumble` (misclicks, forgotten food), `BotRude`, `BotDanger`, `BotDefence`, `BotTiles` (a tile of its own), `BotHangout`, `BotRandomEvents` with `RandomEventTask` |
@@ -186,7 +186,7 @@ The structure is upstream's; the port added modules beside it rather than rewrit
 | Trade | `BotTrade`, `BotTradeScreen` (trades through the screens), `BotTradeSpots`, `BotPrices`, `BotShowOff` |
 | PvP | `BotPkGear`, `BotPkTactics`, `BotPkFight`, `BotPkPj`, `BotPkTeam` |
 | Set pieces | `BotSetPieces` (the interface), `BotSetPieceIndex`, `BotDirector` (about one event an hour), `BotClanWalk`, `BotTrains`, `BotParty`, `BotScams`, `BotDuel`, `BotArena`, `BotModBot`, `BotScreens`, `BotPieceLines` |
-| Chat | `BotChat` (addressing, replies, the marketplace, "come here"), `BotAnswers`, `BotChatter` (unprompted lines), `BotLines` (what fits where; the repetition registry), `BotStyle`, `BotSlots`, `BotThreads`, `BotStage`, `BotWitness`, `BotReactions`, `BotVoice` (one voice's share of a place), `BotSay` (everything said goes through the word filter), `BotSpoke`, `BotEmote`, `BotActivity`, `BotPlaces`, `BotFollow`, `ComeHereTask` |
+| Chat | `BotChat` (addressing, replies, the marketplace, "come here"), `BotAnswers`, `BotChatter` (unprompted lines), `BotLines` (what fits where; the repetition registry), `BotStyle`, `BotSlots`, `BotThreads`, `BotStage`, `BotWitness`, `BotReactions`, `BotVoice` (one voice's share of a place), `BotSay` (everything said goes through the word filter), `BotFilter` (the filter, remembered), `BotSpoke`, `BotEmote`, `BotActivity`, `BotPlaces`, `BotFollow`, `ComeHereTask` |
 | The chat model | `BotModel` (which replies a model words, the pending reply and its fallbacks), `BotModelPrompt`, `BotModelGuard`, `BotModelHistory`, `BotModelTypes` |
 
 ## 4. Contracts
@@ -291,11 +291,12 @@ exception from bot code never reaches the engine's own error handling.
 | `MessagePrivateHandler` "come here" | wrapper on `World.sendPrivateMessage` → `BotChat.onPrivateMessage` |
 | `World.addFriend`: a bot shows online | wrapper on `World.friendThread.postMessage`: the friend lists (§4.8) |
 | `OpPlayerHandler` op 4 on a bot | the overlay's `[opplayer4,_]` → `p_bot_interact_trade` → `BotTrade.onTradeRequest` |
-| `GameMap.botFindPath`/`botWalkPath` | `port/BotPathing.ts` over the engine's route finder |
+| `GameMap.botFindPath`/`botWalkPath` | `port/BotPathing.ts` over `port/BotPathFinder.ts`, an exact copy of the engine's route search |
 | `ScriptOpcode` `P_ISBOT`/`P_BOT_INTERACT_TRADE` | `ScriptRunner.HANDLERS[10100/10101]` (asserted free) |
 | (new) saves | `saves.write`/`saves.retryPending`: bot saves to the bot store (§4.5) |
 | (new) names | `World.onLoginMessage`: a human taking a bot's name (§4.6); a login with no save → `BotManager.newCharacter()` |
 | (new) self-check | `World.cycle`: after the first ticks, the hooks ran and the keep-alive holds |
+| (new) who attacks whom | the library itself: `BotManager.start` wraps `PathingEntity.setInteraction`/`clearInteraction` (`port/BotAggressors`); a failure there only sends the bots back to searching |
 
 The bots are switched off for the session when a hook target is missing, the overlay does not match the packed scripts,
 the store is unreadable or corrupt, `BotManager.start` fails, `BotManager.tick` fails 10 ticks in a row, or the
@@ -474,14 +475,26 @@ while the phone is hot).
 | 750 | 29.9 / 38.5 / 52.7 ms | 18.4 / 27.2 ms | 158, 70.4 ms | 33.0 / 67 / 90 | 160.1 → 227.1 MB | 23 ms | 859 KB |
 | 1000 | 37.1 / 46.9 / 55.5 ms | 24.4 / 33.4 ms | 208, 72.6 ms | 46.6 / 96 / 120 | 159.9 → 242.5 MB | 28 ms | 1,154 KB |
 
+The cheaper searches, scans and arrays of 2026-10-23 (below), measured with the same command against the code before
+them on the same day (a busier machine: before, the whole tick averaged 43.7, 53.2 and 60.6 ms): the whole tick 15, 14
+and 16 % shorter at 500, 750 and 1000 bots, the bots' share 34, 29 and 31 % shorter, the heap the same. Counted in
+instructions in JavaScriptCore (the same seeded world before and after, which ended the same), a tick takes 18 % fewer
+at 500 and 21 % fewer at 1000.
+
 750 and 1000 have been measured on the Mac and in the iPhone simulator only (1000 in the simulator: 50 fps at Varrock
 West, ticks late 38-70 ms at the p95), not on a phone; their memory (about 90 MB more heap than no bots) and heat over
 a long session on a phone are unknown. A fresh world of 1000 takes about 200 ticks (2 minutes) to fill.
 
 What keeps it cheap: route searches are budgeted (12 a tick per 100 online, a bot resuming where it stopped; bots more
-than 64 tiles from every human get at most a third of the budget), appearances are rebuilt only on change, each bot's
-rescan timer starts at its own point, and the bots' own logouts write the store at most every 30 s (at 1000 bots that
-is at most about 140 MB of writes an hour, plus the save occasions).
+than 64 tiles from every human get at most a third of the budget) and run the bots' own copy of 274's search, which
+returns the same routes with cheaper collision reads (1.9× faster in JavaScriptCore, 2.5-3× in V8); the nearest-NPC, loc
+and item searches walk the zones' lists without the engine's generators, a fight's "is my target still here" looks in
+the target's own zone, and "who attacks me" reads an index of who targets whom instead of searching 25-49 zones; the
+bots' scans of every player and of the active bots read arrays taken once a tick, not the generators; the word filter's
+answers for the last 4,096 distinct texts are kept for every check and line; the walking graph's A* reuses its arrays
+between searches; appearances are rebuilt only on change, each bot's rescan timer starts at its own point, and the bots'
+own logouts write the store at most every 30 s (at 1000 bots that is at most about 140 MB of writes an hour, plus the
+save occasions).
 
 ## 7. Tests
 
@@ -491,6 +504,8 @@ node web/engine/bots/test/all.mjs            # the library: type-check, worker s
                                              # economy, PK, habits, social life, looks, set pieces, the living world, …
 node web/engine/bots/test/all.mjs --full     # + task coverage on both world types, long simulations, the living world
                                              # at 25 to 1000 online, a crowd of 250, the humanlike report
+node --expose-gc web/engine/bots/test/identity.mjs --base=main   # a change that must not change what the bots do: four
+                                             # seeded worlds end the same as with the library before it
 node web/engine/test/all.mjs                 # the engine worker, incl. bots.test.mjs: the glue against the real library and the stub
 node web/test/e2e.mjs --bots 25              # the page with 25 bots (--bots 0: explicitly off)
 node web/test/app-test.mjs --bots 25         # in the app (simulator; --device for the iPhone): the setting, fps, ticks, saves
@@ -501,6 +516,11 @@ The tests read the upstream sources (see [BUILDING.md](BUILDING.md)) and never w
 the engine works in a scratch copy under `build/tmp/bots/`, with the library linked in. Every test file's header says
 what it checks; `web/engine/bots/README.md` has the full table. `LC_BOTS_SRC=<dir>/src` runs any test against another
 copy of the library (with its `data` beside it).
+
+Seeded worlds repeat exactly in V8 (Node). In JavaScriptCore they do only with `Array.prototype.sort` replaced by a
+deterministic one: some of upstream's tasks shuffle with `sort(() => Math.random() - 0.5)`, and JavaScriptCore's native
+sort calls such a comparator a varying number of times once its optimizing JIT tiers run, so the random draws shift
+(harmless in play, where the world is not seeded; the spec leaves that order to the engine).
 
 **The world simulator**, `test/sim.mjs`, runs the real 274 world headless with the runtime's hooks and a human player,
 and prints a health report: each task kind's XP per 1,000 bot-ticks, rescue jumps by task and reason, "I can't reach
@@ -536,6 +556,13 @@ node --expose-gc web/engine/bots/test/humanlike.mjs --bots=100 --ticks=6000 [--m
   patch's diff with `git diff` (keep its description), put the Content commit in `web/engine/bots/content/BASE`, then
   run `node scripts/build-web.mjs --skip-pack --rebuild-bot-scripts --require-bots` and
   `node --expose-gc --experimental-vm-modules web/engine/test/bots.test.mjs --real`.
+- **An engine update** (a new Engine-TS commit): the bots' copy of the route search (`port/BotPathFinder`) reads
+  `CollisionEngine`'s zones, the zone searches (`port/BotZoneScan`) read the zones' private lists (`npcs`, `locs`,
+  `objs`, a list's `sentinel`, a node's `next`/`next2`), and the index of who attacks whom (`port/BotAggressors`) wraps
+  `PathingEntity.setInteraction`/`clearInteraction`, the only places an NPC's target changes; the tick's array of the
+  players (`port/BotPlayers`) holds while only `World.processLogins` adds a player and `World.removePlayer` removes one.
+  `node --expose-gc web/engine/bots/test/exact.test.mjs` compares each with what it replaces on every call of a seeded
+  world (and the route search on a sweep of the map), and fails on any difference.
 - **Updating the bot library from upstream**: "Re-vendoring" in
   [web/engine/bots/README.md](../web/engine/bots/README.md#re-vendoring). The library must stay worker-safe.
 - **Names** are append-only. Newcomers use them up, about two an hour of play; when they run out no more newcomers come,

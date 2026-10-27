@@ -56,7 +56,6 @@
 //     draws a die: the world is the rules' as before.
 import InvType from '#/cache/config/InvType.js';
 import ObjType from '#/cache/config/ObjType.js';
-import WordEnc from '#/cache/wordenc/WordEnc.js';
 import { Inventory } from '#/engine/Inventory.js';
 import { MoveSpeed } from '#/engine/entity/MoveSpeed.js';
 import { isClientConnected } from '#/engine/entity/NetworkPlayer.js';
@@ -109,6 +108,8 @@ import { notePrivateLine, notePublicLine } from '#/engine/bot/port/BotModelHisto
 import { renderLocal, renderOnline, situationOf } from '#/engine/bot/port/BotModelPrompt.js';
 import { styleLine } from '#/engine/bot/port/BotStyle.js';
 import chatResponsesJson from '../../data/chat_responses.json';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+import { botFilter } from '#/engine/bot/port/BotFilter.js';
 
 interface Reply {
     text: string;
@@ -237,7 +238,7 @@ function askBack(answer: string, intent: IntentResult | null, canAnswer: () => b
     if (intent === null || !ASK_BACK_INTENTS.has(intent.id) || COUNTER_RX.test(answer.trim()) || chatDice.roll() >= ASK_BACK_CHANCE || !canAnswer()) return { text: answer };
     if (intent.upstream) return { text: answer, after: pickOf(ASK_BACK_ALONE) };
     const asked = `${answer.trim().replace(/[.!]+$/, '')}${pickOf(ASK_BACK)}`;
-    return { text: WordEnc.filter(asked) === asked && asked.length <= 60 ? asked : answer };
+    return { text: botFilter(asked) === asked && asked.length <= 60 ? asked : answer };
 }
 
 /** (variety round 2, S2-1) the answerer's word on the asker's own answer back, now and then */
@@ -1329,7 +1330,7 @@ function askInWhat(asker: Player, leveller: Player, now: number): boolean {
         then: () => {
             if (BotManager.botFor(leveller) === null || isAway(leveller) || chebyshev(asker, leveller) > HEARING_DISTANCE) return;
             const skill = skillShort(ev.stat!);
-            const answers = (ask.answer as string[]).map(a => a.replace('{v}', skill)).filter(a => WordEnc.filter(a) === a);
+            const answers = (ask.answer as string[]).map(a => a.replace('{v}', skill)).filter(a => botFilter(a) === a);
             const answer = answers.length ? freshLine(leveller, answers) : null;
             noteCounter(answer !== null);
             if (answer === null) return;
@@ -1720,7 +1721,7 @@ let nextOpener = -1;
 
 /** port: who a friend bot's unasked message goes to, and from which one: a human whose private chat is not off, and an online friend bot that is not busy (null: none) */
 export function pickOpener(isFriend: (name: string) => boolean): { human: Player; bot: Player } | null {
-    const humans = [...World.playerLoop.all()].filter(p => !p.is_bot && isClientConnected(p) && p.privateChat !== ChatModePrivate.OFF);
+    const humans = [...worldPlayers()].filter(p => !p.is_bot && isClientConnected(p) && p.privateChat !== ChatModePrivate.OFF);
     if (humans.length === 0) return null;
     const human = humans[Math.floor(Math.random() * humans.length)];
     const friends = [...BotManager.activeBots()].filter(b => isFriend(b.username) && b.botTradeTargetPid === -1 && !inFight(b) && !BotChat.inConversation(b) && !isAway(b));
@@ -1810,7 +1811,7 @@ export function joinGreeting(greeting: string, response: string): string {
 
 /** port: the game's word filter (port/BotSay) leaves the line as it is. */
 function isClean(text: string): boolean {
-    return WordEnc.filter(text) === text;
+    return botFilter(text) === text;
 }
 
 /** port: the emote that goes with the line being answered, if any (processIntent sets it), taken off the memory */
@@ -2498,7 +2499,7 @@ export function inFightQuick(bot: Player): boolean {
 export function inFight(bot: Player): boolean {
     const op = bot.targetOp;
     if (bot.target instanceof Player && (op === ServerTriggerType.APPLAYER2 || op === ServerTriggerType.OPPLAYER2)) return true;
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p !== bot && p.target === bot && (p.targetOp === ServerTriggerType.APPLAYER2 || p.targetOp === ServerTriggerType.OPPLAYER2)) return true;
     }
     return false;

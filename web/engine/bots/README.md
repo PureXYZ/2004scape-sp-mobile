@@ -46,6 +46,10 @@ player through the engine: walking, interactions, interface buttons, the bank), 
 | `PlayerBotFields.ts` | The fields the mod added to `Player` (module augmentation; only bots get them) |
 | `BotScriptCommands.ts` | `P_ISBOT` = 10100, `P_BOT_INTERACT_TRADE` = 10101 |
 | `BotPathing.ts` | `botFindPath` / `botWalkPath` (upstream's GameMap patches) over `#/engine/routefinder`, with the per-tick search budget and the level of detail (far bots get a third of it) |
+| `BotPathFinder.ts` | The bots' route search: an exact copy of 274's breadth-first `PathFinder.findPath` (the same routes) with cheaper collision reads; the engine's own search is untouched |
+| `BotZoneScan.ts` | The nearest-NPC, loc and ground-item searches' zone loops: the zone's lists walked in the order of the engine's generators, without them (the same entity) |
+| `BotPlayers.ts` | `worldPlayers()`: `World.playerLoop.all()` as an array taken when `BotManager.tick` starts (no player joins or leaves during it), the generator outside the tick; `BotManager.activeBots()` does the same for the active bots |
+| `BotAggressors.ts` | Who targets whom, kept as NPCs' targets change (`PathingEntity.setInteraction`/`clearInteraction`): "who attacks me" without a search of 25-49 zones, the search's own pick |
 | `BotWalkGraph.ts` | Long walks over the walking graph of the overworld (`data/walk_graph.json`), A* and cached; free areas only on a free world |
 | `BotInventoryCompat.ts` | Revision 254's all-or-nothing `add`, moves clamped to the room in the target, deposits that keep what a full bank refuses |
 | `BotContent.ts` | Content lookups whose names or meaning changed in 274 (cooking locs, trees, water, `sa_energy`, Wilderness levels, multi-combat, toll gates) |
@@ -93,6 +97,7 @@ player through the engine: walking, interactions, interface buttons, the bank), 
 | `BotChatter.ts`, `BotLines.ts`, `BotStyle.ts`, `BotSlots.ts` | When a bot talks unprompted; which line fits (the tags, the repetition registry, repertoires); how its persona types; slots filled from its state |
 | `BotThreads.ts`, `BotStage.ts`, `BotWitness.ts`, `BotReactions.ts`, `BotVoice.ts`, `BotSpoke.ts` | Topic threads between bots; exchanges near the human; witnesses; reactions to the human; one voice's share of a place's talk; who spoke to whom |
 | `BotSay.ts`, `BotEmote.ts`, `BotFollow.ts`, `ComeHereTask.ts` | Everything said, through the word filter; emotes; Follow (a clique's travel, a line of followers); "come here" |
+| `BotFilter.ts` | `botFilter(text)`: 274's word filter (`WordEnc.filter`) for every bot line and check, with one memo of the last 4,096 distinct texts (a line is checked, then said; adverts repeat) |
 | `BotModel.ts`, `BotModelPrompt.ts`, `BotModelGuard.ts`, `BotModelHistory.ts`, `BotModelTypes.ts` | The chat model's seam: scope and fallbacks, the situation and prompts, the guard, the history, the messages ([docs/BOTS.md](../../../docs/BOTS.md#49-chat-and-the-chat-model)) |
 
 ## API
@@ -479,6 +484,8 @@ Every test file's header says exactly what it checks. In short:
 | `test/pathing.test.mjs`, `test/walkgraph.test.mjs` | Waypoints, the search window and budget; the walking graph re-walked on the map |
 | `test/content-names.test.mjs`, `test/knowledge.test.mjs` | Every content name and item id the bundle can reach resolves in 274; every step has something to do in reach |
 | `test/determinism.test.mjs` | Two seeded runs end the same |
+| `test/exact.test.mjs` | The faster internals give the answers of what they replace: every route search of a seeded world and a sweep of the map against 274's own search; every zone search against the engine's generators (the same entity, the predicate on the same entities in the same order), "is my target still here" and "who attacks me" against the search, staged ties; every use of the tick's players and active bots against the generators; the walking graph's A* and nearest nodes against the original |
+| `test/identity.mjs` | Not in `all.mjs`: four seeded worlds (250 to 1000 bots) end the same with another copy of the library (a git ref or a folder): the bots' state and saves, every byte the human was sent, the random draws |
 | `test/churn.mjs`, `test/arrivals.test.mjs` | The living world: sessions, returns restored exactly, newcomers, quits, the empty world; the session draw, near-you-first, newbies by levels, a restart |
 | `test/age.test.mjs`, `test/looks.test.mjs`, `test/outfits.test.mjs`, `test/fashion.test.mjs`, `test/persona.test.mjs` | A new world's ages; bodies, gear taste, rares; outfits and weapons; status gear and fashion; personas |
 | `test/chat.test.mjs`, `test/chat-filter.test.mjs`, `test/lines.test.mjs`, `test/talk.test.mjs`, `test/threads.test.mjs` | Addressing, intents, the marketplace, "come here", typed replies; every line through the real 274 word filter and chat codec; what bots say unprompted; threads, witnesses, the voice cap |
@@ -508,7 +515,12 @@ node --expose-gc web/engine/bots/test/humanlike.mjs --bots=100 --ticks=6000 [--m
 their time, bots without XP, stalls (same tile, task and state, nothing gained), deaths (one at a skill or an errand
 fails the run), rescue jumps by task and reason, and a fingerprint (the same arguments give the same numbers).
 `--levels=N` gives the levelling bots every skill at N, which finds planner bugs that never show at level 3.
-`LC_BOTS_SRC=DIR` runs any test against another copy of the library, for an A/B comparison.
+`LC_BOTS_SRC=DIR` runs any test against another copy of the library, for an A/B comparison. A change that must not
+change what the bots do (a faster search, a cheaper loop) is checked with `test/identity.mjs` against the library before it:
+
+```sh
+node --expose-gc web/engine/bots/test/identity.mjs --base=main [--worlds=quick]
+```
 
 ## Re-vendoring
 

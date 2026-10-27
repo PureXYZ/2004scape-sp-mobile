@@ -9,7 +9,7 @@ import routefinder, { CollisionType } from '#/engine/routefinder/index.js';
 import { walkTo } from '#/engine/bot/BotAction.js';
 import { BotCollisionMap } from '#/engine/bot/BotCollisionMap.js';
 import { setWorld } from '#/engine/bot/BotWorld.js';
-import { BOT_MAX_WAYPOINTS, PATH_SEARCHES_PER_TICK, beginPathTick, botFindPath, botWalkPath, pathBudgetLeft, pathSearchBudget, pathSearchBudgetFor, pathSearchesThisTick, setPathSearchBudget } from '#/engine/bot/port/BotPathing.js';
+import { BOT_MAX_WAYPOINTS, PATH_SEARCHES_PER_TICK, beginPathTick, botFindPath, botWalkPath, pathBudgetLeft, pathSearchBudget, pathSearchBudgetFor, pathSearchesThisTick, setPathSearchBudget, wrapBotRouteForTest } from '#/engine/bot/port/BotPathing.js';
 
 export { walkTo, BotCollisionMap, BOT_MAX_WAYPOINTS, PATH_SEARCHES_PER_TICK, beginPathTick, botFindPath, botWalkPath, pathBudgetLeft, pathSearchBudget, pathSearchBudgetFor, pathSearchesThisTick, setPathSearchBudget };
 // (the variety work, round 1, track F: a walk's waits for the budget; the castle stairs' climb)
@@ -60,6 +60,13 @@ export async function start(): Promise<void> {
     await World.start(false, false);
     (World as unknown as { cycle: () => void }).cycle = () => {}; // nothing runs on its own
     setWorld(World); // what BotManager.start does first
+    // the bots' searches (port/BotPathing's, on port/BotPathFinder) and any other (the engine's route finder)
+    wrapBotRouteForTest(search => (...args) => {
+        const [, srcX, srcZ, destX, destZ, , , , , , , maxWaypoints] = args;
+        searches.push({ srcX, srcZ, destX, destZ, maxWaypoints });
+        if (failFrom === `${srcX},${srcZ}`) return new Uint32Array(0);
+        return search(...args);
+    });
     const findPath = routefinder.findPath.bind(routefinder);
     (routefinder as unknown as { findPath: typeof findPath }).findPath = (...args: Parameters<typeof findPath>) => {
         const [, srcX, srcZ, destX, destZ, , , , , , , , maxWaypoints] = args;

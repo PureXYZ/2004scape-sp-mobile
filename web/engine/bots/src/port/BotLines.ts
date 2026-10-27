@@ -75,6 +75,7 @@ import lines2004ActivitiesJson from '../../data/lines2004-activities.json';
 // (the variety work, round 2: Track M's groups in a file of its own; Track D2's in lines2004-activities.json, Track S2's
 // in lines2004-variety.json)
 import lines2004MembersJson from '../../data/lines2004-members.json';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 // ── the lines ────────────────────────────────────────────────────────────────
 
@@ -493,7 +494,7 @@ export function contextOf(bot: Player, events: LineContext['events'] = new Map()
     const action = step?.action ?? null;
     const state = task ? (((task as unknown as Record<string, unknown>).state as string | undefined) ?? null) : null;
     const near: Neighbour[] = [];
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p === bot || p.level !== bot.level) continue;
         const dist = Math.max(Math.abs(p.x - bot.x), Math.abs(p.z - bot.z));
         if (dist > 15) continue;
@@ -1390,7 +1391,7 @@ export function noteSaid(bot: Player, text: string, now: number = World.currentT
     if (REFLEX.has(normalizedLine(text))) return;
     noteSpeaker(bot.username, key, now);
     areaAt.set(`${areaKey(bot.x, bot.z, bot.level)}|${shape}`, now);
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p.is_bot || p.level !== bot.level) continue;
         if (Math.max(Math.abs(p.x - bot.x), Math.abs(p.z - bot.z)) <= HEARD_DISTANCE) {
             heardAt.set(key, now);

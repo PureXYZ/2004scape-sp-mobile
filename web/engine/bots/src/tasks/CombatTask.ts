@@ -59,6 +59,7 @@ import {
     pickupGroundItem,
     removeItem,
     findNpcFiltered,
+    npcWithin,
     npcMatchesName,
     getNpcCombatLevel,
     findAggressorNpc,
@@ -1470,7 +1471,7 @@ export class CombatTask extends BotTask {
      * of the same type with the original target.
      */
     private _isNpcAlive(player: Player, npc: Npc): boolean {
-        return findNpcFiltered(player.x, player.z, player.level, n => n === npc, 30) !== null;
+        return npcWithin(npc, player.x, player.z, player.level, 30);
     }
 
     // ─────────────────────────────────────────────

@@ -22,8 +22,9 @@ otherwise. The app has been tested on the emulator; what only a phone can show i
 | Origin | **`https://appassets.androidplatform.net`**, everything served at its root by our own router in `shouldInterceptRequest` (not WebViewAssetLoader). Never change it: localStorage and sessionStorage are keyed by it. |
 | Orientation | Landscape (`sensorLandscape`), immersive: system bars hidden, transient on swipe. Cutout mode ALWAYS. `env(safe-area-inset-*)` reports the cutout in WebView 145, so host.js's safe area works unchanged; its sides are made equal (the larger of the two, as iOS reports them in landscape), so a camera hole on one side keeps the HUD the same distance from both edges (host.js `readSafeArea`, host.css `--safe-left/right`, the cover and the keyboard bar alike). |
 | Back | **Back does nothing** (the gesture and the button), as an iPhone has no Back: a swipe from the edge while playing must not close the bank or the chat. GameActivity consumes it, so the activity never finishes on Back. The IME and native dialogs (the Claude key's box) still take Back themselves. |
-| Sound | **No sound setting on Android**: a phone has no silent switch, so Settings › Sound has only Vibration (iOS keeps "Silent switch: Mute / Play"). The game always plays as iOS's Play (`playback`) does: on silent and vibrate too, with audio focus, so other apps' music pauses. A stored `soundMode` is ignored. The game is always muted in the background. |
+| Sound | **No sound setting on Android**: a phone has no silent switch, so Settings › Sound has only Vibration (iOS keeps "Silent switch: Mute / Play"). The game always plays as iOS's Play (`playback`) does: on silent and vibrate too, with audio focus, so other apps' music pauses. A stored `soundMode` is ignored. The game is always muted in the background. The page never suspends the client's AudioContext in a silence here (iOS does with Settings › Sound on Mute: ARCHITECTURE.md §6, `audioIdle`). |
 | Pixels | Crisp pixel snap at fractional device pixel ratios (2.625 → 3 device px per HUD px and per game px; about 808×360 of world on a Pixel 10), done with **CSS zoom** on the HUD's layers. It does nothing at a whole-number ratio, so iOS is unchanged. Details: §6. |
+| Canvas pushes | A canvas gets its **whole frame when any of its pixels changed**, and nothing when none did (client patch 0026, `lcHost.platform` `'android'`). iOS sends only the rect of the changed pixels; on the emulator that rect made in-game frames of 100 ms or more come about three times as often as upstream's whole frame every frame (walking 35 instead of 38 fps). Whole frames of the changed canvases only come about half as often as upstream's (3 runs each: at Lumbridge standing still 18 a minute instead of 50, walking 30 instead of 64, at 42 and 40 fps instead of 40.5 and 38; at Varrock West with 500 bots 30 instead of 42 and 49 instead of 90). |
 | bots.sav | Written at most once every 30 s, plus at every save occasion (pause, background, Save now, autosave, your logout, Reset world). Both apps. |
 | Saves on disk | `filesDir/Documents/` with the iOS layout (`players/<profile>/<name>.sav`, `bots/<profile>/bots.sav`), atomic writes with `.bak` (JNI `renameat2(RENAME_EXCHANGE)`; `link()` is EACCES under SELinux). A player save is fsynced, the file and then its folder (the swap is a folder entry), before its 204; bots.sav is not (iOS syncs neither). A `DocumentsProvider` shows the folder in the system Files app as **2004Scape** (§4.6). `android:hasFragileUserData="true"`, so an uninstall from the launcher or Settings offers to keep the data. |
 | Bot chat | The same three choices. On-device: llama.cpp **b11297**'s official Android arm64 prebuilt, **CPU only**, the same GGUF and model.json as iOS, loaded from the APK by fd (stored uncompressed, 32-byte aligned by the build, mmapped). Claude online: the same request, through `HttpURLConnection` (not the Java SDK), with the key in an AndroidKeyStore-wrapped file. Details: §5. |
@@ -204,10 +205,12 @@ it. `AssetRouter` (+ `GameAssets`, `Mime`, `BodyHeader`), `SaveStore` (+ `FileOp
   iOS's (`terminate`, `idle-timer`, `ui-state`, `overlay`, `memory-warning`, `lifecycle`, `settings`, `reload`,
   `activity`) and `back`, `renderer-kill` (WebViewRenderProcess.terminate()), `renderer-crash` (chrome://crash: a real
   crash, didCrash true), `webview-fail {count}` (the next WebViews cannot be made), `recreate`, `trim {level}`, `config`,
-  `webview`, `insets`, `session`, plus the components'
-  (§4.3-4.6, §5.2); launch extras `--es lostcity.settings '<json>'` (merged before the page loads) and
-  `--ei lostcity.webViewFloor <major>` (a later intent changes it too: the floor lowered while the error screen waits
-  is how smoke.mjs plays an update). Release builds compile the hooks but answer `unhandled native message: debug`.
+  `webview`, `insets`, `session`, `launch-test` (the launch extra `lostcity.test`: the soak of `app-test --soak` and
+  which launch of a series, base64 JSON, kept for the process as iOS keeps its `-LostCityTest` argument), plus the
+  components' (§4.3-4.6, §5.2); launch extras `--es lostcity.settings '<json>'` (merged before the page loads),
+  `--es lostcity.test <base64>` and `--ei lostcity.webViewFloor <major>` (a later intent changes it too: the floor
+  lowered while the error screen waits is how smoke.mjs plays an update). iOS's `keep-awake` has no Android twin:
+  app-test keeps the screen on with `svc power stayon`. Release builds compile the hooks but answer `unhandled native message: debug`.
 - **Router responses.** Chromium's stream loader adds a Content-Length of its own (the stream's `available()`) before
   the WebResourceResponse's headers, so `GameWebViewClient.response` leaves the router's out when the stream reports the
   same length (one header, as on iOS), and a HEAD reply's stream reports the length and yields no byte.
@@ -395,8 +398,10 @@ botChat.host = object : AndroidBotChat.Host {
   `local model unloaded (background)`, while the sound is muted), `resume` → `resume()`, the session's memory warning →
   `memoryWarning()` (the reply being written stops, those waiting are dropped, the model is freed at once; a load
   needs 1 GB free above the low-memory line, `DeviceStats.headroomBytes`), every page reset (load, reload, renderer crash) → `pageReset()` (`#N answered after the page
-  reloaded: dropped`). The warm-up is the page's: `{type:'lm-warm'}` when the player enters the world with the bots on
-  and the on-device model in use.
+  reloaded: dropped`). The warm-up is the page's: `{type:'lm-warm'}` when the player starts to chat with the bots on
+  and the on-device model in use, or enters the world while no quick load is on record (the status's `lastLoadMs`,
+  kept by `AndroidLoadRecord` in SharedPreferences `lostcity-lm` with the app's version and the system's build: here
+  every load takes about as long, so that is only the first one after an install or an update).
 - **The key's box** (`KeyEntryDialog`). Shown only while the activity is started, with the keyboard bridge's focus lent
   through `session.keyboardFocus?.lend()` and closed once when the box goes (closing also re-activates the bridge, so
   `activateKeyboard()` adds nothing); `GameActivity.presenting` names it for `ui-state` (`AlertDialog`). An activity
@@ -491,7 +496,7 @@ host.css `html.ui-snapped`):
 |---|---|
 | JVM unit tests: router, saves, lifecycle, settings, bridge, keyboard, haptics, sound, cover geometry, Files provider, bot chat glue | `./gradlew :app:testDebugUnitTest` (android/) |
 | The bot chat library on the JVM (fake native, a local HTTP stand-in) | `./gradlew :botchat:test` (android/) |
-| The Mac harness: iOS's 44 checks + A1-A5, real GGUF, the mock | `node android/test/native/lm-harness.mjs [--no-model]` |
+| The Mac harness: iOS's 51 checks + A1-A5, real GGUF, the mock | `node android/test/native/lm-harness.mjs [--no-model]` |
 | Instrumented tests (emulator or phone) | `ANDROID_SERIAL=<serial> ./gradlew :llm:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.mock=http://127.0.0.1:47591/v1/messages` (android/; with `node web/test/lm/mock-claude.mjs --port 47591` and `adb reverse tcp:47591 tcp:47591`); add `-Plc.model=none -Pandroid.testInstrumentationRunnerArguments.model=none` for the build without the model |
 | Lint | `./gradlew :app:lintDebug` (android/) |
 | Smoke: boot, login, walk, Save now, Back, HOME, activity recreation, settings, trim, rotation, renderer crash and the crash-loop screen, no WebView after a crash, 25 bots, an update while on screen, the WebView floor (and its screen checking again) | `node android/test/smoke.mjs [--serial S] [--no-build] [--no-install] [--only phases] [--skip phases]` |
@@ -500,7 +505,7 @@ host.css `html.ui-snapped`):
 | The chat model in the real app (`model`: status, Settings › Bot chat, the warm-up, real replies, the key's box and the focus lend, Claude online against the mock, thermal, unloads; `release`: the R8 build with a probe; `none`: `-Plc.model=none`) | `node android/test/lm.mjs [--serial S] [--no-build] [--only model,release,none] [--mock-port 47591]` |
 | The pixel snap on the device's own screen | `node android/test/crisp.mjs [--serial S] [--no-build] [--no-install]` |
 | Everything on one device, one build (JVM, smoke, keyboard, shell, lm `--only model`, drive, app-test; a summary table in `android/build/all/`) | `node android/test/all.mjs [--serial S] [--quick] [--no-build] [--only a,b] [--skip a,b] [--bots N] [--instrumented]` |
-| The in-app test: the same `autotest.js` run as the iPhone's app-test, and the chat model's bench under load (`--lm-bench[=MIN] [--lm-think]`) | `node android/test/app-test.mjs [--serial S \| --device [serial]] [--bots N] [--lm-bench[=MIN]] [--lm-think] [--keep-data] [--no-build]` |
+| The in-app test: the same `autotest.js` run as the iPhone's app-test, the chat model's bench under load (`--lm-bench[=MIN] [--lm-think]`), and the soaks that A/B a branch (`--soak NAME`, docs/BUILDING.md §4) | `node android/test/app-test.mjs [--serial S \| --device [serial]] [--bots N] [--lm-bench[=MIN]] [--lm-think] [--soak NAME] [--keep-data] [--no-build]` |
 | The native layer: iOS's drive.mjs / drive-hw.mjs page with Android's meanings; `android/test/PARITY.md` maps every iOS check | `node android/test/drive.mjs [--serial emulator-S] [--no-build] [--start-phase P]` |
 | The page as Android runs it, in desktop Chrome | `node web/test/e2e.mjs --platform android`, `node web/test/hud.mjs --platform android`, `node web/test/gallery/gallery.mjs --platform android` |
 
@@ -527,7 +532,13 @@ How the test tools work:
   logcat through the console bridge (debug and release builds); logcat entries cut at 4,000 characters are joined again,
   and the bench's samples and summary come from the app's log file. Memory: `dumpsys meminfo` of the app and of the
   renderer its SandboxedProcessService binding names. At the end the normal debug APK is installed again. Output:
-  `android/build/app-test/<emulator|device>-<time>/`.
+  `android/build/app-test/<emulator|device>-<time>/`. `--soak NAME` (web/test/perf/, as on the iPhone: docs/BUILDING.md
+  §4) measures phases instead of the checks after the login; the soak goes to the app in the launch extra
+  `lostcity.test` (so `--no-build` runs any soak), each phase's window is sampled on the device (`top -H` and
+  `/proc/<pid>/task/*/stat` of the app, its renderer, SurfaceFlinger, the composer, the audio server and system_server;
+  `dumpsys gfxinfo`, `SurfaceFlinger --latency`, meminfo) into `soak/`, a start-up series relaunches with
+  `am start -S -W` (its times in `launches.jsonl`), and the soak's lines come from the app's log file at the end;
+  `summary.json` and `summary.txt` follow (web/test/perf/summary.mjs).
 - **`node android/test/drive.mjs [--serial emulator-S] [--no-build] [--start-phase P]`**: web/test/native/drive.mjs's
   and drive-hw.mjs's twin: the same `web/test/native/game-test` page (its `ANDROID` branches check Android's meaning
   where the contract differs) in a debug APK built `-Plc.model=none`, the markers from logcat, the renderer crashed and
@@ -542,7 +553,9 @@ How the test tools work:
 Everything above was checked on the emulator. What only a phone can show, and has not been checked on one yet: the IME heights, OEM keyboards and voice typing (composing
 IMEs), a hardware keyboard attached while typing and the gesture-navigation swipe-down; the 560 dp threshold and Gboard's
 full-screen editor in the key's box; the haptic scales and the Touch feedback intensity levels; the chat model's timings,
-memory, threads (2/3/4) and the SEVERE thermal threshold; the crisp snap on a phone's own screen, such as a Pixel 10's
+memory, threads (2/3/4) and the SEVERE thermal threshold; whether a real GPU takes the rect of changed pixels that iOS
+sends better than the emulator (client patch 0026 sends Android whole frames because of the emulator, which draws with
+software GL: SwiftShader through ANGLE); the crisp snap on a phone's own screen, such as a Pixel 10's
 2424×1080 with its camera hole (crisp.mjs); Auto Backup (bmgr), a full disk (ENOSPC) and a failed main-frame load (not provoked on the emulator
 either). The chat model's bench (`app-test.mjs --lm-bench`) runs on the emulator, but its numbers only mean something
 on the phone.

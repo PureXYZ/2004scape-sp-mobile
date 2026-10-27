@@ -11,12 +11,15 @@
 //   tabs and their panel, tap-to-drop (the chat bar's button: an item dropped by a tap, its menu by a long-press, the
 //   bank's inventory left alone), the action label (beside an item's slot and a red cross, fading out; a walk leaves it), the real Run, the compact chat lines, the chatbox toggle and history drag, the chat filters,
 //   the keyboard bar's charsets, the quest list drag and glide, the bank (window and side panel), the panel stepping
-//   aside for a dialogue or window, the World map (open, drag, pinch, double-tap, Key, overview, underground, centre,
-//   close, Escape), the camera pad, hardware Space and Escape, a safe-area change, Settings (on screen without scrolling,
-//   Restart beside the World heading) and Settings › Bot chat (in the safe area; Think first only for a model that offers
+//   aside for a dialogue or window, the World map (open, its data unpacked with libbzip2, drag, pinch, double-tap, Key,
+//   overview, underground, centre, close, Escape), the camera pad, hardware Space and Escape, a safe-area change, Settings
+//   (on screen without scrolling, Restart beside the World heading) and Settings › Bot chat (in the safe area; Think first only for a model that offers
 //   it, Off / On, the page still fitting; Escape back) and Settings › Tap options (Attack on top, by level, held or
 //   hidden for NPCs and players; Escape back), the classic layout (its options-menu button) and back, and every
-//   screen size the HUD is laid out for (iPhone SE to iPad Pro).
+//   screen size the HUD is laid out for (iPhone SE to iPad Pro). On the title, in game (the camera turning and
+//   still), after a logout and after the screen sizes it reads the canvases back: each must hold exactly the client's
+//   frame (client patch 0026 sends a canvas only the pixels that changed: their rect on iOS, the whole frame on Android,
+//   which it checks too).
 // It starts from settings an earlier version stored (a 450 ms hold). Screenshots of every state go to
 // build/tmp/hud/ (hud-<port>/ for another --port).
 //
@@ -158,6 +161,9 @@ await S('Page.addScriptToEvaluateOnNewDocument', { source: `window.__lcSafeAreaO
 if (ANDROID) {
     await S('Page.addScriptToEvaluateOnNewDocument', { source: androidPageScript() });
 }
+// putImageData calls per canvas id, whole frames and rects (client patch 0026: a changed rect on iOS, the whole frame on
+// Android), in window.__lcPuts
+await S('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const put = CanvasRenderingContext2D.prototype.putImageData; window.__lcPuts = {}; CanvasRenderingContext2D.prototype.putImageData = function (...a) { const n = (window.__lcPuts[this.canvas?.id || '?'] ??= { whole: 0, rect: 0 }); n[a.length >= 7 ? 'rect' : 'whole']++; return put.apply(this, a); }; })();` });
 await S('Emulation.setSafeAreaInsetsOverride', { insets: REPORTED_SAFE }); // CSS env(safe-area-inset-*) too
 
 async function evaluate(expression) {
@@ -297,6 +303,30 @@ const hudState = () => evaluate(`${C}.hudState()`);
 const free = () => evaluate(`[${C}.freeLeft, ${C}.freeTop, ${C}.freeRight, ${C}.freeBottom]`);
 const position = () => evaluate(`(() => { const c = ${C}; const p = c?.localPlayer; return p ? [c.mapBuildBaseX + (p.x >> 7), c.mapBuildBaseZ + (p.z >> 7), c.minusedlevel] : null; })()`);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// The canvases hold exactly the client's frames (client patch 0026 sends a canvas only the pixels that changed): every
+// surface's canvas in game, and on the title each part of the classic canvas the title screen's PixMaps draw, read back
+// between frames `times` times and compared with the PixMap's pixels as it converts them. Returns the reads and the
+// differing ones ({ area: differing pixels }).
+const TITLE_PARTS = [['imageTitle0', 0, 0], ['imageTitle1', 637, 0], ['imageTitle2', 128, 0], ['imageTitle3', 202, 371], ['imageTitle4', 202, 171], ['imageTitle5', 0, 265], ['imageTitle6', 562, 265], ['imageTitle7', 128, 171], ['imageTitle8', 562, 171]];
+async function framesShown(times = 12) {
+    const result = { reads: 0, differing: [] };
+    for (let i = 0; i < times; i++) {
+        await sleep(20 + ((i * 37) % 60));
+        const read = await evaluate(`(() => { const c = ${C}, out = {};
+            const rgba = p => ((p & 0xff0000) >> 16) | (p & 0xff00) | ((p & 0xff) << 16) | 0xff000000;
+            const diff = (pm, ctx, x, y) => { const got = new Int32Array(ctx.getImageData(x, y, pm.width, pm.height).data.buffer); let n = 0; for (let k = 0; k < got.length; k++) if (got[k] !== rgba(pm.data[k])) n++; return n; };
+            if (!c.ingame) { const ctx = document.getElementById('canvas').getContext('2d'); for (const [k, x, y] of ${JSON.stringify(TITLE_PARTS)}) if (c[k]) out[k] = diff(c[k], ctx, x, y); }
+            else for (const k of ['areaGame', 'areaMap', 'areaSide', 'areaChat']) if (c[k]?.own) out[k] = diff(c[k], c[k].ctx, 0, 0);
+            return out; })()`);
+        for (const [area, n] of Object.entries(read)) {
+            result.reads++;
+            if (n) {
+                result.differing.push({ area, n });
+            }
+        }
+    }
+    return result;
+}
 
 async function stablePosition(ms = 1500, timeoutMs = 15000) {
     let last = await position();
@@ -478,6 +508,8 @@ try {
     const hint = await evaluate(`!document.getElementById('title-actions').hidden && !document.getElementById('title-hint').hidden && document.getElementById('btn-continue').hidden`);
     check('title: the larger classic canvas, HUD hidden, only Settings (top right)', titleUi.hud && !titleUi.canvasBehind && same(titleUi.rail, ['btn-settings']) && titleFit.scale > 0.85 && titleFit.settings[1] < 20, JSON.stringify({ ...titleUi, ...titleFit }));
     check('title: with no character yet, the hint that any name makes one', hint);
+    const titleFrames = await framesShown();
+    check("title: the classic canvas holds exactly the title screen's frames (read back)", titleFrames.reads >= 12 * 9 && titleFrames.differing.length === 0, JSON.stringify(titleFrames));
 
     // (a finger rests on Settings through the login: that it still works afterwards is checked where Settings opens below)
     const inGame = await login(USER, true, true);
@@ -591,10 +623,25 @@ try {
 
     const yaw0 = await evaluate(`${C}.orbitCameraYaw`);
     let p = await worldPoint(300, 150);
-    await drag(p.x, p.y, p.x + 120, p.y);
+    await evaluate('window.__lcPuts = {}');
+    const [, turningFrames] = await Promise.all([drag(p.x, p.y, p.x + 120, p.y), framesShown(6)]);
     await sleep(300);
     const yaw1 = await evaluate(`${C}.orbitCameraYaw`);
     check('dragging the world turns the camera', yaw1 !== yaw0, `${yaw0} → ${yaw1}`);
+    const stillFrames = await framesShown();
+    check('in game: every surface holds exactly its frame, while the camera turns and after (read back)', turningFrames.reads >= 6 * 4 && stillFrames.reads >= 12 * 4 && turningFrames.differing.length + stillFrames.differing.length === 0, JSON.stringify({ turning: turningFrames, still: stillFrames }));
+    const turnPuts = await evaluate('window.__lcPuts');
+    const rects = Object.values(turnPuts).reduce((n, c) => n + c.rect, 0);
+    check(ANDROID ? 'in game: a changed surface gets its whole frame, never a rect (patch 0026 on Android)' : 'in game: a changed surface gets the rect of its changed pixels (patch 0026)', ANDROID ? rects === 0 && turnPuts['surface-game']?.whole > 0 : turnPuts['surface-game']?.rect > 0, JSON.stringify(turnPuts));
+    // standing still for 2 s, the side panel asked to draw at every client frame (redrawSide: the same pixels again) and
+    // its draws and the minimap's counted (PixMap.draw on the two instances)
+    await evaluate(`(() => { const c = ${C}; window.__lcPuts = {}; const draws = (window.__lcDraws = { side: 0, map: 0 });
+        for (const [key, area] of [['side', c.areaSide], ['map', c.areaMap]]) { const draw = area.draw; area.draw = function (...a) { draws[key]++; return draw.apply(this, a); }; }
+        window.__lcRedrawSide = setInterval(() => { c.redrawSide = true; }, 5); })()`);
+    await sleep(2000);
+    const still = await evaluate(`(() => { const c = ${C}; clearInterval(window.__lcRedrawSide); delete c.areaSide.draw; delete c.areaMap.draw; return { draws: window.__lcDraws, puts: window.__lcPuts }; })()`);
+    const pushes = id => (still.puts[id]?.whole ?? 0) + (still.puts[id]?.rect ?? 0);
+    check('...and standing still a surface that draws the same pixels gets nothing: the side panel drawn at every frame gets at most 2 pushes in 2 s, the minimap fewer pushes than draws', still.draws.side >= 20 && pushes('surface-side') <= 2 && still.draws.map >= 20 && pushes('surface-map') < still.draws.map, JSON.stringify(still));
     const rose = await evaluate(`document.querySelector('#btn-compass .compass-rose').style.transform`);
     await tapElement('#btn-compass');
     const north = await waitFor(`${C}.orbitCameraYaw === 0`, 3000);
@@ -981,6 +1028,8 @@ try {
     await sleep(800);
     const titleAgain = await evaluate(`({ hud: document.getElementById('hud').hidden, behind: document.getElementById('canvas').classList.contains('behind') })`);
     check('a tap on the panel\'s logout button (side surface) logs out to the title screen', out.ok && titleAgain.hud && !titleAgain.behind, JSON.stringify(titleAgain));
+    const logoutFrames = await framesShown();
+    check("...whose canvas holds exactly the title screen's frames (read back)", logoutFrames.reads >= 12 * 9 && logoutFrames.differing.length === 0, JSON.stringify(logoutFrames));
     const listButton = await waitFor(`!document.getElementById('title-actions').hidden && !document.getElementById('btn-characters').hidden`, 5000);
     if (listButton.ok) {
         await tapElement('#btn-characters');
@@ -1394,6 +1443,8 @@ try {
     const frameCentre = [Math.floor(frame.w / ZOOM / 2), Math.floor(frame.h / ZOOM / 2)];
     const marked = await waitFor(`${mapPixel(...frameCentre)}.every(v => v > 240)`, 3000, 50); // (the white dot)
     check('the globe opens the World map over the world, centred on the player, who is marked there', mapOpened.ok && (await visible('#worldmap')) && at.area === 0 && near(at.x, playerTile.x + 0.5) && near(at.z, playerTile.z + 0.5) && marked.ok, JSON.stringify({ playerTile, at, centrePixel: await evaluate(mapPixel(...frameCentre)), ms: mapOpened.ms }));
+    const mapDecoder = await evaluate(`(() => { const w = document.getElementById('worldmap-frame').contentWindow; return { fetched: w.performance.getEntriesByType('resource').some(e => e.name.endsWith('/engine/bzip2.wasm')), held: '__LC_BZIP2__' in w }; })()`);
+    check('the map unpacked worldmap.jag with libbzip2 (mapview.html, bzip2.js) and gave it up once ready', mapDecoder.fetched && !mapDecoder.held, JSON.stringify(mapDecoder));
     await screenshot('worldmap');
 
     await drag(frame.cx, frame.cy, frame.cx - 120, frame.cy - 60, 12, 20);
@@ -1880,6 +1931,8 @@ try {
     check('a narrow desktop window (450x800): the world renders at 768x1365, not without bound', same(narrow, [768, 1365]), JSON.stringify(narrow));
     await setScreen(VIEW, REPORTED_SAFE, DPR);
     await waitFor(`${C}.freeLeft === ${toRender(SAFE.left)}`, 3000);
+    const resizedFrames = await framesShown();
+    check('after the screen sizes, every surface holds exactly its frame (read back)', resizedFrames.reads >= 12 * 4 && resizedFrames.differing.length === 0, JSON.stringify(resizedFrames));
     await tapElement('#btn-chat-toggle');
     await sleep(200);
     await tapElement('#hud-tabs .tab[data-tab="3"]');

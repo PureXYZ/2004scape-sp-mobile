@@ -8,12 +8,14 @@ applet's overview on request, flashes a key's icons (gliding to the nearest when
 the player is on (the surface, the underground or the other places: MapView's three maps). The host drives it with
 postMessage (see MobileMapView.ts).
 
-MapView's grids are columns of typed arrays: as nested plain arrays its 1600x1408 tiles took ~96 MB of JS heap.
+MapView's grids are columns of typed arrays: as nested plain arrays its 1600x1408 tiles took ~96 MB of JS heap. The
+four that only the applet's keys draw (items, npcs, multi-combat and free-to-play areas:
+shouldDrawItems/Npcs/Multimap/Freemap, which MobileMapView never turns on) are not loaded (keyGrids): 9 MB.
 
 hudPlayerTile() gives the world tile the local player stands on.
 
 diff --git a/src/client/Client.ts b/src/client/Client.ts
-index d956d85..ff7d8a7 100644
+index cd7f20c..555dbb1 100644
 --- a/src/client/Client.ts
 +++ b/src/client/Client.ts
 @@ -12177,6 +12177,15 @@ export class Client extends GameShell {
@@ -33,7 +35,7 @@ index d956d85..ff7d8a7 100644
      private interfaceText(com: IfType | undefined): string {
          if (!com) {
 diff --git a/src/mapview/MapView.ts b/src/mapview/MapView.ts
-index 3901dc5..ca14305 100644
+index 3901dc5..e87b26f 100644
 --- a/src/mapview/MapView.ts
 +++ b/src/mapview/MapView.ts
 @@ -5,12 +5,27 @@ import Pix8 from '#/graphics/Pix8.js';
@@ -65,7 +67,17 @@ index 3901dc5..ca14305 100644
  export class MapView extends GameShell {
      static shouldDrawBorders: boolean = false;
      static shouldDrawLabels: boolean = true;
-@@ -223,39 +238,39 @@ export class MapView extends GameShell {
+@@ -67,6 +82,9 @@ export class MapView extends GameShell {
+     // custom: free.dat
+     freePos: boolean[][] = [];
+ 
++    // custom (ios): whether maininit reads the four grids above (see there)
++    protected keyGrids: boolean = true;
++
+     mapscene: Pix8[] = [];
+     mapfunction: Pix32[] = [];
+     mapdot0: Pix32 | null = null;
+@@ -223,41 +241,45 @@ export class MapView extends GameShell {
          }
  
          const underlay: Packet = new Packet(worldmap.read('underlay.dat'));
@@ -89,33 +101,56 @@ index 3901dc5..ca14305 100644
 +        this.locMapfunction = bytes(this.mapWidth, this.mapHeight); // custom (ios)
          this.loadLoc(loc);
  
-         try {
-             // custom:
-             const obj: Packet = new Packet(worldmap.read('obj.dat'));
+-        try {
+-            // custom:
+-            const obj: Packet = new Packet(worldmap.read('obj.dat'));
 -            this.objPos = new TypedArray2d(this.mapWidth, this.mapHeight, false);
-+            this.objPos = flags(this.mapWidth, this.mapHeight); // custom (ios)
-             this.loadObj(obj);
- 
-             // custom:
-             const npc: Packet = new Packet(worldmap.read('npc.dat'));
+-            this.loadObj(obj);
+-
+-            // custom:
+-            const npc: Packet = new Packet(worldmap.read('npc.dat'));
 -            this.npcPos = new TypedArray2d(this.mapWidth, this.mapHeight, false);
-+            this.npcPos = flags(this.mapWidth, this.mapHeight); // custom (ios)
-             this.loadNpc(npc);
- 
-             // custom:
-             const multi: Packet = new Packet(worldmap.read('multi.dat'));
+-            this.loadNpc(npc);
+-
+-            // custom:
+-            const multi: Packet = new Packet(worldmap.read('multi.dat'));
 -            this.multiPos = new TypedArray2d(this.mapWidth, this.mapHeight, false);
-+            this.multiPos = flags(this.mapWidth, this.mapHeight); // custom (ios)
-             this.loadMulti(multi);
- 
-             // custom:
-             const free: Packet = new Packet(worldmap.read('free.dat'));
+-            this.loadMulti(multi);
+-
+-            // custom:
+-            const free: Packet = new Packet(worldmap.read('free.dat'));
 -            this.freePos = new TypedArray2d(this.mapWidth, this.mapHeight, false);
-+            this.freePos = flags(this.mapWidth, this.mapHeight); // custom (ios)
-             this.loadFree(free);
-         } catch (_e) {
+-            this.loadFree(free);
+-        } catch (_e) {
++        // custom (ios): the item, npc, multi-combat and free-to-play grids are drawn only behind the applet's keys
++        // (shouldDrawItems/Npcs/Multimap/Freemap), which a map without them (MobileMapView) leaves off for good
++        if (this.keyGrids) {
++            try {
++                // custom:
++                const obj: Packet = new Packet(worldmap.read('obj.dat'));
++                this.objPos = flags(this.mapWidth, this.mapHeight); // custom (ios)
++                this.loadObj(obj);
++
++                // custom:
++                const npc: Packet = new Packet(worldmap.read('npc.dat'));
++                this.npcPos = flags(this.mapWidth, this.mapHeight); // custom (ios)
++                this.loadNpc(npc);
++
++                // custom:
++                const multi: Packet = new Packet(worldmap.read('multi.dat'));
++                this.multiPos = flags(this.mapWidth, this.mapHeight); // custom (ios)
++                this.loadMulti(multi);
++
++                // custom:
++                const free: Packet = new Packet(worldmap.read('free.dat'));
++                this.freePos = flags(this.mapWidth, this.mapHeight); // custom (ios)
++                this.loadFree(free);
++            } catch (_e) {
++            }
          }
-@@ -307,7 +322,7 @@ export class MapView extends GameShell {
+ 
+         try {
+@@ -307,7 +329,7 @@ export class MapView extends GameShell {
              this.f30 = WorldMapFont.fromSystem(30, true);
          }
  
@@ -126,10 +161,10 @@ index 3901dc5..ca14305 100644
          this.overview = new Pix32(this.overviewWidth, this.overviewHeight);
 diff --git a/src/mapview/MobileMapView.ts b/src/mapview/MobileMapView.ts
 new file mode 100644
-index 0000000..c767f86
+index 0000000..9aa99a3
 --- /dev/null
 +++ b/src/mapview/MobileMapView.ts
-@@ -0,0 +1,782 @@
+@@ -0,0 +1,785 @@
 +// custom (ios): the world map of the iOS app's HUD (web/host/mapview.html, in the World map window's iframe).
 +//
 +// Upstream's 2004 map applet (MapView) with a phone's controls in place of its own buttons and keys: drag to pan (it
@@ -214,6 +249,9 @@ index 0000000..c767f86
 +    private lastState: string = '';
 +
 +    private started: boolean = false; // the first maininit has begun
++    // the applet's keys are not here, so the item, npc, multi-combat and free-to-play grids would never be drawn
++    // (shouldDrawItems/Npcs/Multimap/Freemap stay off): MapView.maininit leaves them out (9 MB, and 2.7 MB less to unpack)
++    protected override keyGrids: boolean = false;
 +    private early: Message[] = []; // what the host said before that
 +
 +    private readonly onMessage = (e: MessageEvent): void => this.message(e.data as Message);

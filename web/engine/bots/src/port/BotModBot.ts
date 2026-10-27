@@ -21,7 +21,6 @@
 //   - Its answers: "is there a mod here", "r u a mod", "how do i become a mod" (port/BotAnswers' intents; here when the human
 //     asks to nobody and the mod is in earshot: it answers, the bots near keep quiet).
 // Per tick: nothing. A bot's line costs a regular expression; a human's line a few compares.
-import WordEnc from '#/cache/wordenc/WordEnc.js';
 import type Player from '#/engine/entity/Player.js';
 import { PlayerStat } from '#/engine/entity/PlayerStat.js';
 import World from '#/engine/World.js';
@@ -41,6 +40,7 @@ import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
 import { ANSWER_LINES } from '#/engine/bot/port/BotAnswers.js';
 import { arenaLines, rand, sayArenaText } from '#/engine/bot/port/BotArena.js';
 import { scheduleInTicks } from '#/engine/bot/port/BotSchedule.js';
+import { botFilter } from '#/engine/bot/port/BotFilter.js';
 
 /** within this many tiles (and its floor) the mod hears spam */
 export const MOD_HEARS = 25;
@@ -378,7 +378,7 @@ export function onHumanLine(human: Player, text: string): boolean {
     if (human.is_bot === true) return false;
     const now = World.currentTick;
     const line = text.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-    const starred = (WordEnc.filter(text).match(/\*+/g) ?? []).length;
+    const starred = (botFilter(text).match(/\*+/g) ?? []).length;
     const list = humanLines.get(human.username) ?? [];
     list.push({ t: now, line, starred });
     while (list.length && now - list[0].t > 100) list.shift();

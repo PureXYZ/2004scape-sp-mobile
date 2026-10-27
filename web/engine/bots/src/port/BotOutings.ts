@@ -23,6 +23,7 @@ import World from '#/engine/World.js';
 import { BotManager } from '#/engine/bot/BotManager.js';
 import { sayPieceLine } from '#/engine/bot/port/BotPieceLines.js';
 import { isMembersWorld } from '#/engine/bot/port/BotWorldRules.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** the minigames' task kinds (their tasks' names): MG1's time, FT1's "on a minigame wherever it is" */
 export const MINIGAME_KINDS: readonly string[] = ['Trawler', 'AgilityArena', 'RangingGuild', 'TreasureTrail'];
@@ -215,7 +216,7 @@ export function sayMembers(bot: Player, kind: string, to: Player | null = null):
 /** A bot within `radius` tiles of (x, z) on that floor, that is not `but` (a crew's company, someone to talk to). */
 export function botsNear(x: number, z: number, level: number, radius: number, but: Player | null = null): Player[] {
     const list: Player[] = [];
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p === but || p.is_bot !== true || p.level !== level) continue;
         if (Math.max(Math.abs(p.x - x), Math.abs(p.z - z)) <= radius) list.push(p);
     }

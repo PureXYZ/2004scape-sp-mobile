@@ -24,6 +24,7 @@ export interface LcHost {
     takeSecondaryClick?(): boolean;
     settings?: LcHostSettings;
     onClientEvent?(name: string, detail?: unknown): void;
+    platform?: string;
 }
 
 export function lcHost(): LcHost | null {
@@ -42,6 +43,17 @@ export function lcSetting<K extends keyof LcHostSettings>(key: K, fallback: NonN
         console.error(e);
     }
     return fallback;
+}
+
+// Which app the page runs in, as the host learns it from the app (window.LostCityNative.platform): 'ios', 'android', or
+// 'web' without an app (desktop tests) or without a host.
+export function lcPlatform(): string {
+    try {
+        const platform = lcHost()?.platform;
+        return typeof platform === 'string' ? platform : 'web';
+    } catch {
+        return 'web';
+    }
 }
 
 export function lcHaptic(style: HapticStyle): void {

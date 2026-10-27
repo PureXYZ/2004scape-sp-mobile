@@ -61,6 +61,7 @@ import { BotManager } from '#/engine/bot/BotManager.js';
 // port/BotSetPieces only: port/BotPkTeam is a set piece's module, loaded with the director's)
 import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
 import type { PkRaid } from '#/engine/bot/port/BotPkTeam.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** port (the realism work, phase 5b): the PK team raid this PKer has a part in (port/BotPkTeam), or null */
 function raidOf(p: Player): PkRaid | null {
@@ -343,7 +344,7 @@ function isFightingAnother(target: Player, self: Player): boolean {
  * and turned on its friend). Never a clique-mate (port/BotCliques).
  */
 function getAttacker(player: Player): Player | null {
-    for (const p of (World as any).playerLoop.all() as Iterable<Player>) {
+    for (const p of worldPlayers()) {
         if (p === player || p.slot === -1) continue;
         if (p.target !== player || (p.targetOp !== ServerTriggerType.APPLAYER2 && p.targetOp !== ServerTriggerType.OPPLAYER2)) continue;
         if (sameClique(player.username, p.username)) continue;
@@ -362,7 +363,7 @@ function getAttacker(player: Player): Player | null {
  */
 function foughtByOther(target: Player, self: Player): boolean {
     if (isMultiCombat(target.x, target.z, target.level)) return false;
-    for (const p of (World as any).playerLoop.all() as Iterable<Player>) {
+    for (const p of worldPlayers()) {
         if (p === self || p === target || p.slot === -1) continue;
         if (p.target === target && (p.targetOp === ServerTriggerType.APPLAYER2 || p.targetOp === ServerTriggerType.OPPLAYER2)) return true;
     }
@@ -374,7 +375,7 @@ function foughtByOther(target: Player, self: Player): boolean {
 // port (the realism work, phase 5b: PK team raids): a team-mate's claim is no claim where the raid lets the bot share the
 // target (it stands in multi-combat and fewer than 3 of the team are on it: port/BotPkTeam mayShare)
 function isTargetClaimed(target: Player, excludeBot: Player, raid: PkRaid | null = null): boolean {
-    for (const p of (World as any).playerLoop.all() as Iterable<Player>) {
+    for (const p of worldPlayers()) {
         if (p === target || p === excludeBot) continue;
         if (p.slot === -1) continue;
         const task = (p as any)._bot?.currentTask;
@@ -398,7 +399,7 @@ function findNearbyTarget(bot: Player, radius: number, blacklist?: Map<string, n
     if (team && !blacklist?.has(team.username) && chebyshev(bot.x, bot.z, team.x, team.z) <= radius && inCombatRange(pvpWildernessLevel(bot, team), bot.combatLevel, team.combatLevel)) return team;
     let best: Player | null = null;
     let bestDist = radius + 1;
-    for (const p of (World as any).playerLoop.all() as Iterable<Player>) {
+    for (const p of worldPlayers()) {
         if (p === bot) continue;
         if (p.level !== bot.level) continue;
         if (p.slot === -1) continue;
@@ -1128,7 +1129,7 @@ export class EdgevillePKerTask extends BotTask {
     }
 
     private isStackedWith(player: Player): Player | null {
-        for (const p of (World as any).playerLoop.all() as Iterable<Player>) {
+        for (const p of worldPlayers()) {
             if (p === player || p.slot === -1) continue;
             if (p.x === player.x && p.z === player.z && p.level === player.level) return p;
         }

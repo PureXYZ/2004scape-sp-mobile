@@ -1,0 +1,9 @@
+{
+    "description": "In the background (0 bots): Lumbridge 40 s, the app behind the Settings app for 120 s (recorded), then Lumbridge 40 s again. The iPhone's Auto-Lock must be longer than 2 minutes (or Never) for the run.",
+    "bots": 0,
+    "phases": [
+        { "name": "lumbridge-before", "tele": "0,50,50,22,18", "vars": { "option_music": 2, "option_sounds": 2 }, "sec": 40, "traces": [{ "set": "am", "at": 3, "sec": 30 }] },
+        { "name": "background", "background": true, "sec": 120 },
+        { "name": "lumbridge-after", "sec": 40, "traces": [{ "set": "am", "at": 3, "sec": 30 }] }
+    ]
+}

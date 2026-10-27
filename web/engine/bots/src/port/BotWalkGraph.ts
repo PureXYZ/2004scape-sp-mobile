@@ -147,11 +147,17 @@ export type Allowed = (x: number, z: number) => boolean;
  * The `count` nodes nearest (x, z) on the overworld (Chebyshev, then Manhattan; within two cells; ones the route may
  * use), nearest first. Level 0 only: the graph has no upstairs and no dungeons.
  */
+const nearScores = new Float64Array(25);
+const nearIds = new Int32Array(25);
 export function nearestNodes(x: number, z: number, count: number, allowed?: Allowed): number[] {
     const g = load();
     const gx = Math.floor((x - g.x0) / g.grid);
     const gz = Math.floor((z - g.z0) / g.grid);
-    const found: [number, number][] = [];
+    // port (perf, 2026-10-23): the candidates (at most 25, one a cell) kept in the sort's order as they come (scores,
+    // then node numbers), in two reused arrays: no pair array per candidate, no sort, slice and map per call
+    let n = 0;
+    const scores = nearScores;
+    const ids = nearIds;
     for (let dz = -2; dz <= 2; dz++) {
         for (let dx = -2; dx <= 2; dx++) {
             const cx = gx + dx;
@@ -159,11 +165,20 @@ export function nearestNodes(x: number, z: number, count: number, allowed?: Allo
             if (cx < 0 || cz < 0 || cx >= g.w || cz >= g.h) continue;
             const i = g.cellNode[cz * g.w + cx];
             if (i < 0 || (allowed && !allowed(g.nodeX[i], g.nodeZ[i]))) continue;
-            found.push([Math.max(Math.abs(g.nodeX[i] - x), Math.abs(g.nodeZ[i] - z)) * 4 + Math.abs(g.nodeX[i] - x) + Math.abs(g.nodeZ[i] - z), i]);
+            const score = Math.max(Math.abs(g.nodeX[i] - x), Math.abs(g.nodeZ[i] - z)) * 4 + Math.abs(g.nodeX[i] - x) + Math.abs(g.nodeZ[i] - z);
+            let k = n++;
+            while (k > 0 && (scores[k - 1] > score || (scores[k - 1] === score && ids[k - 1] > i))) {
+                scores[k] = scores[k - 1];
+                ids[k] = ids[k - 1];
+                k--;
+            }
+            scores[k] = score;
+            ids[k] = i;
         }
     }
-    found.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    return found.slice(0, count).map(f => f[1]);
+    const out: number[] = [];
+    for (let k = 0; k < n && k < count; k++) out.push(ids[k]);
+    return out;
 }
 
 /** The node nearest (x, z) (nearestNodes), or -1. */
@@ -196,6 +211,12 @@ function inWilderness(x: number, z: number): boolean {
 const WILDERNESS_COST = 4;
 
 const cache = new Map<string, number[] | null>();
+// route's arrays, kept between searches; a node's entries are the current search's only when its stamp is
+let aDist = new Float64Array(0);
+let aPrev = new Int32Array(0);
+let aStamp = new Int32Array(0);
+let aDone = new Int32Array(0);
+let aGen = 0;
 const CACHE_SIZE = 512;
 
 /**
@@ -217,9 +238,22 @@ export function route(start: number, goal: number, allowed?: Allowed, allowedKey
     const tz = g.nodeZ[goal];
     const toWild = inWilderness(tx, tz);
     const n = g.nodeX.length;
-    const dist = new Float64Array(n).fill(Infinity);
-    const prev = new Int32Array(n).fill(-1);
-    const done = new Uint8Array(n);
+    // port (perf, 2026-10-23): the search's arrays are kept between searches and told apart by a stamp (a node's dist,
+    // prev and done are this search's only when its stamp is), and the heap swaps through temporaries: the same A*, the
+    // same heap order, the same route, without 3 arrays of n nodes allocated and filled per search (A* was 2.5 % of the
+    // world tick at 1000 bots in JavaScriptCore, its arrays 6 % of the bots' garbage)
+    if (aStamp.length !== n || aGen === 0x7fffffff) {
+        aDist = new Float64Array(n);
+        aPrev = new Int32Array(n);
+        aStamp = new Int32Array(n);
+        aDone = new Int32Array(n);
+        aGen = 0;
+    }
+    const gen = ++aGen;
+    const dist = aDist;
+    const prev = aPrev;
+    const stamp = aStamp;
+    const done = aDone;
     // a binary heap of [f, node]
     const heapF: number[] = [];
     const heapN: number[] = [];
@@ -230,8 +264,12 @@ export function route(start: number, goal: number, allowed?: Allowed, allowedKey
         while (i > 0) {
             const parent = (i - 1) >> 1;
             if (heapF[parent] <= heapF[i]) break;
-            [heapF[parent], heapF[i]] = [heapF[i], heapF[parent]];
-            [heapN[parent], heapN[i]] = [heapN[i], heapN[parent]];
+            const tf = heapF[parent];
+            heapF[parent] = heapF[i];
+            heapF[i] = tf;
+            const tn = heapN[parent];
+            heapN[parent] = heapN[i];
+            heapN[i] = tn;
             i = parent;
         }
     };
@@ -250,30 +288,38 @@ export function route(start: number, goal: number, allowed?: Allowed, allowedKey
                 if (l < heapF.length && heapF[l] < heapF[m]) m = l;
                 if (r < heapF.length && heapF[r] < heapF[m]) m = r;
                 if (m === i) break;
-                [heapF[m], heapF[i]] = [heapF[i], heapF[m]];
-                [heapN[m], heapN[i]] = [heapN[i], heapN[m]];
+                const tf = heapF[m];
+                heapF[m] = heapF[i];
+                heapF[i] = tf;
+                const tn = heapN[m];
+                heapN[m] = heapN[i];
+                heapN[i] = tn;
                 i = m;
             }
         }
         return top;
     };
     const h = (i: number): number => Math.max(Math.abs(g.nodeX[i] - tx), Math.abs(g.nodeZ[i] - tz));
+    // dist[] is Infinity and prev[] -1 for a node this search has not reached (stamp !== gen)
+    stamp[start] = gen;
     dist[start] = 0;
+    prev[start] = -1;
     push(h(start), start);
     while (heapF.length > 0) {
         const u = pop();
-        if (done[u]) continue;
-        done[u] = 1;
+        if (done[u] === gen) continue;
+        done[u] = gen;
         if (u === goal) break;
         for (let e = g.adjStart[u]; e < g.adjStart[u + 1]; e++) {
             const v = g.adjNode[e];
-            if (done[v]) continue;
+            if (done[v] === gen) continue;
             const vx = g.nodeX[v];
             const vz = g.nodeZ[v];
             if (v !== goal && allowed && !allowed(vx, vz)) continue;
             const c = g.adjCost[e] * (!toWild && inWilderness(vx, vz) ? WILDERNESS_COST : 1);
             const nd = dist[u] + c;
-            if (nd < dist[v]) {
+            if (nd < (stamp[v] === gen ? dist[v] : Infinity)) {
+                stamp[v] = gen;
                 dist[v] = nd;
                 prev[v] = u;
                 push(nd + h(v), v);
@@ -281,7 +327,7 @@ export function route(start: number, goal: number, allowed?: Allowed, allowedKey
         }
     }
     let result: number[] | null = null;
-    if (dist[goal] < Infinity) {
+    if (stamp[goal] === gen && dist[goal] < Infinity) {
         result = [goal];
         while (result[result.length - 1] !== start) result.push(prev[result[result.length - 1]]);
         result.reverse();

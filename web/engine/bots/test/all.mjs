@@ -2,7 +2,8 @@
 // Every check of the bot library, one process each (each test that needs the engine makes its own scratch clone under
 // build/tmp/bots and removes it again):
 //   tsc -p web/engine/bots, worker safety, names and the pool, inventory vs 254, pathing, the walking graph, content
-//   names, a short world simulation (10 bots, 600 ticks), determinism (two seeded runs end the same), a crowd of 100
+//   names, a short world simulation (10 bots, 600 ticks), determinism (two seeded runs end the same), the faster
+//   internals against what they replace (exact.test: every route and zone search of a seeded world, a sweep), a crowd of 100
 //   bots around the player, chat, what bots say unprompted (lines.test), PKers, PK tactics (pkfight.test), trade, the economy (economy.test: street
 //   prices, rares, stock by trade bank, adverts; realism phase 4), ageing, personas and human timing,
 //   habits (breaks, leaving, timing in a 40-bot world), social life (regulars, lures, friend cliques in a 60-bot world),
@@ -36,6 +37,7 @@ const STEPS = [
     ['knowledge vs the map (every step has something to do in reach)', [test('knowledge.test.mjs')]],
     ['world sim 10 × 600', sim('--bots=10', '--ticks=600')],
     ['the same seed gives the same world (two runs)', [test('determinism.test.mjs')]],
+    ['the faster internals give the answers of what they replace (route searches against 274\'s own, zone searches against the generators)', ['--expose-gc', test('exact.test.mjs')]],
     ['crowd of 100', sim('--scenario=crowd', '--bots=100', '--ticks=120')],
     ['chat lines through the word filter', [test('chat-filter.test.mjs')]],
     ['lines: tags, gating, the repetition registry, the style layer, level-up forms, PK subsets', [test('lines.test.mjs')]],

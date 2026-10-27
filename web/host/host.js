@@ -725,6 +725,7 @@
             }
             this.shown = true;
             this.context = context;
+            startsToChat(context.kind);
             if (isNative) {
                 postNative({ type: 'keyboard', action: 'show', ...context });
             } else {
@@ -773,6 +774,7 @@
                     return;
                 }
                 this.context = next;
+                startsToChat(next.kind);
                 if (isNative) {
                     postNative({ type: 'keyboard', action: 'show', ...next });
                 }
@@ -781,6 +783,9 @@
             const chips = JSON.stringify(next.chips ?? null);
             if (next.text !== prev.text || next.prompt !== prev.prompt || chips !== JSON.stringify(prev.chips ?? null)) {
                 this.context = next;
+                if (isStaff()) {
+                    startsToChat(next.kind); // (a staff line as the client now holds it: a chip, a Backspace)
+                }
                 if (isNative) {
                     // (chips too: the recent commands and amounts change as they are used)
                     postNative({ type: 'keyboard', action: 'update', prompt: next.prompt, text: next.text, chips: next.chips ?? [] });
@@ -797,6 +802,10 @@
                 if (String(text) === ' ' && continueDialogue()) {
                     return;
                 }
+            }
+            // (typing, not a Space that clicked a dialogue on: a hardware keyboard's, or a staff line with what this adds)
+            if (!this.shown || isStaff()) {
+                startsToChat(inputContext().kind, text);
             }
             for (const ch of String(text)) {
                 queueKey(ch === '\n' || ch === '\r' ? 'Enter' : ch);
@@ -894,6 +903,67 @@
             dispatchKey(name, down ? 'keydown' : 'keyup');
         }
     };
+
+    // The player starts to type something a bot may answer: the chat keyboard opens on the chat, a private message or
+    // another social prompt (names to add), or a hardware keyboard types there (its characters come through insertText;
+    // pressKey has only the named keys: arrows, Return...). The bots' chat model loads now if it is not in memory
+    // (lm.warm), while the line is typed: the timing measured on an iPhone 13 mini.
+    // A staff character's chat line is judged as it will be once the client has read every key on its way (`typed` is
+    // what insertText adds): one that is still empty, ':', or starts with '::' is not chat yet (the client sends a '::'
+    // line as a command, CLIENT_CHEAT, never as chat), so a Jmod's '::tele' (or the soak harness's) does not load the
+    // model; the line's first other character does. A normal player's '::' does nothing (the engine ignores it), so the
+    // chat keyboard opening loads the model for them, as measured.
+    function startsToChat(kind, typed = '') {
+        if (kind === 'social' || (kind === 'chat' && (!isStaff() || chatLinesAfterKeys(typed).some(isChatLine)))) {
+            lm.warm('chat');
+        }
+    }
+
+    function isStaff() {
+        return client()?.staffmodlevel > 0;
+    }
+
+    // A chat line that a bot may hear: sent (Enter on a line that is not empty) and not a '::' command, or being typed and
+    // neither empty, ':' nor '::...' (it may still become a command).
+    function isChatLine({ line, sent }) {
+        return !line.startsWith('::') && (sent || !'::'.startsWith(line));
+    }
+
+    // The chat lines as the client will hold them once it has read every key on its way: its chatInput, then the keys
+    // still unread in its key queue (the client reads them in its cycle, so keys that come back to back, or while a long
+    // frame holds the page, wait there), then those waiting here (pendingKeys; a submit is an Enter), then `typed`. By the
+    // client's own rules (Client.ts, the chat's key handling): 32..122 adds, up to '~' on a '::' line, 80 at most; 8 takes
+    // the last one off; 10 or 13 sends a line that is not empty. The lines sent on the way ({sent: true}), then the one
+    // left.
+    function chatLinesAfterKeys(typed) {
+        const c = client();
+        const lines = [];
+        let line = String(c?.chatInput ?? '');
+        const add = code => {
+            if (code >= 32 && (code <= 122 || (line.startsWith('::') && code <= 126)) && line.length < 80) {
+                line += String.fromCharCode(code);
+            } else if (code === 8) {
+                line = line.slice(0, -1);
+            } else if ((code === 10 || code === 13) && line.length > 0) {
+                lines.push({ line, sent: true });
+                line = '';
+            }
+        };
+        const addKey = key => add(key === 'Enter' ? 10 : key === 'Backspace' ? 8 : key.length === 1 ? key.charCodeAt(0) : 0);
+        if (c && Array.isArray(c.keyQueue)) {
+            for (let i = c.keyQueueReadPos & 127; i !== (c.keyQueueWritePos & 127); i = (i + 1) & 127) {
+                add(c.keyQueue[i]);
+            }
+        }
+        for (const key of pendingKeys) {
+            addKey(typeof key === 'string' ? key : 'Enter');
+        }
+        for (const ch of String(typed ?? '')) {
+            addKey(ch === '\n' || ch === '\r' ? 'Enter' : ch);
+        }
+        lines.push({ line, sent: false });
+        return lines;
+    }
 
     const OFFLINE_PASSWORD = 'offline';
     const KEYBOARD_CURVE = 'cubic-bezier(0.38, 0.7, 0.125, 1)'; // close to the iOS keyboard's own
@@ -998,6 +1068,9 @@
 
     window.lcHost = {
         settings,
+        // which app the page runs in, as the engine is told: on Android client patch 0026 sends a canvas its whole frame
+        // when any pixel changed, not their rect ('web' = no app: desktop tests get the iOS path, as everywhere here)
+        platform: window.LostCityNative?.platform ?? 'web',
         snapSetting, // (hud.mjs: what stored values the sheet no longer offers load as)
         keyboard,
         haptic,
@@ -1075,6 +1148,7 @@
         } catch {
             // older WebKit
         }
+        audioIdle.arm(); // (whether it may suspend the context follows the sound mode)
     }
 
     // A fallback mute for native (docs/ANDROID.md §3.3: LostCityHost.audio.setMuted), used only where the WebView
@@ -1103,12 +1177,118 @@
         }
     }
 
+    // WebKit keeps the audio output running while an AudioContext runs, silent or not: on an iPhone 13 mini audiomxd took
+    // 14-17.5 % of a core with the client's context running, 0.1-0.7 % with it suspended. So the client's context
+    // (window.audioContext) is suspended once nothing has played on it for AUDIO_IDLE_MS, and resumed when a source
+    // starts on it (start() on a suspended context plays once the resume is done, with the same samples: on an iPhone 13
+    // mini its first sample is out about 7 ms later than on a running context, about 40 ms after minutes of silence) and,
+    // ahead of that, when the player touches the page (a sound follows a tap a tick later at the soonest). Music keeps it
+    // running: its buffers are scheduled ahead, so one is always active. Native's mute (setAudioMuted) and the
+    // lifecycle's pause own the context while they last: nothing is suspended or resumed here then.
+    // AUDIO_IDLE_SUSPEND:
+    //   'ambient'  (as shipped) only while Settings › Sound follows the silent switch ('ambient'), where the session
+    //              mixes with other apps' audio anyway: a silent stretch there costs the iPhone 13 mini about 23 points of
+    //              a core less (audiomxd 18 % -> 0.1 %);
+    //   'all'      in either sound mode. Not in Play (the default): there the page is the phone's Now Playing app while
+    //              its context runs, and WebKit drops a context the page has suspended from Now Playing, so Control
+    //              Center would show the previous app (Music) in the game's silences. (WebKit keeps the audio session
+    //              active while the context is suspended, so other apps' audio stays interrupted as it does now);
+    //   'off'      nothing is suspended.
+    // Never on Android: native holds audio focus whatever the page does, but how long a resume takes on a phone there is
+    // unmeasured.
+    const AUDIO_IDLE_SUSPEND = 'ambient';
+    const AUDIO_IDLE_MS = 10000;
+
+    const audioIdle = {
+        ctx: null,
+        active: 0, // sources started on ctx that have not ended
+        timer: 0,
+        suspended: false, // ctx was suspended here (and not resumed since)
+
+        // Once client.js has made its context, before anything plays on it (boot): every source started on it is counted
+        // until it ends (the 'ended' event: also for a source stopped early, or before it started).
+        install() {
+            const ctx = window.audioContext;
+            if (ANDROID || AUDIO_IDLE_SUSPEND === 'off' || this.ctx || typeof ctx?.suspend !== 'function' || typeof AudioBufferSourceNode !== 'function') {
+                return;
+            }
+            this.ctx = ctx;
+            const start = AudioBufferSourceNode.prototype.start;
+            AudioBufferSourceNode.prototype.start = function (...args) {
+                const started = start.apply(this, args); // (a second start() throws, and is not counted)
+                if (this.context === audioIdle.ctx) {
+                    audioIdle.active++;
+                    this.addEventListener('ended', () => {
+                        audioIdle.active--;
+                        audioIdle.arm();
+                    }, { once: true });
+                    audioIdle.wake();
+                }
+                return started;
+            };
+            ctx.addEventListener('statechange', () => {
+                if (ctx.state === 'running') {
+                    this.suspended = false; // (resumed: here, by the client, by the lifecycle or by native's unmute)
+                    this.arm();
+                }
+            });
+            document.addEventListener('pointerdown', () => this.wake(), true);
+            this.arm();
+        },
+
+        allowed() {
+            return AUDIO_IDLE_SUSPEND === 'all' || (AUDIO_IDLE_SUSPEND === 'ambient' && settings.soundMode === 'ambient');
+        },
+
+        // (again whenever a source ends, the context runs again or Settings › Sound changes)
+        arm() {
+            clearTimeout(this.timer);
+            if (!this.ctx) {
+                return;
+            }
+            if (!this.allowed()) {
+                this.wake(); // (one suspended in a mode that allowed it)
+                return;
+            }
+            if (this.active > 0) {
+                return;
+            }
+            this.timer = setTimeout(() => {
+                if (this.active === 0 && this.allowed() && this.ctx.state === 'running' && !audioMuted && lifecycleState !== 'paused') {
+                    this.suspended = true;
+                    void this.ctx.suspend().catch(() => {});
+                }
+            }, AUDIO_IDLE_MS);
+        },
+
+        // (native's unmute and the lifecycle's resume: a context that ran on through them sends no statechange, and a
+        // timer that fired meanwhile did nothing)
+        rearm() {
+            if (this.ctx && this.ctx.state === 'running' && !this.suspended) {
+                this.arm();
+            }
+        },
+
+        // (resumed whatever its state says now: a suspend still under way when a source starts reports 'running' until it
+        // is done, and a resume asked meanwhile runs after it)
+        wake() {
+            if (this.suspended && !audioMuted && lifecycleState !== 'paused') {
+                this.suspended = false;
+                void this.ctx.resume().catch(() => {});
+            }
+            if (this.allowed()) {
+                this.arm();
+            }
+        }
+    };
+
     function setAudioMuted(muted) {
         audioMuted = muted === true;
         try {
             holdAudioMuted();
             if (!audioMuted) {
                 resumeAudio();
+                audioIdle.rearm();
             }
         } catch {
             // audio is best-effort
@@ -1143,6 +1323,7 @@
                 lifecycleState = 'running';
                 thawClientTimers();
                 resumeAudio();
+                audioIdle.rearm();
                 const reply = await engineRequest('resume', 4000);
                 return lifecycleResult(reply);
             }
@@ -2525,6 +2706,10 @@
         context: '',
         user: 'Your friend Zezima says: yo whats up'
     });
+    // lm.warm: a load under this is quick (about 1.3 s on an iPhone 13 mini, 1.2-1.8 s on the Android emulator; the first
+    // one with Metal's shaders still to prepare about 15 s); a chat start's warm-up is asked again after this at most
+    const LM_QUICK_LOAD_MS = 5000;
+    const LM_CHAT_WARM_MS = 10000;
 
     function lmStatusOf(raw) {
         const local = raw?.local ?? {};
@@ -2538,7 +2723,9 @@
                 reason: typeof local.reason === 'string' ? local.reason : null,
                 // whether the model writes a short note before its reply: 'never', 'always', or 'option' (the request's
                 // think decides: Settings › Bot chat › Think first)
-                think: ['never', 'always', 'option'].includes(local.think) ? local.think : 'never'
+                think: ['never', 'always', 'option'].includes(local.think) ? local.think : 'never',
+                // how long its last load took on this install, app version and system version (ms), or null: none yet
+                lastLoadMs: Number(local.lastLoadMs) > 0 ? Number(local.lastLoadMs) : null
             },
             online: {
                 keySet: online.keySet === true,
@@ -2552,6 +2739,7 @@
     const lm = {
         status: lmStatusOf(window.LostCityNative?.lm),
         engineBots: false, // the engine runs the bots (engine-bots.js): the only one that asks
+        chatWarmAt: -Infinity, // when a chat start last asked native to load the model (warm)
         pending: new Map(), // id -> { sent, timer }: requests native has not answered yet
         testSeq: 0,
         tests: new Map(), // (negative ids) the Bot chat page's Test -> resolve
@@ -2572,14 +2760,29 @@
         },
 
         // In the world with the bots and the model in the app chosen (or Claude online with no key, which then answers with
-        // it): native loads it now, in the background (about 1 s; once after an install, about 15 s), so the first reply
-        // does not wait for it. (With a key Claude answers; the model in the app is only its fallback, loaded if needed.)
-        warm() {
+        // it): native loads it in the background (about 1 s), so the first reply does not wait for it. (With a key Claude
+        // answers; the model in the app is only its fallback, loaded if needed.)
+        // - 'chat': the player starts to type something a bot may answer (startsToChat): the model loads then, if it is
+        //   not in memory (a warm-up of a loaded model would only put its idle unload off).
+        // - 'world': entering the world, or choosing the model there: only until a load here has been quick (the status's
+        //   lastLoadMs under LM_QUICK_LOAD_MS). The first load after an install, an app update or a system update takes
+        //   about 15 s on an iPhone, while Metal prepares the model's shaders: that one starts as soon as it can.
+        warm(on) {
             const mode = settings.botChat;
             const uses = mode === 'local' || (mode === 'online' && !this.status.online.keySet);
-            if (isNative && this.engineBots && this.status.local.available && uses && isInGame(client())) {
-                postNative({ type: 'lm-warm' });
+            if (!isNative || !this.engineBots || !this.status.local.available || !uses || !isInGame(client())) {
+                return;
             }
+            if (on === 'chat') {
+                // (asked once while it loads: every key would ask again)
+                if (this.status.local.loaded || performance.now() - this.chatWarmAt < LM_CHAT_WARM_MS) {
+                    return;
+                }
+                this.chatWarmAt = performance.now();
+            } else if (this.status.local.lastLoadMs !== null && this.status.local.lastLoadMs < LM_QUICK_LOAD_MS) {
+                return;
+            }
+            postNative({ type: 'lm-warm' });
         },
 
         toEngine(reply) {
@@ -2864,7 +3067,7 @@
                     persistSettings();
                     if (group.dataset.setting === 'botChat') {
                         lm.sendMode(); // (at once: no restart)
-                        lm.warm();
+                        lm.warm('world');
                         botChat.render();
                     }
                 });
@@ -2923,6 +3126,23 @@
     const AUTOSAVE_MS = 2 * 60 * 1000;
     let lastAutosave = performance.now();
 
+    // While the loader shows, it is checked every LOADER_WATCH_MS as well as by the watcher, so the title shows as soon
+    // as it and the world are ready (the watcher's 200 ms alone left the loader up to 200 ms longer).
+    const LOADER_WATCH_MS = 50;
+
+    function watchLoader() {
+        const c = client();
+        if (!c || loadingEl.hidden || loadingEl.classList.contains('fade')) {
+            return;
+        }
+        loaderProgress.client = Math.max(loaderProgress.client, 0.5 + 0.5 * ((Number(c.lastProgressPercent) || 0) / 100));
+        showLoaderProgress();
+        // (a client that failed to load: its own error screen shows at once)
+        if (titleReady(c) || clientFailed(c) || runMs > LOADER_TIMEOUT_MS) {
+            hideLoading();
+        }
+    }
+
     function watchClient() {
         const c = client();
         if (!c) {
@@ -2931,14 +3151,10 @@
         const now = performance.now();
         runMs += Math.min(now - lastWatch, 1000); // (a longer gap: the page was not running)
         lastWatch = now;
-        if (!loadingEl.hidden && !loadingEl.classList.contains('fade')) {
-            loaderProgress.client = Math.max(loaderProgress.client, 0.5 + 0.5 * ((Number(c.lastProgressPercent) || 0) / 100));
-            showLoaderProgress();
-            // (a client that failed to load: its own error screen shows at once)
-            if (titleReady(c) || clientFailed(c) || runMs > LOADER_TIMEOUT_MS) {
-                hideLoading();
-            }
+        if (globalThis.__LC_BZIP2__ && (Number(c.lastProgressPercent) >= 100 || clientFailed(c))) {
+            delete globalThis.__LC_BZIP2__; // (the client has loaded its archives: libbzip2's instance and memory can go)
         }
+        watchLoader();
         if (bootNotice && engineState === 'ready' && loadingEl.hidden) {
             showNotice(bootNotice, 6000);
             bootNotice = null;
@@ -2963,7 +3179,7 @@
             lastPhase = phase;
             postNative({ type: 'status', phase });
             if (phase === 'ingame') {
-                lm.warm(); // (the first reply need not wait for the model's load)
+                lm.warm('world'); // (the first load after an install is the slow one: lm.warm)
             }
             layout();
             if (phase === 'title') {
@@ -3035,7 +3251,11 @@
         postNative({ type: 'loader-drawn' });
     }
 
+    // The client's cache (OnDemand's files: __LC_CACHE__), and libbzip2 for its jag archives while it loads
+    // (__LC_BZIP2__, bzip2.js: none without WebAssembly, and the client decodes them itself). Both are there before the
+    // Client is made.
     async function loadClientCache() {
+        const decoder = window.__lcBzip2?.load('engine/bzip2.wasm') ?? null;
         const names = ['main_file_cache.dat', 'main_file_cache.idx0', 'main_file_cache.idx1', 'main_file_cache.idx2', 'main_file_cache.idx3', 'main_file_cache.idx4'];
         const files = await Promise.all(
             names.map(async name => {
@@ -3047,6 +3267,31 @@
             })
         );
         globalThis.__LC_CACHE__ = { dat: files[0], idx: files.slice(1) };
+        const bzip2 = await decoder;
+        if (bzip2) {
+            globalThis.__LC_BZIP2__ = bzip2;
+        }
+    }
+
+    // What boot starts first, before the page builds its own controls: the world's boot in its worker, the client's
+    // cache and client.js, so they load while the page lays itself out (client.js reads __LC_CACHE__ only once the Client
+    // exists; the worker's messages wait for boot's first await, after all of the page's init). Null on a browser without
+    // the iterator helpers the engine needs (boot says so, with nothing started); else { engineError } when the worker
+    // could not be made, or { cache, client } to await (their failures are reported there).
+    function startLoading() {
+        if (typeof Iterator !== 'function' || typeof Iterator.prototype?.map !== 'function') {
+            return null;
+        }
+        try {
+            startEngine();
+        } catch (err) {
+            return { engineError: err };
+        }
+        const cache = loadClientCache();
+        const clientModule = import('./client/client.js');
+        cache.catch(() => {});
+        clientModule.catch(() => {});
+        return { cache, client: clientModule };
     }
 
     async function boot() {
@@ -3064,6 +3309,7 @@
         }
         checkStoredSettings();
         bootSettings = { members: settings.members, xpRate: settings.xpRate, lowMemory: settings.lowMemory, bots: settings.bots, jmod: settings.jmod };
+        const loading = startLoading();
         try {
             worldMap = window.__lcWorldMap?.init({ client, haptic, bindTapButton }) ?? null;
         } catch (err) {
@@ -3121,26 +3367,25 @@
         showLoaderProgress();
         // The engine's scripts use the iterator helpers (Chrome 122, Safari 18.4): an older WebView would fail somewhere
         // inside the world's start, so say plainly what to update instead (native checks the version too, on Android
-        // before it loads the page).
-        if (typeof Iterator !== 'function' || typeof Iterator.prototype?.map !== 'function') {
+        // before it loads the page). startLoading started nothing then.
+        if (!loading) {
             const version = /Chrome\/(\d+)/.exec(navigator.userAgent)?.[1] ?? null;
             console.error(`[host] no iterator helpers (${navigator.userAgent}): the engine cannot run here`);
             showError(isNative ? T.tooOld(version) : 'This browser is too old for the game: it needs JavaScript\'s iterator helpers (Chrome 122, Safari 18.4 or later).');
             postNative({ type: 'status', phase: 'error', detail: 'webview too old' });
             return;
         }
-        try {
-            startEngine();
-        } catch (err) {
-            engineFailed(`The game engine could not be started.\n${err?.message ?? err}`);
+        if (loading.engineError) {
+            engineFailed(`The game engine could not be started.\n${loading.engineError?.message ?? loading.engineError}`);
             return;
         }
 
         try {
-            await loadClientCache();
+            await loading.cache;
             loaderProgress.client = 0.25;
             showLoaderProgress();
-            const { Client } = await import('./client/client.js');
+            const { Client } = await loading.client;
+            audioIdle.install(); // (client.js has made its AudioContext: nothing has played on it yet)
             loaderProgress.client = 0.4;
             showLoaderProgress();
             window.__client = new Client(NODE_ID, bootSettings.lowMemory, bootSettings.members);
@@ -3152,6 +3397,13 @@
 
         applySettings();
         setInterval(watchClient, 200);
+        const loaderWatch = setInterval(() => {
+            if (loadingEl.hidden || loadingEl.classList.contains('fade')) {
+                clearInterval(loaderWatch);
+                return;
+            }
+            watchLoader();
+        }, LOADER_WATCH_MS);
     }
 
     if (document.readyState === 'loading') {

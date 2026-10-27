@@ -227,7 +227,7 @@ until the app is back)", "crash: a real renderer crash in front is noticed (cras
 | The launch burst (6 screenshots over 1.5 s: launch screen → black → cover) | **drive** (the same burst); `shell:cover` films the launch screen frame by frame and checks it has no icon |
 | The mock API's requests all well-formed (a malformed one fails the run) | **drive** (the same rule), `lm:model`, `inst BotChatDeviceTest.claudeOnlineThroughTheMock` |
 | The Documents tree and the app's logs copied at the end | **drive** (`run-as … find files/Documents`, the app's log file pulled) |
-| `web/test/native/lm-harness.mjs` (the Swift chat model on the Mac: 49 checks) | `node android/test/native/lm-harness.mjs`: the same 49 + A1-A5 on the Kotlin port |
+| `web/test/native/lm-harness.mjs` (the Swift chat model on the Mac: 51 checks) | `node android/test/native/lm-harness.mjs`: the same 51 + A1-A5 on the Kotlin port |
 
 ## Not covered on Android
 

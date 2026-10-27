@@ -32,6 +32,7 @@ import { coinsOwned } from '#/engine/bot/BotNeeds.js';
 import { setBankStopHook } from '#/engine/bot/tasks/BotTaskBase.js';
 import { scheduleInTicks } from '#/engine/bot/port/BotSchedule.js';
 import { alchStats } from '#/engine/bot/tasks/AlchTask.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** play ticks between two stints (40-90 minutes), and a stint's length (3-9 minutes) */
 export const ALCH_GAP_TICKS: [number, number] = [4000, 9000];
@@ -102,7 +103,7 @@ const CENSUS_TILES = 15;
 /** (variety round 1, F) the bots (never a human) within CENSUS_TILES of (x, z) on the ground floor */
 function botsAt(x: number, z: number): number {
     let n = 0;
-    for (const p of World.playerLoop.all()) if (p.is_bot === true && p.level === 0 && Math.max(Math.abs(p.x - x), Math.abs(p.z - z)) <= CENSUS_TILES) n++;
+    for (const p of worldPlayers()) if (p.is_bot === true && p.level === 0 && Math.max(Math.abs(p.x - x), Math.abs(p.z - z)) <= CENSUS_TILES) n++;
     return n;
 }
 

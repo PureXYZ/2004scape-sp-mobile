@@ -15,6 +15,7 @@ import { PlayerStat } from '#/engine/entity/PlayerStat.js';
 import ServerTriggerType from '#/engine/script/ServerTriggerType.js';
 import { isMultiCombat } from '#/engine/bot/port/BotContent.js';
 import { pkFightStats } from '#/engine/bot/port/BotPkFight.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** 274's single-way lock: no third player on one hit in the last 8 ticks (pvp_combat.rs2) */
 export const PJ_LOCK = 8;
@@ -85,7 +86,7 @@ export class PkPjWatch {
 export function pkFightToWatch(bot: Player, radius: number, may: (p: Player) => boolean): PkPjWatch | null {
     let best: PkPjWatch | null = null;
     let bestDist = radius + 1;
-    for (const p of World.playerLoop.all() as Iterable<Player>) {
+    for (const p of worldPlayers()) {
         if (p === bot || p.slot === -1 || p.level !== bot.level) continue;
         const q = p.target;
         if (!(q instanceof Player) || q === bot || q.slot === -1 || !attacks(p, q)) continue;

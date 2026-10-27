@@ -152,7 +152,7 @@ These are compiled into the web bundle (`build/Game`) that both apps ship.
 | [TinySoundFont](https://github.com/schellingb/TinySoundFont) `tsf.h`, inside tinymidipcm | as in tinymidipcm | MIT | Copyright (C) 2017, 2018 Bernhard Schelling; based on SFZero, Copyright (C) 2012 Steve Folta | client |
 | TinyMidiLoader `tml.h` (part of TinySoundFont), inside tinymidipcm | as in tinymidipcm | zlib | Copyright (C) 2017, 2018, 2020 Bernhard Schelling | client |
 | [Fix iOS AudioContext](https://gist.github.com/kus/3f01d60569eeadefe3a1), in Client-TS `src/3rdparty/audio.js` | as in Client-TS | MIT | Copyright (c) Blake Kus | client |
-| [bzip2 / libbzip2](https://sourceware.org/bzip2/) 1.0.8, as WebAssembly (`engine/bzip2.wasm`, Engine-TS's build via [bzip2-wasm](https://github.com/misterhat/bzip2-wasm)) | 1.0.8 | bzip2 licence | Copyright (C) 1996-2019 Julian R Seward | engine worker |
+| [bzip2 / libbzip2](https://sourceware.org/bzip2/) 1.0.8, as WebAssembly (`engine/bzip2.wasm`, Engine-TS's build via [bzip2-wasm](https://github.com/misterhat/bzip2-wasm)) | 1.0.8 | bzip2 licence | Copyright (C) 1996-2019 Julian R Seward | engine worker, client, world map (the page's `bzip2.js`) |
 | bzip2 / libbzip2 1.0.8's decoder, ported to TypeScript (`web/engine/src/shims/bunzip2.ts`) | 1.0.8 | bzip2 licence | Copyright (C) 1996-2019 Julian R Seward | engine worker |
 
 The TypeScript port of the bzip2 decoder is an altered version of libbzip2's `decompress.c` and `bzlib.c`: it decodes

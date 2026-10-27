@@ -12,10 +12,14 @@ import { IOS, SERVER } from './fixture.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../../src');
 
-/** @param contents TypeScript entry source (imports resolve from web/engine/src). Returns the imported module. */
-export async function importBundled(name, contents, engineDir = path.join(SERVER, 'engine')) {
+/**
+ * @param contents TypeScript entry source (imports resolve from web/engine/src). Returns the imported module.
+ * @param plugins esbuild plugins that run before the engine build's own (e.g. to stub a module's imports).
+ */
+export async function importBundled(name, contents, engineDir = path.join(SERVER, 'engine'), plugins = []) {
     const outfile = path.join(IOS, 'build/tmp/engine/unit', `${name}.mjs`);
     fs.mkdirSync(path.dirname(outfile), { recursive: true });
-    await esbuild.build({ ...bundleOptions(engineDir), stdin: { contents, resolveDir: SRC, loader: 'ts', sourcefile: `${name}.ts` }, outfile, minify: false });
+    const options = bundleOptions(engineDir);
+    await esbuild.build({ ...options, plugins: [...plugins, ...options.plugins], stdin: { contents, resolveDir: SRC, loader: 'ts', sourcefile: `${name}.ts` }, outfile, minify: false });
     return import(pathToFileURL(outfile).href + `?t=${Date.now()}`);
 }

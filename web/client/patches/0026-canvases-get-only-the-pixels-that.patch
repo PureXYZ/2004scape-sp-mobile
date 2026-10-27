@@ -1,0 +1,263 @@
+ios: canvases get only the pixels that changed
+
+Every frame the client converted the whole world (812x375 at the HUD's size) and the minimap to RGBA and sent them
+with putImageData, about 100 pushes and 65 MB a second, though with a still camera 0.3-0.5 % of the world's pixels
+change and the minimap is identical in about two frames of three. In WebKit each push costs the GPU process a
+conversion and an IOSurface. A PixMap that owns its canvas (the mobile layout's surfaces, patch 11) now keeps the frame
+it last sent (`shown`): draw() compares row by row, converts only the changed pixels and sends their bounding rect
+(putImageData's dirty rect), or nothing when no pixel changed. The title screen's PixMaps do the same once the client
+has loaded (`changesOnly`): each owns its part of the classic canvas, the login box is drawn every frame and mostly
+unchanged, the flames change in places.
+
+The canvas still ends each draw with exactly the frame's pixels. The whole frame is sent on a PixMap's first draw,
+after a retarget or a move, every 100th draw, and after PixMap.invalidate(): on visibilitychange and pageshow (WebKit
+may drop a hidden page's canvas buffers), when a canvas's context is restored (blank again), at a full redraw
+(redrawFrame), and when the canvas is drawn directly (the plain loading bar, the error screen, a resize).
+
+On Android (lcHost.platform 'android': Chromium's WebView) a PixMap sends its whole frame when any of its pixels
+changed, as upstream sends every frame, and nothing when none did: the rect made in-game frames stall there. On the
+Android emulator (3 runs each), frames of 100 ms or more a minute, rect / whole frames when changed / upstream: Lumbridge
+standing 159 / 18 / 50, walking 186 / 30 / 64; Varrock West with 500 bots standing 152 / 30 / 42, walking 170 / 49 /
+90. iOS, and a page without an app (the desktop tests), sends the rect.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index ceaa3ec..00aa25b 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -412,6 +412,7 @@ export class Client extends GameShell {
+     private imageTitle6: PixMap | null = null;
+     private imageTitle7: PixMap | null = null;
+     private imageTitle8: PixMap | null = null;
++    private titleChanges: boolean = false; // custom (ios): the title screen's PixMaps send only their changes (see sendTitleChanges)
+     private imageTitlebox: Pix8 | null = null;
+     private imageTitlebutton: Pix8 | null = null;
+     private loginscreen: number = 0;
+@@ -764,6 +765,7 @@ export class Client extends GameShell {
+     }
+ 
+     private drawError(): void {
++        PixMap.invalidate(); // custom (ios): drawn on the canvas directly
+         canvas2d.fillStyle = 'black';
+         canvas2d.fillRect(0, 0, this.sWid, this.sHei);
+ 
+@@ -1399,6 +1401,9 @@ export class Client extends GameShell {
+                     this.mouseTracking.cycle();
+                 }, 50);
+             }
++
++            this.titleChanges = true; // custom (ios)
++            this.sendTitleChanges();
+         } catch (e) {
+             console.error(e);
+ 
+@@ -1472,6 +1477,10 @@ export class Client extends GameShell {
+ 
+         Client.drawCycle++;
+ 
++        if (this.redrawFrame) {
++            PixMap.invalidate(); // custom (ios): a full redraw sends whole frames (PixMap.changesOnly)
++        }
++
+         if (!this.ingame) {
+             await this.titleScreenDraw();
+         } else {
+@@ -1831,9 +1840,26 @@ export class Client extends GameShell {
+             this.loadTitleImages();
+         }
+ 
++        this.sendTitleChanges(); // custom (ios)
+         this.redrawFrame = true;
+     }
+ 
++    // custom (ios): once the client has loaded, only the title screen's PixMaps draw on the classic canvas while it
++    // shows, each in a part of its own (drawError calls PixMap.invalidate; the port's MobileKeyboard draws nothing), so
++    // they send only the pixels that changed: the login box is drawn every frame and mostly unchanged, the flames change
++    // in places (PixMap.changesOnly)
++    private sendTitleChanges(): void {
++        if (!this.titleChanges) {
++            return;
++        }
++
++        for (const area of [this.imageTitle0, this.imageTitle1, this.imageTitle2, this.imageTitle3, this.imageTitle4, this.imageTitle5, this.imageTitle6, this.imageTitle7, this.imageTitle8]) {
++            if (area) {
++                area.changesOnly = true;
++            }
++        }
++    }
++
+     private async loadTitleBackground(): Promise<void> {
+         if (!this.title) {
+             return;
+diff --git a/src/client/GameShell.ts b/src/client/GameShell.ts
+index c2d6ee7..348af3a 100644
+--- a/src/client/GameShell.ts
++++ b/src/client/GameShell.ts
+@@ -121,6 +121,7 @@ export default abstract class GameShell {
+     }
+ 
+     protected resize(width: number, height: number) {
++        PixMap.invalidate(); // custom (ios): the canvas is cleared
+         canvas.width = width;
+         canvas.height = height;
+         this.drawArea = new PixMap(width, height);
+@@ -323,6 +324,8 @@ export default abstract class GameShell {
+         const width: number = this.sWid;
+         const height: number = this.sHei;
+ 
++        PixMap.invalidate(); // custom (ios): drawn on the canvas directly
++
+         if (this.fullredraw) {
+             canvas2d.fillStyle = 'black';
+             canvas2d.fillRect(0, 0, width, height);
+diff --git a/src/graphics/PixMap.ts b/src/graphics/PixMap.ts
+index 9e26be1..03e2fc6 100644
+--- a/src/graphics/PixMap.ts
++++ b/src/graphics/PixMap.ts
+@@ -1,3 +1,4 @@
++import { lcPlatform } from '#/client/LcHost.js'; // custom (ios)
+ import { canvas2d } from '#/graphics/Canvas.js';
+ import Pix2D from '#/graphics/Pix2D.js';
+ 
+@@ -13,6 +14,33 @@ export default class PixMap {
+     // the canvas origin, wherever the classic layout would have put it
+     private own: boolean = false;
+ 
++    // custom (ios): draw() sends only the pixels that changed since the frame the canvas shows (`shown`), as one
++    // putImageData of their bounding rect, or nothing when none did; unchanged pixels cost a compare instead of a
++    // conversion, and the browser converts and uploads only the rect. That needs the canvas to still show `shown`, so
++    // it is for a canvas of its own (`own`) and for a part of the classic canvas that only this PixMap draws
++    // (`changesOnly`: the title screen's PixMaps once the client has loaded). The whole frame is sent on the first
++    // draw, after a retarget or a move, every FULL_EVERY-th draw, and after PixMap.invalidate(): the page shown again
++    // (WebKit may drop a hidden page's canvas buffers), a canvas's context restored (it comes back blank), a full
++    // redraw (redrawFrame), and anything drawing on the canvas directly (the plain loading bar, the error screen).
++    // Between draws `paint` holds `shown` converted, so a rect never sends a stale pixel.
++    // On Android (lcPlatform 'android': Chromium's WebView) a frame with a changed pixel is sent whole, as upstream sends
++    // every frame, and one without is not sent: on the Android emulator the rects made in-game frames of 100 ms or more
++    // come 2-3.6 times as often as upstream's whole frame every frame does, these whole frames about half as often. iOS,
++    // and a page without an app (desktop tests), sends the rect.
++    changesOnly: boolean = false;
++    private shown: Int32Array | null = null;
++    private shownX: number = 0;
++    private shownY: number = 0;
++    private shownGeneration: number = -1;
++    private drawsSinceWhole: number = 0;
++    private static generation: number = 0;
++    private static readonly FULL_EVERY: number = 100;
++
++    // custom (ios): every PixMap sends its whole frame at its next draw (see changesOnly)
++    static invalidate(): void {
++        PixMap.generation++;
++    }
++
+     constructor(width: number, height: number, ctx: CanvasRenderingContext2D = canvas2d, own: boolean = false) {
+         this.width = width;
+         this.height = height;
+@@ -35,13 +63,96 @@ export default class PixMap {
+     retarget(ctx: CanvasRenderingContext2D = canvas2d, own: boolean = false): void {
+         this.ctx = ctx;
+         this.own = own;
++        this.shownGeneration = -1; // custom (ios): the next draw sends the whole frame
+     }
+ 
+     draw(x: number, y: number): void {
++        if (this.own || this.changesOnly) {
++            this.drawChanges(this.own ? 0 : x, this.own ? 0 : y); // custom (ios)
++            return;
++        }
++
+         this.prepareCanvas();
+         this.ctx.putImageData(this.img, this.own ? 0 : x, this.own ? 0 : y);
+     }
+ 
++    // custom (ios): see changesOnly
++    private drawChanges(x: number, y: number): void {
++        const data: Int32Array = this.data;
++
++        if (this.shownGeneration !== PixMap.generation || x !== this.shownX || y !== this.shownY || ++this.drawsSinceWhole >= PixMap.FULL_EVERY) {
++            this.prepareCanvas();
++            this.ctx.putImageData(this.img, x, y);
++
++            this.shown ??= new Int32Array(data.length);
++            this.shown.set(data);
++            this.shownX = x;
++            this.shownY = y;
++            this.shownGeneration = PixMap.generation;
++            this.drawsSinceWhole = 0;
++            return;
++        }
++
++        const shown: Int32Array = this.shown!;
++        const paint: Uint32Array = this.paint;
++        const width: number = this.width;
++        const height: number = this.height;
++
++        // the changed pixels' bounding rect, rows top..bottom and columns left..right
++        let top: number = -1;
++        let bottom: number = -1;
++        let left: number = width;
++        let right: number = -1;
++
++        let i: number = 0;
++        for (let row: number = 0; row < height; row++) {
++            const start: number = i;
++            const end: number = start + width;
++
++            while (i < end && data[i] === shown[i]) {
++                i++;
++            }
++
++            if (i === end) {
++                continue;
++            }
++
++            if (top === -1) {
++                top = row;
++            }
++            bottom = row;
++
++            if (i - start < left) {
++                left = i - start;
++            }
++
++            let last: number = i;
++            for (; i < end; i++) {
++                const pixel: number = data[i];
++
++                if (pixel !== shown[i]) {
++                    shown[i] = pixel;
++                    paint[i] = ((pixel & 0xff0000) >> 16) | (pixel & 0xff00) | ((pixel & 0xff) << 16) | 0xff000000;
++                    last = i;
++                }
++            }
++
++            if (last - start > right) {
++                right = last - start;
++            }
++        }
++
++        if (top === -1) {
++            return;
++        }
++
++        if (lcPlatform() === 'android') {
++            this.ctx.putImageData(this.img, x, y);
++        } else {
++            this.ctx.putImageData(this.img, x, y, left, top, right - left + 1, bottom - top + 1);
++        }
++    }
++
+     private prepareCanvas(): void {
+         const data = this.data;
+         const paint = this.paint;
+@@ -68,3 +179,11 @@ export default class PixMap {
+         }
+     }
+ }
++
++// custom (ios): a page shown again may have lost its canvases' buffers (WebKit drops a hidden page's), and a canvas
++// whose context was restored is blank (Chrome; the event does not bubble, so it is caught on its way down)
++if (typeof document !== 'undefined') {
++    document.addEventListener('visibilitychange', PixMap.invalidate);
++    document.addEventListener('contextrestored', PixMap.invalidate, true);
++    window.addEventListener('pageshow', PixMap.invalidate);
++}

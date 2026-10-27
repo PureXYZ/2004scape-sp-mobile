@@ -19,7 +19,6 @@
 // its stall, a bot hanging out), at a low rate: each hub about every 50 minutes, its area's gap shared with the
 // exchanges near a human (one map square, one exchange at a time); the regular's opening line is one of its persona's
 // (port/BotChatter.countAsChatter: its talk to nobody waits a quiet after it).
-import WordEnc from '#/cache/wordenc/WordEnc.js';
 import { isClientConnected } from '#/engine/entity/NetworkPlayer.js';
 import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
@@ -38,6 +37,8 @@ import practicesJson from '../../data/practices.json';
 // (the variety work, round 2, Track S2: P4's topic threads and the pairs' memory; P5's cap on one voice)
 import { depthFor, drawThread, inThread, notePairTopic, pairTalkedOf } from '#/engine/bot/port/BotThreads.js';
 import { voiceFree, voiceRoom } from '#/engine/bot/port/BotVoice.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+import { botFilter } from '#/engine/bot/port/BotFilter.js';
 
 interface Turn {
     by: 'a' | 'b';
@@ -136,7 +137,7 @@ const lineHeard = new Map<string, number>();
 export function tickStage(): void {
     const now = World.currentTick;
     if (now % STAGE_EVERY !== 0) return;
-    for (const human of World.playerLoop.all()) {
+    for (const human of worldPlayers()) {
         if (human.is_bot || human.slot === -1 || !isClientConnected(human)) continue;
         const current = running.get(human);
         if (current && now - current.since < STALE_TICKS) continue;
@@ -296,9 +297,9 @@ function draw(practice: Practice, a: Player, b: Player, now: number): { speaker:
         let text = '';
         for (let i = 0; i < 4; i++) {
             text = fill(pick(pool), slots);
-            if (now - (lineHeard.get(meaningKey(text)) ?? -Infinity) >= LINE_REPEAT_TICKS && WordEnc.filter(text) === text) break;
+            if (now - (lineHeard.get(meaningKey(text)) ?? -Infinity) >= LINE_REPEAT_TICKS && botFilter(text) === text) break;
         }
-        if (text.includes('{') || WordEnc.filter(text) !== text) return null;
+        if (text.includes('{') || botFilter(text) !== text) return null;
         out.push({ speaker, to, text });
     }
     return out.length >= 2 ? out : null;

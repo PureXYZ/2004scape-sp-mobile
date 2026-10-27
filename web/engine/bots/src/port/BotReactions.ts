@@ -43,6 +43,7 @@ import { NpcStat } from '#/engine/entity/NpcStat.js';
 import { PlayerStat } from '#/engine/entity/PlayerStat.js';
 import { wildernessLevelAt } from '#/engine/bot/port/BotContent.js';
 import { reactToHuman } from '#/engine/bot/port/BotWitness.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** gz to a human's level-up ({name}: theirs, said in about one in five by the persona's echo) */
 const GZ = ['gz', 'gz m8', 'gratz', 'grats', 'gz!', 'gj', 'nice', 'congrats', 'gz {name}', 'gratz {name}'];
@@ -103,7 +104,7 @@ export function tickReactions(): void {
     const now = World.currentTick;
     if (now % HUMANS_EVERY === 0 || humans.some(h => h.slot === -1)) {
         humans = [];
-        for (const p of World.playerLoop.all()) if (!p.is_bot && p.slot !== -1 && isClientConnected(p)) humans.push(p);
+        for (const p of worldPlayers()) if (!p.is_bot && p.slot !== -1 && isClientConnected(p)) humans.push(p);
     }
     for (const human of humans) {
         if (human.slot === -1) continue;

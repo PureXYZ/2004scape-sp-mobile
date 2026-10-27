@@ -6,7 +6,8 @@
 //   node scripts/build-web.mjs            # release build (minified)
 //   node scripts/build-web.mjs --debug    # unminified + sourcemaps + console output kept
 //   node scripts/build-web.mjs --skip-pack  # don't run the engine's (incremental) packer, unless data/pack is missing
-//   node scripts/build-web.mjs --autotest   # also inject web/test/autotest.js (in-app test run, see web/test/app-test.mjs)
+//   node scripts/build-web.mjs --autotest   # also inject web/test/autotest.js (in-app test run, see web/test/app-test.mjs),
+//                                           # and the engine's measurements for app-test --soak (web/engine/src/autotest)
 //   node scripts/build-web.mjs --out <dir>  # build somewhere else than build/Game (e.g. to test beside another build)
 //   node scripts/build-web.mjs --no-bots    # without the bots (docs/BOTS.md): engine.js only, as before them
 //   node scripts/build-web.mjs --rebuild-bot-scripts   # recompile the bots' content-script overlay (else cached)
@@ -186,11 +187,11 @@ step(`Cleaning ${path.relative(IOS, OUT)}`);
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
 
-step(`Building engine worker (${debug ? 'debug' : 'release'}${bots ? ', with the bots bundle' : ', without bots'})`);
+step(`Building engine worker (${debug ? 'debug' : 'release'}${bots ? ', with the bots bundle' : ', without bots'}${autotest ? ', with the test build\'s measurements' : ''})`);
 const { buildEngine } = await import('../web/engine/build.mjs');
 let engineInfo;
 try {
-    engineInfo = await buildEngine({ out: OUT, debug, engineDir: ENGINE, contentDir: CONTENT, bots: bots ? { overlay, ...(BOTS_LIB ? { lib: BOTS_LIB } : {}) } : false });
+    engineInfo = await buildEngine({ out: OUT, debug, engineDir: ENGINE, contentDir: CONTENT, bots: bots ? { overlay, ...(BOTS_LIB ? { lib: BOTS_LIB } : {}) } : false, autotest });
 } catch (e) {
     fail(`the engine build: ${e instanceof Error ? e.message : e}${bots ? '\n(build without the bots: --no-bots)' : ''}`);
 }
@@ -320,6 +321,24 @@ if (bots) {
     const engineJs = fs.readFileSync(path.join(OUT, 'engine/engine.js'), 'utf8');
     if (['LCBOTS01', '[bots]', 'P_ISBOT'].some(m => engineJs.includes(m))) {
         fail('engine/engine.js contains bot code: it must stay the vanilla engine (docs/BOTS.md §2)');
+    }
+}
+// a normal build has no test code: no autotest.js, and no page or engine script that names the test build's measurements
+// (web/engine/build.mjs checks the engine's bundles; this checks every script and page that ships)
+if (!autotest) {
+    const { PERF_MARKER } = await import('../web/engine/build.mjs');
+    const scripts = [];
+    const walkScripts = d => {
+        for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+            const p = path.join(d, entry.name);
+            if (entry.isDirectory()) walkScripts(p);
+            else if (/\.(m?js|html)$/.test(entry.name)) scripts.push(p);
+        }
+    };
+    walkScripts(OUT);
+    const named = scripts.filter(p => path.basename(p) === 'autotest.js' || fs.readFileSync(p, 'utf8').includes(PERF_MARKER));
+    if (named.length) {
+        fail(`a normal build has test code: ${named.map(p => path.relative(OUT, p)).join(', ')}`);
     }
 }
 // nothing in a release build may name the builder's folders (the script compiler's absolute source paths did;

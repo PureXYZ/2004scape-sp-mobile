@@ -18,6 +18,7 @@ import MessagePublicHandler from '#/network/game/client/handler/MessagePublicHan
 import type MessagePublic from '#/network/game/client/model/MessagePublic.js';
 import { fromBase37 } from '#/util/JString.js';
 
+import { beginBotTick, endBotTick } from './routing.js';
 import { botError, bots, botsActive, disableBots } from './state.js';
 
 type WorldHooks = {
@@ -70,7 +71,12 @@ export function installHooks(): void {
         if (!botsActive()) return;
         const t0 = performance.now();
         try {
-            BotManager.tick();
+            beginBotTick();
+            try {
+                BotManager.tick();
+            } finally {
+                endBotTick();
+            }
             bots.counters.botTicks++;
             failuresInARow = 0;
         } catch (e) {

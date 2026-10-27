@@ -82,6 +82,22 @@ export function errno(code: string, syscall: string, path: string): Error {
     return e;
 }
 
+// An evicted file's bytes are freed at once, not at the worker's next full collection: they were preloaded, so by the
+// release they are old and the frequent young collections never take them (the map zip alone is 15 MB). Nothing else
+// holds them by then (the reads that needed them are over: test/vfs-release.test.mjs), and a later read fetches the
+// file again. ArrayBuffer.prototype.transfer(0) detaches the buffer and frees its contents (JavaScriptCore from iOS
+// 17.4, V8 from Chrome 114: the iPhone app needs iOS 18.4, an Android WebView older than 114 has none). Without it, for
+// a view of part of a buffer, or a buffer that cannot be detached, the bytes wait for the collector as before.
+function detach(data: Uint8Array) {
+    const buffer = data.buffer as ArrayBuffer & { transfer?: (length: number) => ArrayBuffer };
+    if (data.byteOffset !== 0 || data.byteLength !== buffer.byteLength || typeof buffer.transfer !== 'function') return;
+    try {
+        buffer.transfer(0);
+    } catch {
+        // (not detachable: left to the collector)
+    }
+}
+
 // distinct paths the engine asked for (existence checks and reads); cheap, and lets the tests prove that the
 // staged file set is exactly what the engine uses
 const accessed = new Set<string>();
@@ -196,6 +212,7 @@ export const vfs = {
                 store.files.delete(abs);
                 files++;
                 bytes += f.byteLength;
+                detach(f);
             }
         }
         return { files, bytes };

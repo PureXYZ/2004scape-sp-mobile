@@ -69,6 +69,7 @@ import { logNormal } from '#/engine/bot/port/BotTiming.js';
 import { isMembersWorld } from '#/engine/bot/port/BotWorldRules.js';
 import type { BotTask } from '#/engine/bot/tasks/Index.js';
 import { lampDone, RandomEventTask, responseDue } from '#/engine/bot/port/RandomEventTask.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 // ── the defaults (the spec's "Random events" rows) ───────────────────────────
 
@@ -558,7 +559,7 @@ export function failExitFor(x: number, z: number, level: number): { way: 'ground
 /** the nearest human (not a bot) on the bot's floor: Chebyshev tiles, Infinity for none */
 export function humanDistance(x: number, z: number, level: number): number {
     let best = Infinity;
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p.is_bot === true || p.level !== level) continue;
         const d = Math.max(Math.abs(p.x - x), Math.abs(p.z - z));
         if (d < best) best = d;
@@ -682,7 +683,7 @@ function roll(now: number): void {
     rollStats.rolls++;
     const seen = new Set<Player>();
     const candidates: Player[] = [];
-    for (const human of World.playerLoop.all()) {
+    for (const human of worldPlayers()) {
         if (human.is_bot === true) continue;
         for (const bot of BotManager.activeBots()) {
             if (seen.has(bot) || bot.level !== human.level) continue;

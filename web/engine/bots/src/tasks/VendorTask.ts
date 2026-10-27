@@ -62,7 +62,6 @@
  */
 
 import ObjType from '#/cache/config/ObjType.js';
-import WordEnc from '#/cache/wordenc/WordEnc.js';
 import { Items } from '#/engine/bot/BotKnowledge.js';
 import { tilesInReach } from '#/engine/bot/BotAction.js';
 import {
@@ -90,6 +89,8 @@ import { composeReply, sayTyped } from '#/engine/bot/port/BotChat.js';
 import type { ChatStyle } from '#/engine/bot/port/BotSay.js';
 import { logNormal } from '#/engine/bot/port/BotTiming.js';
 import { freshLine } from '#/engine/bot/port/BotLines.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+import { botFilter } from '#/engine/bot/port/BotFilter.js';
 
 // port: upstream's BUYBACK_RATE (0.7 of its price) is port/BotPrices' buyPrice, at most a shop's price
 const STARTING_VENDOR_COINS = 500_000_000;
@@ -391,7 +392,7 @@ export function vendorAdverts(spec: AdvertSpec): string[] {
         const prices = [priceText(amount, short), `for ${priceText(amount, short)}`, String(amount), `for ${amount}`];
         const line = prices
             .map(p => form.replace('{n}', spec.nick).replace('{c}', countText(spec.count)).replace('{p}', p).replace('{b}', p))
-            .find(l => WordEnc.filter(l) === l);
+            .find(l => botFilter(l) === l);
         if (line !== undefined && !lines.includes(line)) lines.push(line);
     }
     return lines;
@@ -637,7 +638,7 @@ function isSeller(p: Player): boolean {
 }
 /** (variety round 1, also the bankstanders') a player within 15 tiles who is no seller: someone to sell to */
 export function buyerNear(seller: Player): boolean {
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p === seller || p.level !== seller.level || isSeller(p)) continue;
         if (Math.abs(p.x - seller.x) <= BUYER_DISTANCE && Math.abs(p.z - seller.z) <= BUYER_DISTANCE) return true;
     }
@@ -645,7 +646,7 @@ export function buyerNear(seller: Player): boolean {
 }
 /** a neighbouring seller advertised lately (within 6 tiles, in the last 30 ticks) */
 function rivalAdvertised(seller: Player, now: number): boolean {
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p === seller || p.level !== seller.level || Math.abs(p.x - seller.x) > RIVAL_DISTANCE || Math.abs(p.z - seller.z) > RIVAL_DISTANCE) continue;
         const at = lastAdvert.get(p);
         if (at !== undefined && now - at <= RIVAL_TICKS) return true;
@@ -1031,7 +1032,7 @@ export class VendorTask extends BotTask implements TradingTask {
     private _advertLine(player: Player, now: number): string | null {
         const roll = Math.random();
         const fill = (t: string): string => t.replace('{n}', this.nick).replace('{p}', formatGp(this.price)).replace('{c}', String(this.itemCount >= 1000 ? `${Math.floor(this.itemCount / 1000)}k` : this.itemCount >= 100 ? Math.floor(this.itemCount / 100) * 100 : this.itemCount));
-        const clean = (t: string): string | null => (WordEnc.filter(t) === t ? t : null);
+        const clean = (t: string): string | null => (botFilter(t) === t ? t : null);
         if (roll < RIVAL_SHARE && rivalAdvertised(player, now)) return clean(VENDOR_PATTER.rival[randInt(0, VENDOR_PATTER.rival.length - 1)]);
         if (roll < RIVAL_SHARE + PATTER_SHARE) {
             const pool: readonly string[] = this.kind === 'bulk' && this.itemCount >= 20 && Math.random() < 0.3 ? VENDOR_PATTER.bulk : VENDOR_PATTER.still;
@@ -1063,10 +1064,10 @@ export class VendorTask extends BotTask implements TradingTask {
         // (2026-10-18: an auto typer's line retyped at the new price, the drop told by hand once)
         if (this.typerGap !== null) {
             this.typerLine = this._typerLineOf(player);
-            if (WordEnc.filter(told) === told) botSay(player, told, undefined, 'trade');
+            if (botFilter(told) === told) botSay(player, told, undefined, 'trade');
             return;
         }
-        if (WordEnc.filter(told) === told) this.adverts = [told, ...this.adverts];
+        if (botFilter(told) === told) this.adverts = [told, ...this.adverts];
     }
 
     private handleReturnHome(player: Player): void {

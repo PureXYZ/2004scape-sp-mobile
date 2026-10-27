@@ -82,7 +82,6 @@ import { claimStandTile, releaseStandTile, stepToTile } from '#/engine/bot/port/
 import { offStalls } from '#/engine/bot/port/BotHangout.js';
 import { logNormal, reactionTicks, typingTicks } from '#/engine/bot/port/BotTiming.js';
 import { clearTradeTarget } from '#/engine/bot/port/BotTradeScreen.js';
-import WordEnc from '#/cache/wordenc/WordEnc.js';
 import World from '#/engine/World.js';
 import socialJson from '../../data/social.json';
 // (phase 5b, Track P: the lure to a waiting PK team, the fake Wilderness drop party: port/BotSetPieces' runs, never another
@@ -97,6 +96,8 @@ import { placeAt } from '#/engine/bot/port/BotSlots.js';
 import { isQuestionText } from '#/engine/bot/port/BotChat.js';
 import InvType from '#/cache/config/InvType.js';
 import ObjType from '#/cache/config/ObjType.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+import { botFilter } from '#/engine/bot/port/BotFilter.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -299,7 +300,7 @@ function approachLine(pool: string, slots: Record<string, string>): string | nul
     const lines = APPROACH[pool] ?? [];
     for (let i = 0; i < 3 && lines.length; i++) {
         const line = pickRandom(lines).replace(/\{([a-z]+)\}/g, (all, k: string) => slots[k] ?? all);
-        if (!line.includes('{') && WordEnc.filter(line) === line) return line;
+        if (!line.includes('{') && botFilter(line) === line) return line;
     }
     return null;
 }
@@ -420,7 +421,7 @@ function humansNow(): Player[] {
     if (humansAt !== World.currentTick) {
         humansAt = World.currentTick;
         humans = [];
-        for (const p of World.playerLoop.all()) if (!p.is_bot) humans.push(p);
+        for (const p of worldPlayers()) if (!p.is_bot) humans.push(p);
     }
     return humans;
 }
@@ -807,7 +808,7 @@ export class SocialTask extends BotTask {
         const name = other.is_bot ? (Math.random() < GREET_NAMED_BOT ? nickOf(other) : null) : Math.random() < GREET_NAMED_HUMAN ? other.displayName : null;
         if (name) {
             const line = pickRandom(socialJson.regular.greetNamed).replaceAll('{name}', name);
-            if (WordEnc.filter(line) === line && isFresh(player.username, line, player.x, player.z, player.level, World.currentTick)) {
+            if (botFilter(line) === line && isFresh(player.username, line, player.x, player.z, player.level, World.currentTick)) {
                 noteSaid(player, line);
                 return line;
             }

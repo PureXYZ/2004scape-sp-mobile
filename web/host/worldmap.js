@@ -146,6 +146,16 @@
         }
     }
 
+    // The map has read worldmap.jag (its first map is ready; the others use what it read): libbzip2, which mapview.html
+    // offers while it loads (bzip2.js), can go with its memory.
+    function dropDecoder() {
+        try {
+            delete state.frame.contentWindow.__LC_BZIP2__;
+        } catch {
+            // (a frame on its way out)
+        }
+    }
+
     function post(message) {
         state.frame?.contentWindow?.postMessage(message, '*');
     }
@@ -160,8 +170,11 @@
             state.ready = data.ready === true;
             state.loading = data.loading === true;
             state.area = typeof data.area === 'number' ? data.area : -1;
-            if (state.ready && !wasReady && state.showOverview) {
-                post({ lcMap: 'overview', on: true });
+            if (state.ready && !wasReady) {
+                dropDecoder();
+                if (state.showOverview) {
+                    post({ lcMap: 'overview', on: true });
+                }
             }
             refresh();
         } else if (data?.lcMap === 'keys' && Array.isArray(data.keys)) {

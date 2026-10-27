@@ -1,0 +1,5 @@
+{
+    "description": "The title screen, idle (0 bots): the client's flames and the engine's world without a player. 70 s, recorded 60 s.",
+    "bots": 0,
+    "phases": [{ "name": "title", "where": "title", "sec": 70, "traces": [{ "set": "am", "at": 3, "sec": 60 }] }]
+}

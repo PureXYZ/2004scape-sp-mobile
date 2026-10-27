@@ -17,6 +17,9 @@ import Packet from '#/io/Packet.js';
 import NullClientSocket from '#/server/NullClientSocket.js';
 import Environment from '#/util/Environment.js';
 import { toSafeName } from '#/util/JString.js';
+import './runtime/tick.js'; // after World: it patches classes World's imports bring in
+import { installStartupTables } from './runtime/startup-tables.js';
+import { installSharedZeroZones, installTypedScriptArrays } from './runtime/memory.js';
 
 import bzip2 from './shims/bzip2.js';
 import { EngineExit, __lc_exit, hasExited, setExitHandler } from './shims/globals.js';
@@ -64,6 +67,13 @@ gameMap.init = function () {
     if (startState === 'starting') progress('start', 'Loading the world map');
     realMapInit.call(gameMap);
 };
+
+// Midi.load and AnimFrame.load (World.start) take the song lengths and frame delays from the build's start-up tables
+installStartupTables();
+// memory (runtime/memory.ts): the collision zones without a flag share one all-zero array until their first non-zero
+// write; the scripts' bytecode and line tables are typed arrays
+installSharedZeroZones();
+installTypedScriptArrays();
 
 // ---- memory: drop what only start-up needed --------------------------------------------------------------
 let released = { files: 0, bytes: 0 };

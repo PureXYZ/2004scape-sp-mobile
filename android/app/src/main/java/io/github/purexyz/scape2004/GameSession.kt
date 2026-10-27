@@ -110,6 +110,9 @@ class GameSession(private val app: LostCityApp) {
     /** DEBUG builds: a higher WebView floor from the launch intent, to see the error screen (lostcity.webViewFloor). */
     var debugWebViewFloor: Int? = null
 
+    /** DEBUG builds: what the test driver launched the app with (lostcity.test: app-test --soak), for `launch-test`. */
+    var debugLaunchTest: String? = null
+
     /** DEBUG builds: this many more WebViews fail to be made (the `webview-fail` action), to see the error screen. */
     private var debugWebViewFailures = 0
 
@@ -787,6 +790,8 @@ class GameSession(private val app: LostCityApp) {
                 userActivity()
                 reply(JsonNull)
             }
+            // what the launch intent's lostcity.test said (app-test --soak: the soak and which launch of a series), or null
+            "launch-test" -> reply(debugLaunchTest?.let { JsonPrimitive(it) } ?: JsonNull)
             "back" -> {
                 back()
                 reply(JsonNull)

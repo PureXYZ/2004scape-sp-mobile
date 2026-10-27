@@ -31,7 +31,7 @@ import { limitRepeatedLogs, logLimits, rollLogWindow } from './logs.js';
 import { forgetDeletedCharacters, friendStats, friendTargetsMissing, friendsAfterTick, installFriends, isFriendOfHuman } from './friends.js';
 import { applyOverlay, overlayStats, overlayTargetsMissing } from './overlay.js';
 import { botsSaved } from './page.js';
-import { checkHeldLogins, collisions, flushDueBots, humanInWorld, humanNames, installRouting, isReservedName, loadHumanNames, loadSave, routingTargetsMissing, storeWrites } from './routing.js';
+import { checkHeldLogins, collisions, flushDueBots, humanInWorld, humanNames, installRouting, isReservedName, loadHumanNames, loadSave, reservedCheck, routingTargetsMissing, storeWrites } from './routing.js';
 import { BOT_COMMANDS, installScriptCommands } from './scripts.js';
 import { botError, bots, disableBots, readBotsConfig } from './state.js';
 import { botStore } from './store.js';
@@ -187,6 +187,8 @@ export const botsTest = {
     /** the store's writes as the routing coalesces them: lastTick, held, coalesced, everyTicks */
     storeWrites,
     humanNames,
+    /** isReservedName's answers inside BotManager.tick (one map a tick) against World.getPlayerByUsername's */
+    reservedCheck,
     friendStats,
     logLimits,
     botsSaved,

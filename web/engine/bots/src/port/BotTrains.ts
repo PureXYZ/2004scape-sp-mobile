@@ -24,7 +24,6 @@
 //     plan (still newbies).
 // Every line is a set piece's (LineKind 'setpiece', out of H7), counted against its speaker's talk budget. Its log
 // (trainsLog) is the humanlike report's G4.
-import WordEnc from '#/cache/wordenc/WordEnc.js';
 import Player from '#/engine/entity/Player.js';
 import { PlayerStat } from '#/engine/entity/PlayerStat.js';
 import World from '#/engine/World.js';
@@ -41,6 +40,8 @@ import { scheduleInTicks } from '#/engine/bot/port/BotSchedule.js';
 import { clearRole, eventRoleOf, setRole } from '#/engine/bot/port/BotSetPieces.js';
 import { noteSpoke } from '#/engine/bot/port/BotSpoke.js';
 import { reactionTicks, typingTicks } from '#/engine/bot/port/BotTiming.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+import { botFilter } from '#/engine/bot/port/BotFilter.js';
 
 /**
  * the ask's cadence (ticks), and its chance per passer-by within PASS_RANGE (a slow alt's half). ("More newbie
@@ -232,7 +233,7 @@ function tryAsk(now: number): void {
     const newbies: Player[] = [];
     const passers: Player[] = [];
     const a = LUMBRIDGE_AREA;
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p.level !== 0 || p.x < a.x0 - PASS_RANGE || p.x > a.x1 + PASS_RANGE || p.z < a.z0 - PASS_RANGE || p.z > a.z1 + PASS_RANGE) continue;
         if (freeNewbie(p, now) && play - (askedAt.get(p.username) ?? -Infinity) >= NEWBIE_ASK_GAP) newbies.push(p);
         else if (passer(p)) passers.push(p);
@@ -257,7 +258,7 @@ function tryAsk(now: number): void {
 /** (variety round 1, F: ISS-6) a free newbie within PASS_RANGE of the leader, not in the train, asks it with the ask's chance */
 function tryAskLeader(t: Train, now: number): void {
     const l = t.leader;
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p === l || t.members.includes(p) || p.level !== l.level || cheb(p.x, p.z, l.x, l.z) > PASS_RANGE) continue;
         if (!freeNewbie(p, now) || play - (askedAt.get(p.username) ?? -Infinity) < NEWBIE_ASK_GAP) continue;
         if (Math.random() >= rates.ask * (isSlowNewbie(p.username) ? 0.5 : 1)) continue;
@@ -272,7 +273,7 @@ function addressed(text: string, to: Player): string {
     if (Math.random() >= 0.5) return text;
     const name = to.displayName;
     const line = `${name} ${text}`;
-    return name && WordEnc.filter(line) === line ? line : text;
+    return name && botFilter(line) === line ? line : text;
 }
 
 function askFor(newbie: Player, stranger: Player, now: number, join = false): void {
@@ -448,7 +449,7 @@ function advance(t: Train, now: number): void {
         const chance = t.members.length <= 1 ? Math.min(0.9, rates.join * SHORT_TRAIN_JOIN) : rates.join;
         if (Math.random() < chance) {
             const last = t.members[t.members.length - 1];
-            for (const p of World.playerLoop.all()) {
+            for (const p of worldPlayers()) {
                 if (p === last || p === t.leader || t.members.includes(p) || p.level !== last.level || cheb(p.x, p.z, last.x, last.z) > (isNewbie(p) ? JOIN_RANGE : JOIN_REACH) || !freeJoiner(p, now)) continue;
                 if (join(t, p, last, now)) say(p, 'train-join', last);
                 break;
@@ -459,7 +460,7 @@ function advance(t: Train, now: number): void {
     if (!t.seen && t.members.length >= 2) {
         t.seen = true;
         if (Math.random() < SEEN_CHANCE) {
-            for (const p of World.playerLoop.all()) {
+            for (const p of worldPlayers()) {
                 if (p.is_bot !== true || p === l || t.members.includes(p) || p.level !== l.level || cheb(p.x, p.z, l.x, l.z) > 10 || !BotManager.botFor(p)) continue;
                 noteEvent(p, 'train-seen');
                 break;

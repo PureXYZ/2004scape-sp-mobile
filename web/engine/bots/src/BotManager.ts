@@ -31,6 +31,8 @@ import type World from '#/engine/World.js';
 import { PlayerStat, getBaseLevel, setVarp, tilesInReach, tilesInSquare } from '#/engine/bot/BotAction.js';
 import { BotPlayer } from '#/engine/bot/BotPlayer.js';
 import { setWorld } from '#/engine/bot/BotWorld.js';
+import { installAggressorIndex } from '#/engine/bot/port/BotAggressors.js';
+import { beginPlayersTick, endPlayersTick } from '#/engine/bot/port/BotPlayers.js';
 import { BotGoalPlanner, makeSkiller, makeFighter, makeBalanced, makeRandom, makeExtrasSocial, makeExtrasVendor, makeExtrasPKer, makeExtrasEdgevillePKer } from '#/engine/bot/BotGoalPlanner.js';
 import { PlayerLoading } from '#/engine/entity/PlayerLoading.js';
 import Packet from '#/io/Packet.js';
@@ -417,6 +419,8 @@ class BotManagerClass {
         this.timing = makeTiming(options.timing);
         this.random = options.random ?? Math.random;
         setWorld(world);
+        // port (perf, 2026-10-23): who targets whom, for the bots' "who attacks me?" (port/BotAggressors)
+        installAggressorIndex(world.npcs);
         configureBotLog(options.debug);
         BotDebugService.configure();
 
@@ -461,6 +465,7 @@ class BotManagerClass {
         const tick = world.currentTick;
         this.tickCount++;
         botLogTick(tick);
+        beginPlayersTick();
         beginPathTick();
 
         try {
@@ -494,6 +499,11 @@ class BotManagerClass {
 
             this._sessions();
             this._spawnSome(tick);
+            // port (perf, 2026-10-23): the active bots as an array for the rest of the tick, as port/BotPlayers does for
+            // the players: from here on no member starts or stops playing this tick (its state changes in the keep-alive
+            // loop, _sessions and _spawnSome above; its slot in processLogins and removePlayer; retire() and release()
+            // come from the glue between ticks)
+            this.activeSnapshot = [...this._activeBots()];
             runScheduled(tick);
             // port: a friend bot now and then messages the human first
             const isFriend = this.options?.isFriendOfHuman;
@@ -571,6 +581,8 @@ class BotManagerClass {
             this.tickErrors++;
             console.error('[BotManager] tick failed', err);
         } finally {
+            this.activeSnapshot = null;
+            endPlayersTick();
             this.pathSearchesLastTick = pathSearchesThisTick();
             this.lastTickMs = performance.now() - started;
             if (this.lastTickMs > this.maxTickMs) this.maxTickMs = this.lastTickMs;
@@ -654,7 +666,24 @@ class BotManagerClass {
         if (member) this._drop(member);
     }
 
-    *activeBots(): IterableIterator<Player> {
+    /** The active bots from tick()'s sessions and spawns to its end (null outside), in the members' order */
+    private activeSnapshot: readonly Player[] | null = null;
+    private activeCheck: ((bots: readonly Player[], fresh: () => Iterable<Player>) => void) | null = null;
+
+    /** The bots in the world and not on their way out, in the members' order (inside tick(): its array) */
+    activeBots(): Iterable<Player> {
+        const snapshot = this.activeSnapshot;
+        if (snapshot === null) return this._activeBots();
+        if (this.activeCheck !== null) this.activeCheck(snapshot, () => this._activeBots());
+        return snapshot;
+    }
+
+    /** (tests) every use of tick()'s array is handed to `check` with a fresh pass of the members (to compare); null: none */
+    setActiveCheckForTest(check: ((bots: readonly Player[], fresh: () => Iterable<Player>) => void) | null): void {
+        this.activeCheck = check;
+    }
+
+    private *_activeBots(): IterableIterator<Player> {
         for (const member of this.members.values()) {
             if (this._playing(member)) yield member.bot!.player;
         }

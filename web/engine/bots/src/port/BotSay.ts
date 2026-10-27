@@ -3,7 +3,7 @@
 // on the human's ignore list; adverts can have a colour and an effect. Upstream used Player.say (the SAY mask), which
 // the client shows as it is and ignore cannot hide. A human's line is filtered on the server too
 // (MessagePublicHandler: WordEnc.filter, then WordPack), so every bot line goes through the same two steps here.
-import WordEnc from '#/cache/wordenc/WordEnc.js';
+import { botFilter } from '#/engine/bot/port/BotFilter.js';
 import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
 import Packet from '#/io/Packet.js';
@@ -85,12 +85,6 @@ export function lastChatAt(player: Player): number {
     return lastChat.get(player) ?? -Infinity;
 }
 
-// Bots repeat themselves (a vendor's advert every few ticks) and the filter is the costliest part of a bot's turn, so
-// the filtered text of recent distinct lines is kept (the oldest goes first). port: 4,096 (256 thrashed with 100 bots
-// and more: the filter was 7 to 17% of the bots' time, and a 4,096-line cache cut a sim's run by 63%)
-const MAX_REMEMBERED = 4096;
-const filtered = new Map<string, string>();
-
 export function botSay(player: Player, text: string, style?: ChatStyle, kind?: LineKind, to?: Player | null): void {
     const [first, ...more] = splitLine(text);
     if (first === undefined) return;
@@ -112,12 +106,7 @@ function sayLine(player: Player, text: string, style?: ChatStyle, kind?: LineKin
         });
         return;
     }
-    let line = filtered.get(text);
-    if (line === undefined) {
-        line = WordEnc.filter(text);
-        if (filtered.size >= MAX_REMEMBERED) filtered.delete(filtered.keys().next().value!);
-        filtered.set(text, line);
-    }
+    const line = botFilter(text);
     // as MessagePublicHandler does for a human's line (but no logMessage: that is the human's chat log)
     const out = Packet.alloc(0);
     WordPack.pack(out, line);

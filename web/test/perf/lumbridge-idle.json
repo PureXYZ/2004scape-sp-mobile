@@ -1,0 +1,5 @@
+{
+    "description": "Standing still in Lumbridge's courtyard (0 bots), Music and Sound at their defaults. 70 s, recorded 60 s.",
+    "bots": 0,
+    "phases": [{ "name": "lumbridge-idle", "tele": "0,50,50,22,18", "vars": { "option_music": 2, "option_sounds": 2 }, "sec": 70, "traces": [{ "set": "am", "at": 3, "sec": 60 }] }]
+}

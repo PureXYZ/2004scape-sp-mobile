@@ -91,6 +91,9 @@ import { personaOf } from '#/engine/bot/port/BotPersona.js';
 import { wildernessLevelAt } from '#/engine/bot/port/BotContent.js';
 import type { PlannerKey } from '#/engine/bot/port/BotRoster.js';
 import { canTravel, CollisionType, LocShape } from '#/engine/routefinder/index.js';
+import { nearestLocIn, nearestNpcIn, nearestObjIn, inSomeZone, zoneHasNpc, type Nearest } from '#/engine/bot/port/BotZoneScan.js';
+import { aggressorIndexReady, findTargeting } from '#/engine/bot/port/BotAggressors.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** Debug-only: resolves the BotPlayer wrapper's name off a Player, or null for real (non-bot) players. */
 function _debugBotName(player: Player): string | null {
@@ -180,7 +183,7 @@ export function noteMove(player: Player, cls: MoveClass): void {
 
 /** port: is a human (a player that is not a bot) within HUMAN_SIGHT of (x, z) on that floor? */
 export function humanCanSee(x: number, z: number, level: number): boolean {
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p.is_bot === true || p.level !== level) continue;
         if (Math.max(Math.abs(p.x - x), Math.abs(p.z - z)) <= HUMAN_SIGHT) return true;
     }
@@ -2317,6 +2320,8 @@ function _nodeReachable(player: Player, i: number, key: string): boolean | 'wait
  * Kept per tile (gateway ends and destinations repeat).
  */
 const sideComps = new Map<string, number>();
+/** _sideComp's steps, in its order: east, west, north, south */
+const SIDE_STEPS = [1, 0, -1, 0, 0, 1, 0, -1];
 const SIDE_TILES = 4000;
 function _tilesOf(area: number[][]): number[][] {
     if (area.length < 2) return area.map(a => [a[0], a[1]]);
@@ -2343,7 +2348,10 @@ function _sideComp(x: number, z: number, level: number, avoid?: number[][]): num
             comp = componentOf(n);
             break;
         }
-        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        // port (perf, 2026-10-23): the four steps from one constant (the literal here made 5 arrays a tile)
+        for (let d = 0; d < 8; d += 2) {
+            const dx = SIDE_STEPS[d];
+            const dz = SIDE_STEPS[d + 1];
             const k = (cx + dx) * 16384 + cz + dz;
             if (seen.has(k) || avoidSet.has(k) || !canTravel(0, cx, cz, dx, dz, 1, 0, CollisionType.NORMAL)) continue;
             seen.add(k);
@@ -4318,29 +4326,25 @@ export function interactObjOp(player: Player, obj: Obj, op: 1 | 2 | 3 | 4 | 5): 
 //Ground items
 //Ground items
 function _findObj(player: Player, cx: number, cz: number, level: number, radius: number, predicate: (obj: Obj) => boolean): Obj | null {
-    let best: Obj | null = null;
-    let bestDist = Infinity;
+    return scanCheck === null ? _nearestObj(player, cx, cz, level, radius, predicate) : scanCheck.obj(player, cx, cz, level, radius, predicate, p => _nearestObj(player, cx, cz, level, radius, p));
+}
+
+// port (perf, 2026-10-23): each zone's items through port/BotZoneScan (no generators), the same item
+function _nearestObj(player: Player, cx: number, cz: number, level: number, radius: number, predicate: (obj: Obj) => boolean): Obj | null {
+    const best: Nearest<Obj> = { found: null, dist: Infinity };
+    const visible = (obj: Obj): boolean => obj.receiver64 === Obj.NO_RECEIVER || obj.receiver64 === player.hash64;
+    const map = getWorld().gameMap;
     const zoneRadius = Math.ceil(radius / 8) + 1;
     for (let dz = -zoneRadius; dz <= zoneRadius; dz++) {
         for (let dx = -zoneRadius; dx <= zoneRadius; dx++) {
             const zx = cx + dx * 8;
             const zz = cz + dz * 8;
-            const zone = getWorld().gameMap.getZone(zx, zz, level);
+            const zone = map.getZone(zx, zz, level);
             if (!zone) continue;
-            for (const obj of zone.getAllObjsSafe()) {
-                if (!predicate(obj)) continue;
-                if (obj.receiver64 === Obj.NO_RECEIVER || obj.receiver64 === player.hash64) {
-                    //<- added this
-                    const dist = Math.abs(obj.x - cx) + Math.abs(obj.z - cz);
-                    if (dist <= radius * 2 && dist < bestDist) {
-                        bestDist = dist;
-                        best = obj;
-                    }
-                }
-            }
+            nearestObjIn(zone, cx, cz, radius * 2, best, predicate, visible);
         }
     }
-    return best;
+    return best.found;
 }
 export function findObjByPrefix(player: Player, cx: number, cz: number, level: number, prefix: string, radius = 20): Obj | null {
     return _findObj(player, cx, cz, level, radius, obj => {
@@ -4541,51 +4545,86 @@ export function npcMatchesName(npc: Npc, name: string): boolean {
 
 // ── Internal zone search ──────────────────────────────────────────────────────
 
-function _findNpc(cx: number, cz: number, level: number, radius: number, predicate: (npc: Npc) => boolean): Npc | null {
-    let best: Npc | null = null;
-    let bestDist = Infinity;
+/**
+ * port (perf, 2026-10-23): what test/exact.test.mjs puts beside every zone search: each search runs as `run` with the
+ * caller's predicate, and the check compares it with the engine's generators (the same answer, the predicate on the
+ * same entities in the same order); npcWithin and the aggressor lookup with the search they stand for.
+ */
+export interface ScanCheck {
+    npc(cx: number, cz: number, level: number, radius: number, predicate: (npc: Npc) => boolean, run: (predicate: (npc: Npc) => boolean) => Npc | null): Npc | null;
+    loc(cx: number, cz: number, level: number, radius: number, predicate: (loc: Loc) => boolean, run: (predicate: (loc: Loc) => boolean) => Loc | null): Loc | null;
+    obj(player: Player, cx: number, cz: number, level: number, radius: number, predicate: (obj: Obj) => boolean, run: (predicate: (obj: Obj) => boolean) => Obj | null): Obj | null;
+    within(npc: Npc, cx: number, cz: number, level: number, radius: number, answer: boolean): void;
+    acting(player: Player, radius: number, acts: (npc: Npc) => boolean, answer: Npc | null): void;
+}
+let scanCheck: ScanCheck | null = null;
 
+/** (tests) every zone search also goes through `check`; null: none */
+export function setScanCheckForTest(check: ScanCheck | null): void {
+    scanCheck = check;
+}
+
+function _findNpc(cx: number, cz: number, level: number, radius: number, predicate: (npc: Npc) => boolean): Npc | null {
+    return scanCheck === null ? _nearestNpc(cx, cz, level, radius, predicate) : scanCheck.npc(cx, cz, level, radius, predicate, p => _nearestNpc(cx, cz, level, radius, p));
+}
+
+// port (perf, 2026-10-23): each zone's NPCs through port/BotZoneScan (no generators), the same NPC
+function _nearestNpc(cx: number, cz: number, level: number, radius: number, predicate: (npc: Npc) => boolean): Npc | null {
+    const best: Nearest<Npc> = { found: null, dist: Infinity };
+    const map = getWorld().gameMap;
     const zoneRadius = Math.ceil(radius / 8) + 1;
     for (let dz = -zoneRadius; dz <= zoneRadius; dz++) {
         for (let dx = -zoneRadius; dx <= zoneRadius; dx++) {
             const zx = cx + dx * 8;
             const zz = cz + dz * 8;
-            const zone = getWorld().gameMap.getZone(zx, zz, level);
+            const zone = map.getZone(zx, zz, level);
             if (!zone) continue;
-            for (const npc of zone.getAllNpcsSafe()) {
-                // port: the distance first, the predicate only for an NPC that would be the nearest so far
-                const dist = Math.abs(npc.x - cx) + Math.abs(npc.z - cz);
-                if (dist > radius * 2 || dist >= bestDist || !predicate(npc)) continue;
-                bestDist = dist;
-                best = npc;
-            }
+            // port: the distance first, the predicate only for an NPC that would be the nearest so far
+            nearestNpcIn(zone, cx, cz, radius * 2, best, predicate);
         }
     }
-    return best;
+    return best.found;
+}
+
+/**
+ * port (perf, 2026-10-23): `_findNpc(cx, cz, level, radius, n => n === npc) !== null`, CombatTask's and
+ * RangedMagicTask's "is my target still here?" every tick of a fight, without searching 121 zones for one NPC. The
+ * search finds it only in a zone list it walks: an NPC in none is not found; one in its own tile's zone is found when
+ * that zone is in the search's square, it is valid and within the limit; anything else is the search's to answer.
+ */
+export function npcWithin(npc: Npc, cx: number, cz: number, level: number, radius: number): boolean {
+    const answer = _npcWithin(npc, cx, cz, level, radius);
+    if (scanCheck !== null) scanCheck.within(npc, cx, cz, level, radius, answer);
+    return answer;
+}
+
+function _npcWithin(npc: Npc, cx: number, cz: number, level: number, radius: number): boolean {
+    if (!inSomeZone(npc)) return false;
+    if (!zoneHasNpc(getWorld().gameMap.getZone(npc.x, npc.z, npc.level), npc)) return _nearestNpc(cx, cz, level, radius, n => n === npc) !== null;
+    const zoneRadius = Math.ceil(radius / 8) + 1;
+    return npc.level === level && Math.abs((npc.x >> 3) - (cx >> 3)) <= zoneRadius && Math.abs((npc.z >> 3) - (cz >> 3)) <= zoneRadius && npc.isValid() && Math.abs(npc.x - cx) + Math.abs(npc.z - cz) <= radius * 2;
 }
 
 function _findLoc(cx: number, cz: number, level: number, radius: number, predicate: (loc: Loc) => boolean): Loc | null {
-    let best: Loc | null = null;
-    let bestDist = Infinity;
+    return scanCheck === null ? _nearestLoc(cx, cz, level, radius, predicate) : scanCheck.loc(cx, cz, level, radius, predicate, p => _nearestLoc(cx, cz, level, radius, p));
+}
 
+// port (perf, 2026-10-23): each zone's locs through port/BotZoneScan (no generators), the same loc
+function _nearestLoc(cx: number, cz: number, level: number, radius: number, predicate: (loc: Loc) => boolean): Loc | null {
+    const best: Nearest<Loc> = { found: null, dist: Infinity };
+    const map = getWorld().gameMap;
     const zoneRadius = Math.ceil(radius / 8) + 1;
     for (let dz = -zoneRadius; dz <= zoneRadius; dz++) {
         for (let dx = -zoneRadius; dx <= zoneRadius; dx++) {
             const zx = cx + dx * 8;
             const zz = cz + dz * 8;
-            const zone = getWorld().gameMap.getZone(zx, zz, level);
+            const zone = map.getZone(zx, zz, level);
             if (!zone) continue;
-            for (const loc of zone.getAllLocsSafe()) {
-                // port: the distance first, the caller's predicate only for a loc that would be the nearest so far
-                const dist = Math.abs(loc.x - cx) + Math.abs(loc.z - cz);
-                if (dist > radius * 2 || dist >= bestDist) continue;
-                if (!predicate(loc)) continue;
-                bestDist = dist;
-                best = loc;
-            }
+            // port: the distance first, the caller's predicate only for a loc that would be the nearest so far
+            nearestLocIn(zone, cx, cz, radius * 2, best, predicate);
         }
     }
-    return best;
+    return best.found;
 }
 
 /** port: is there a loc on (x, z) (a fire, a tree, furniture: a fire cannot be lit there)? */
@@ -4861,14 +4900,27 @@ export function findAggressorNpc(player: Player, radius = 10): Npc | null {
     if (!byRadius) aggressorCache.set(player, (byRadius = new Map()));
     const last = byRadius.get(radius);
     if (last && now - last.tick < 3 && (last.npc === null || actsOn(last.npc, player))) return last.npc;
-    const npc = _findNpc(player.x, player.z, player.level, radius, npc => actsOn(npc, player));
+    const npc = _findActing(player, radius, npc => actsOn(npc, player));
     byRadius.set(radius, { tick: now, npc });
     return npc;
 }
 
 /** port: an NPC other than `except` that attacks the player (a second attacker: a multi-combat area's), or null */
 export function findOtherAggressorNpc(player: Player, except: Npc | null, radius = 8): Npc | null {
-    return _findNpc(player.x, player.z, player.level, radius, npc => npc !== except && actsOn(npc, player));
+    return _findActing(player, radius, npc => npc !== except && actsOn(npc, player));
+}
+
+/**
+ * port (perf, 2026-10-23): `_findNpc(player.x, player.z, player.level, radius, acts)` for a predicate true only of NPCs
+ * that target the player: among the NPCs that do (port/BotAggressors), not a search of 25-49 zones
+ */
+function _findActing(player: Player, radius: number, acts: (npc: Npc) => boolean): Npc | null {
+    const search = (): Npc | null => _nearestNpc(player.x, player.z, player.level, radius, acts);
+    if (!aggressorIndexReady()) return search();
+    const map = getWorld().gameMap;
+    const answer = findTargeting(player, player.x, player.z, player.level, radius, acts, (x, z, level) => map.getZone(x, z, level), search);
+    if (scanCheck !== null) scanCheck.acting(player, radius, acts, answer);
+    return answer;
 }
 
 /**

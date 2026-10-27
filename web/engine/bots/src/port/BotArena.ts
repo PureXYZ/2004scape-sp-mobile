@@ -51,6 +51,7 @@ import { standTileOf } from '#/engine/bot/port/BotTiles.js';
 import { DuelArenaTask, type ArenaRole } from '#/engine/bot/tasks/DuelArenaTask.js';
 import duelJson from '../../data/duel.json';
 import linesJson from '../../data/lines2004-arena.json';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 // ── the numbers (data/duel.json) ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -407,7 +408,7 @@ export function sampleSpectators(bot: Player): void {
     if (!d || d.record.end >= 0 || World.currentTick - d.lastSample < 10) return;
     d.lastSample = World.currentTick;
     let n = 0;
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p === d.a || p === d.b || p.level !== 0 || inFightZone(p.x, p.z, p.level)) continue;
         if (Math.max(Math.abs(p.x - d.a.x), Math.abs(p.z - d.a.z)) <= 10 || Math.max(Math.abs(p.x - d.b.x), Math.abs(p.z - d.b.z)) <= 10) n++;
     }
@@ -544,7 +545,7 @@ export function humansInArea(): readonly Player[] {
     if (now - humansSeenAt < 5 && humansSeenAt >= 0) return humansThere;
     humansSeenAt = now;
     humansThere = [];
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p.is_bot === true || !inChallengeArea(p.x, p.z, p.level)) continue;
         humansThere.push(p);
         const h = humanOf(p.username);

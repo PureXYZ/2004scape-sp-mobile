@@ -8,6 +8,7 @@ import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
 import { BotTask, randInt } from '#/engine/bot/tasks/BotTaskBase.js';
 import { findLocByName } from '#/engine/bot/BotAction.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** a login this near a human (tiles, the same floor) lingers */
 export const LINGER_TILES = 15;
@@ -28,7 +29,7 @@ export function setLingerForTest(on: boolean): void {
 
 /** a human (not a bot) within LINGER_TILES of the bot on its floor? */
 function humanNear(bot: Player): boolean {
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p.is_bot === true || p.slot === -1 || p.level !== bot.level) continue;
         if (Math.max(Math.abs(p.x - bot.x), Math.abs(p.z - bot.z)) <= LINGER_TILES) return true;
     }

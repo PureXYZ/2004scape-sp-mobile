@@ -16,12 +16,13 @@
 //            the human sees both; it comes back from its record; the bots' own logouts write bots.sav at most once
 //            every storeWrites.everyTicks ticks (the human's logout at once); the friend list at the next login; the
 //            lists of a character with no save dropped at load; with the real
-//            library the empty world (every bot out) and newcomers and quits written to bots.sav
+//            library the empty world (every bot out) and newcomers and quits written to bots.sav, and the names a
+//            newcomer may take answered inside the bots' tick from one map of the players, as World.getPlayerByUsername
 //   unreadable  reading bots.sav fails (I/O error, not a missing or corrupt file): bots off for the session, and neither
 //            bots.sav nor its older .bak is used or written; the page hears why ({type:'bots'})
 //   bak      bots.sav corrupt (the launcher wrote garbage): the bots come back from bots.sav.bak
 //   corrupt  both corrupt: bots off for the session, the world plays on, nothing overwrites bots.sav; the page hears why
-//   off      bots.count 0: engine.js, the 37 vanilla files, nothing under bots/, and the vanilla 64-check session
+//   off      bots.count 0: engine.js, the 38 vanilla files, nothing under bots/, and the vanilla 64-check session
 // and, on their own build (test/bots.test.mjs): broken (the library throws while it loads) and nobundle (bots asked of a
 // build without them): engine.js, and the page hears why.
 //
@@ -217,7 +218,7 @@ async function bootMain(ctx) {
 
     T.phase('files, overlay, hooks');
     const gets = env.staticGets();
-    T.check('vfs-manifest-bots.json and vfs/bots/scripts.bin preloaded with the 37 vanilla files', gets.includes('engine/vfs-manifest-bots.json') && gets.includes('engine/vfs/bots/scripts.bin') && page.booted.files === 38, { files: page.booted.files });
+    T.check('vfs-manifest-bots.json and vfs/bots/scripts.bin preloaded with the 38 vanilla files', gets.includes('engine/vfs-manifest-bots.json') && gets.includes('engine/vfs/bots/scripts.bin') && page.booted.files === 39, { files: page.booted.files });
     T.check('bots.sav read once (none yet: 404); /save-index read once', S.gets.filter(g => g.rel === botsSav).map(g => g.status).join() === '404' && S.indexGets === 1, { gets: S.gets.filter(g => g.rel.startsWith('bots/')), indexGets: S.indexGets });
     const SP = B.ScriptProvider;
     const death = SP.getByName('[proc,player_death_lose_items]');
@@ -302,10 +303,12 @@ async function bootMain(ctx) {
                 await waitTicks(ctx, H, 1);
                 const n0 = requests.length;
                 publicChat(human, `${b.displayName} whats ur cb`);
-                await waitFor(env, () => requests.length > n0, 6000 * ctx.slow, 'a model request').catch(() => {});
-                if (requests.length > n0) {
+                // (the request for this line: in 'local' mode other bots may ask the page for their own lines meanwhile)
+                const forLine = () => requests.slice(n0).find(r => /whats ur cb/i.test(r.local?.user ?? ''));
+                await waitFor(env, () => !!forLine(), 6000 * ctx.slow, 'a model request').catch(() => {});
+                if (forLine()) {
                     asked = b;
-                    request = requests[requests.length - 1];
+                    request = forLine();
                     break;
                 }
                 await waitTicks(ctx, H, 30);
@@ -652,6 +655,8 @@ async function bootRestore(ctx) {
 async function bootLiving(ctx) {
     const { env, T, S, N, botsSav } = ctx;
     const { H, B, W } = await bootWithBots(ctx);
+    // (the real library: every newcomer asks isReservedName of each unused name inside BotManager.tick)
+    if (!ctx.stub) Object.assign(B.reservedCheck, { on: true, calls: 0, mismatches: 0 });
     const userhash = new Map();
     const nameOf = h => userhash.get(h);
 
@@ -768,6 +773,7 @@ async function bootLiving(ctx) {
         await waitFor(env, () => B.BotManager.stats().quits >= 1, 120000 * ctx.slow, 'a quit').catch(() => {});
         const st = B.BotManager.stats();
         T.check('newcomers joined (the timer), and one old account quit', st.newcomers >= 1 && st.quits >= 1, st);
+        T.check("the names a newcomer may take: inside the bots' tick from one map of the players, the answers of World.getPlayerByUsername", B.reservedCheck.calls > 100 && B.reservedCheck.mismatches === 0, B.reservedCheck);
         const ls = await ctx.page.sendLifecycle('save', 20000 * ctx.slow);
         const store = parseBotStore(S.read(botsSav));
         const quit = store.meta?.quit ?? [];
@@ -927,9 +933,9 @@ async function bootOff(env) {
     const session = await runSession(env);
     const T = createRunner(env);
     T.phase('bots off: exactly the vanilla engine');
-    T.check('booted engine.js, bots 0, the 37 vanilla files', booted?.bundle === 'engine.js' && booted.bots === 0 && booted.files === 37 && env.bots === null, booted && { bundle: booted.bundle, bots: booted.bots, files: booted.files });
+    T.check('booted engine.js, bots 0, the 38 vanilla files', booted?.bundle === 'engine.js' && booted.bots === 0 && booted.files === 38 && env.bots === null, booted && { bundle: booted.bundle, bots: booted.bots, files: booted.files });
     const manifest = filesAtBoot ? filesAtBoot.filter(f => f !== 'engine/vfs-manifest.json' && f !== 'engine/bzip2.wasm') : [];
-    T.check('fetched before booted: vfs-manifest.json, the 37 files (+ bzip2.wasm), nothing of the bots', !!filesAtBoot && filesAtBoot.includes('engine/vfs-manifest.json') && manifest.length === 37 && !filesAtBoot.some(f => /bots/.test(f)), filesAtBoot && filesAtBoot.filter(f => !f.startsWith('engine/vfs/') && !f.startsWith('cache/')));
+    T.check('fetched before booted: vfs-manifest.json, the 38 files (+ bzip2.wasm), nothing of the bots', !!filesAtBoot && filesAtBoot.includes('engine/vfs-manifest.json') && manifest.length === 38 && !filesAtBoot.some(f => /bots/.test(f)), filesAtBoot && filesAtBoot.filter(f => !f.startsWith('engine/vfs/') && !f.startsWith('cache/')));
     T.check('the vanilla script.dat, no overlay', !!filesAtBoot && filesAtBoot.includes('engine/vfs/data/pack/server/script.dat') && !env.staticGets().some(f => /scripts\.bin|vfs-manifest-bots|engine-bots/.test(f)));
     T.check('no request under bots/ and no /save-index', !env.storage.gets.some(g => g.rel.startsWith('bots/')) && !env.storage.puts.some(p => p.rel.startsWith('bots/')) && env.storage.indexGets === 0);
     const H = env.hooks;

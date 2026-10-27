@@ -9,7 +9,7 @@
 // Phases (checks, screenshots and results.json with the replies' timings in android/build/lm/):
 //   model    the debug build with the model (android/scripts/prepare-model.sh's, the iPhone's): LostCityNative.lm at
 //            document start; Settings › Bot chat (the model's name and size, On-device by default, Think first shown and
-//            greyed with Rules and Claude online); the warm-up when the player enters the world (" · loaded"); real
+//            greyed with Rules and Claude online); the warm-up when the player first enters the world (" · loaded"); real
 //            replies to the engine's requests (posted from inside the engine worker, as e2e --lm-stub does) with Think
 //            first on and off, their timings in the log; the key's box (typed and saved, "not a key" with the error
 //            haptic, Cancel, Back, the IME, FLAG_SECURE); Claude online against the mock (a line, the Test button, the
@@ -394,7 +394,9 @@ try {
         const loaded = await waitLog(/\[lm\] local model loaded in \d+ ms/, 60000);
         const ingameAt = d.log().findIndex(l => /status ingame/.test(l));
         const loadedAt = d.log().findIndex(l => /\[lm\] local model loaded in/.test(l));
-        check('model: entering the world warms the model up (lm-warm → loaded, after status ingame)', loaded.ok && ingameAt >= 0 && loadedAt > ingameAt, strip(loaded.value));
+        // (the data was cleared: no load on record, so entering the world warms the model up; after a quick load the page
+        // warms it only when the player starts to chat, as e2e.mjs --lm-stub checks)
+        check('model: entering the world with no load on record warms the model up (lm-warm → loaded, after status ingame)', loaded.ok && ingameAt >= 0 && loadedAt > ingameAt, strip(loaded.value));
         results.warmLoad = strip(loaded.value);
         const loadedStatus = await waitFor(async () => (await lastStatus())?.local?.loaded === true, 5000);
         await openBotChat();
@@ -622,12 +624,13 @@ try {
         await sleep(1500);
         await reconnect();
         await bootToTitle('model: reloaded');
-        // (all but `loaded`: the dropped request loaded the model while the new document was starting, and a status that
-        // changes between its document start and host.js's first lines reaches neither, on iOS as here; the next does)
+        // (all but `loaded` and `lastLoadMs`: the dropped request loaded the model while the new document was starting,
+        // and a status that changes between its document start and host.js's first lines reaches neither, on iOS as here;
+        // the next does. The document still has a last load time, the earlier load's)
         const nativeAfter = await page.eval('window.LostCityNative');
         const live = await debug('lm-status');
-        const withoutLoaded = status => status && { ...status, local: { ...status.local, loaded: null } };
-        check('model: after a reload LostCityNative.lm is the current status (the key\'s and the model\'s), and Think first is still On', sorted(withoutLoaded(nativeAfter.lm)) === sorted(withoutLoaded(live?.status)) && nativeAfter.lm?.online?.keySet === false && nativeAfter.settings?.botThink === true, JSON.stringify({ document: nativeAfter.lm, live: live?.status }));
+        const withoutLoaded = status => status && { ...status, local: { ...status.local, loaded: null, lastLoadMs: null } };
+        check('model: after a reload LostCityNative.lm is the current status (the key\'s and the model\'s), and Think first is still On', sorted(withoutLoaded(nativeAfter.lm)) === sorted(withoutLoaded(live?.status)) && nativeAfter.lm?.local?.lastLoadMs > 0 && nativeAfter.lm?.online?.keySet === false && nativeAfter.settings?.botThink === true, JSON.stringify({ document: nativeAfter.lm, live: live?.status }));
 
         const leaked = d.adbQuiet('logcat', '-d').split('\n').filter(l => /sk-ant-test/.test(l));
         check('model: no key in any log line (all of logcat)', leaked.length === 0, leaked.slice(0, 3).join(' | '));

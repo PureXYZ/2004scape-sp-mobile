@@ -182,7 +182,10 @@ class GameActivity : ComponentActivity() {
      * `-LostCityVerbose YES` launch argument only comes from Xcode), `--es lostcity.settings '<json>'` (merged into the
      * saved settings before the page loads; the tests start with known settings) and `--ei lostcity.webViewFloor <major>`
      * (a higher WebView floor, to see the error screen; a later intent changes it too, and the error screen checks again
-     * when the app comes back to the front: a WebView updated meanwhile).
+     * when the app comes back to the front: a WebView updated meanwhile). `--es lostcity.test <base64 JSON>` is what the
+     * in-app test's driver says for the page (app-test --soak: the soak and which launch of a series), answered by the
+     * debug `launch-test` action; kept for the process, as iOS keeps its launch arguments (a later intent without it, such
+     * as the driver bringing the app back, leaves it as it was).
      */
     private fun applyIntent(intent: Intent?) {
         intent ?: return
@@ -196,6 +199,7 @@ class GameActivity : ComponentActivity() {
         if (intent.hasExtra(EXTRA_WEBVIEW_FLOOR)) {
             session.debugWebViewFloor = intent.getIntExtra(EXTRA_WEBVIEW_FLOOR, GameSession.MIN_WEBVIEW_MAJOR)
         }
+        intent.getStringExtra(EXTRA_TEST)?.let { session.debugLaunchTest = it }
     }
 
     private companion object {
@@ -204,5 +208,6 @@ class GameActivity : ComponentActivity() {
         const val EXTRA_VERBOSE = "lostcity.verbose"
         const val EXTRA_SETTINGS = "lostcity.settings"
         const val EXTRA_WEBVIEW_FLOOR = "lostcity.webViewFloor"
+        const val EXTRA_TEST = "lostcity.test"
     }
 }

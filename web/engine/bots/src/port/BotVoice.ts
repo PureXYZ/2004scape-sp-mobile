@@ -19,6 +19,7 @@
 // hundred entries).
 import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** the share of a place's talk in an hour one bot may have (the plan: about 20 %) */
 export const VOICE_SHARE = 0.2;
@@ -129,7 +130,7 @@ export function voiceRoom(bot: Player, now: number = World.currentTick, lines = 
 /** (B7) the players within PLACE of `bot` on its floor now, itself among them, counted up to `limit` */
 function playersNear(bot: Player, limit: number): number {
     let n = 0;
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p.level !== bot.level || Math.max(Math.abs(p.x - bot.x), Math.abs(p.z - bot.z)) > PLACE) continue;
         if (++n >= limit) break;
     }

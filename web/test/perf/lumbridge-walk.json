@@ -1,0 +1,5 @@
+{
+    "description": "Walking to and fro in Lumbridge (0 bots): a minimap tap every 3.5 s, so the camera moves. 70 s, recorded 60 s.",
+    "bots": 0,
+    "phases": [{ "name": "lumbridge-walk", "tele": "0,50,50,22,18", "vars": { "option_music": 2, "option_sounds": 2 }, "walk": true, "sec": 70, "traces": [{ "set": "am", "at": 3, "sec": 60 }] }]
+}

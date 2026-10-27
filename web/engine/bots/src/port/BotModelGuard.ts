@@ -19,9 +19,9 @@
 //   (f) "brb", "gtg", "afk" and the like: each is an effect line in the rules (an AFK or a logout that would not follow).
 // The persona's style (port/BotStyle) runs after it, as on the new 2004 lines. Pure: no dice and no game state beyond
 // what it is given (Track L's checker runs it over the writers' replies with the captured situations).
-import WordEnc from '#/cache/wordenc/WordEnc.js';
 import { MAX_LINE } from '#/engine/bot/port/BotSay.js';
 import type { Situation } from '#/engine/bot/port/BotModelTypes.js';
+import { botFilter } from '#/engine/bot/port/BotFilter.js';
 
 export interface GuardResult {
     ok: boolean;
@@ -213,7 +213,7 @@ export function guardReply(raw: string | null | undefined, s: Situation | null, 
     if (anachronism && !(s?.hint && new RegExp(`\\b${escapeRx(anachronism[0])}\\b`, 'i').test(s.hint.text.replace(QUEST_NAMES, '')))) return refuse('anachronism');
     if (MODERN_SLANG.test(text)) return refuse('anachronism');
     if (CONFESSION.test(text) || (CONFESSION_BARE.test(text) && !OF_SOMEONE_ELSE.test(text))) return refuse('confession');
-    if (WordEnc.filter(text) !== text) return refuse('filter');
+    if (botFilter(text) !== text) return refuse('filter');
     if (MARKUP.test(text)) return refuse('markup');
     if (!s) return { ok: true, text };
 
@@ -239,7 +239,7 @@ export function guardReply(raw: string | null | undefined, s: Situation | null, 
     if (opts.keepName === false) {
         text = withoutName(text, s.human.name);
         if (!text) return refuse('empty');
-        if (WordEnc.filter(text) !== text) return refuse('filter');
+        if (botFilter(text) !== text) return refuse('filter');
     }
     return { ok: true, text };
 }

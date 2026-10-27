@@ -20,7 +20,7 @@ import { BotPlayer } from '#/engine/bot/BotPlayer.js';
 import { BotChat } from '#/engine/bot/port/BotChat.js';
 import { BotTrade } from '#/engine/bot/port/BotTrade.js';
 import { wildernessLevelAt } from '#/engine/bot/port/BotContent.js';
-import { pathSearchesThisTick } from '#/engine/bot/port/BotPathing.js';
+import * as Pathing from '#/engine/bot/port/BotPathing.js';
 import { BOT_NAMES, groupCap, initialPool, isLevelling, onlineShare, plannerOf, PLANNERS, poolShare } from '#/engine/bot/port/BotRoster.js';
 import { sayListeners } from '#/engine/bot/port/BotSay.js';
 import { advertsPerMinute, claimNearestStall, claimVendorStall, hubTilesForTest, releaseStall, stallOf, TRADE_BANKS, vendorHome } from '#/engine/bot/port/BotTradeSpots.js';
@@ -150,7 +150,13 @@ export class Sim {
             BotManager.clearAfkEvents();
         };
 
-        // count every path search (bots' and the engine's), and the human's PLAYER_INFO
+        // count every path search (bots' and the engine's), and the human's PLAYER_INFO; the bots' own search
+        // (port/BotPathFinder) through its test wrapper (an older library searches through the engine's)
+        type BotRoute = (...args: unknown[]) => Uint32Array;
+        (Pathing as unknown as { wrapBotRouteForTest?: (wrap: (search: BotRoute) => BotRoute) => void }).wrapBotRouteForTest?.(search => (...args) => {
+            sim.searchesTotal++;
+            return search(...args);
+        });
         const findPath = routefinder.findPath.bind(routefinder);
         sim.findPathUncounted = findPath;
         (routefinder as unknown as { findPath: typeof findPath }).findPath = (...args: Parameters<typeof findPath>) => {
@@ -217,7 +223,7 @@ export class Sim {
             tick,
             cycleMs: performance.now() - s,
             botMs: this.botMs,
-            botSearches: pathSearchesThisTick(),
+            botSearches: Pathing.pathSearchesThisTick(),
             allSearches: this.searchesTotal - searchesBefore,
             playerInfo: this.playerInfoMax
         };

@@ -160,6 +160,7 @@ last APK):
 node android/test/all.mjs --serial emulator-5554               # every test below on one device from one build, with a summary table (--quick: JVM + smoke)
 node android/test/app-test.mjs --serial emulator-5554          # the iPhone's in-app test (autotest.js): login, walk, save, background, reconnect, bots (--bots N)
 node android/test/app-test.mjs --device --lm-bench             # the on-device chat model under load with 500 bots, on the phone (--lm-think: with the note)
+node android/test/app-test.mjs --serial emulator-5554 --soak render   # a soak of web/test/perf/: per-phase frames, ticks, CPU, memory (docs/BUILDING.md §4, A/B)
 node android/test/drive.mjs --serial emulator-5554             # the native layer: iOS's drive.mjs checks with Android's meanings (android/test/PARITY.md)
 node android/test/smoke.mjs --serial emulator-5554             # boot, login, walk, save, Back, HOME, recreation, rotation, crash, bots, an update, the WebView floor
 node android/test/keyboard.mjs --serial emulator-5554          # Gboard and hardware keys on the real app, the bar, focus, the cutout

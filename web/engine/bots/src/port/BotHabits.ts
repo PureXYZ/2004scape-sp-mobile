@@ -54,6 +54,7 @@ import { LeaveBankTask } from '#/engine/bot/tasks/UtilTasks.js';
 import { claimStandTile, releaseStandTile, sharesTile, stepToTile } from '#/engine/bot/port/BotTiles.js';
 import { hangoutAtBank, hangoutOf } from '#/engine/bot/port/BotHangout.js';
 import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 const TICKS_PER_HOUR = 6000;
 
@@ -284,7 +285,7 @@ function free(p: Player): boolean {
 
 /** A human or another bot within NEAR tiles, on the bot's floor (a line said with nobody to read it is not said). */
 function playersNear(p: Player): boolean {
-    for (const other of World.playerLoop.all()) {
+    for (const other of worldPlayers()) {
         if (other !== p && other.level === p.level && Math.max(Math.abs(other.x - p.x), Math.abs(other.z - p.z)) <= NEAR) return true;
     }
     return false;
@@ -420,7 +421,7 @@ export type Spectacle = 'pk' | 'cheer' | 'dance';
  */
 export function noteSpectacle(subject: Player, _what: Spectacle): void {
     const now = World.currentTick;
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p === subject || p.is_bot !== true || p.level !== subject.level) continue;
         if (Math.max(Math.abs(p.x - subject.x), Math.abs(p.z - subject.z)) > WATCH_RANGE) continue;
         const h = habits.get(p);

@@ -1,0 +1,5 @@
+{
+    "description": "Start-up, 5 clean launches (0 bots): each launch's marks from the page's navigation to the title (engine booted, World.start, the first tick, the client at 100 %, title ready, the loader's fade). No phases.",
+    "bots": 0,
+    "startup": { "launches": 5 }
+}

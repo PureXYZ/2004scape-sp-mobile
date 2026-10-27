@@ -77,7 +77,7 @@ upstream checkouts `scripts/lib/upstream.mjs` resolves. `debug` = unminified + s
 ## 2. `build/Game/` layout (served at `lostcity://game/…`)
 
 ```
-index.html  host.js  hud.js  menu.js  worldmap.js  mapview.html  host.css   (web/host, copied recursively)
+index.html  host.js  bzip2.js  hud.js  menu.js  worldmap.js  mapview.html  host.css   (web/host, copied recursively)
 ui/fonts/p11.ttf p12.ttf b12.ttf q8.ttf           the game's four fonts ('RS Plain 11/12', 'RS Bold 12', 'RS Quill 8')  (web/ui)
 ui/sprites/<name>[-<tile>].png                    every content sprite and title image, magenta → transparent           (web/ui)
 ui/manifest.json                                  font metrics and sprite sizes                                          (web/ui)
@@ -92,9 +92,9 @@ engine/boot.js                                    module-worker bootstrap: prelo
 engine/engine.js [engine.js.map]                  engine bundle
 engine/engine-bots.js [.map]                      Bots: the same engine + the bot library and its glue (built unless --no-bots)
 engine/vfs-manifest-bots.json                     Bots: the extra vfs file (vfs/bots/scripts.bin, the 24 overlaid scripts)
-engine/bzip2.wasm                                 optional; engine falls back to pure-JS bzip2 if WASM is unavailable
+engine/bzip2.wasm                                 optional; engine falls back to pure-JS bzip2 if WASM is unavailable; the page's bzip2.js uses it too
 engine/vfs-manifest.json                          [[vfsPath, urlRelativeToEngineDir], …]
-engine/vfs/…                                      engine runtime files other than the cache (server packs, maps zip, csv, pem, world.json, wordenc, …)
+engine/vfs/…                                      engine runtime files other than the cache (server packs, maps zip, csv, pem, world.json, wordenc, the start-up tables, …)
 build-info.json                                   versions/commits of the inputs                    (orchestrator)
 ```
 
@@ -199,17 +199,40 @@ Before `client.js` is imported, the host page:
    on this being the global.
 2. Sets `globalThis.__LC_CACHE__ = { dat: Uint8Array, idx: [Uint8Array ×5] }` (from `cache/main_file_cache.*`) — the
    patched client's OnDemand reads models/anims/midi/maps from it synchronously (no worker, no second socket, no IndexedDB).
+   With it, `globalThis.__LC_BZIP2__ = { decompress(stream) }`: libbzip2 (`engine/bzip2.wasm` through
+   `web/host/bzip2.js`), with which the client's `src/io/BZip2.js` override unpacks its jag archives about 10× faster
+   than with its own JavaScript decoder, to the same bytes. Deleted once the client has loaded (`lastProgressPercent`
+   100), which frees the instance; without WebAssembly (Lockdown Mode) there is none and the client decodes as upstream.
+   The World map's page (`mapview.html`) does the same for `worldmap.jag` until its first map is ready.
 3. Sets `globalThis.lcHost` (API below).
 
 Then it does `const { Client } = await import('./client/client.js'); window.__client = new Client(10, lowMemory, members)`
-(nodeId 10 and the Settings' detail and members choice — must match the engine's `node.id`/`node.members`).
+(nodeId 10 and the Settings' detail and members choice — must match the engine's `node.id`/`node.members`). The engine
+worker, the cache's fetch and the import of `client.js` start first, right after the stored settings are read, so that
+they load while the page builds its own controls and lays itself out; the Client is made once both are there (the
+worker's messages wait for that init: the page's first `await`).
 
 One loader (`#loading`) shows from launch to the title screen: its bar fills with the world's preload and start and the
-client's own loading, and it fades once the title screen is drawn and the world is ready. A client that fails to load
+client's own loading, and it fades once the title screen is drawn and the world is ready (checked every 50 ms while the
+loader shows, and by the page's 200 ms watcher). A client that fails to load
 (`errorLoading`, `errorHost`, `errorStarted`) draws its own error screen, and the loader gives way to it at once.
 Otherwise it gives way after 45 s; a world still starting then says so in the status pill ("The world is still
 starting…"), and one not started after 90 s is ended and reported: the 2004 error screen with Restart (`fatal`, §7). Both
 times count only while the page runs, so a launch spent in the background does not time out.
+
+The client's AudioContext (`window.audioContext`, 22,050 Hz) can be suspended in silences (`host.js` `audioIdle`): once
+no source has played on it for 10 s, and resumed when one starts (the music's next buffer, a sound effect: it plays once
+the resume is done, with the same samples) and, ahead of that, on a touch. WebKit keeps the audio output running while a
+context runs, silent or not (audiomxd 14-17.5 % of a core on an iPhone 13 mini, 0.1-0.7 % with it suspended). One
+constant decides where (`AUDIO_IDLE_SUSPEND`): `'ambient'`, as shipped: only while Settings › Sound follows the silent
+switch (Mute), where the session mixes with other apps' audio anyway. On an iPhone 13 mini a silent stretch there costs
+about 23 points of a core less, and a sound with no touch before it (a hit, a level-up, the next song) is out about 7 ms
+later, about 40 ms after minutes of silence. `'all'` would also suspend in Play (`playback`, the default), but there the
+page is the phone's Now Playing app while its context runs, and WebKit drops a suspended context from Now Playing:
+Control Center would show the previous app in the game's silences. (WebKit keeps the audio session active through a
+suspend, so other apps' audio would stay interrupted as it is now.) `'off'` suspends nothing. `e2e.mjs` checks whichever
+it says. Never on Android. Native's mute and the lifecycle's pause own the context while they last (the 10 s start again
+after them).
 
 `globalThis.lcHost` (implemented by `web/host/host.js`, consumed by client patches/overrides):
 
@@ -219,6 +242,7 @@ times count only while the page runs, so a launch spent in the background does n
 | `haptic(style)` | touch patches | `'light'|'medium'|'heavy'|'selection'` (nothing when the Vibration setting is off) |
 | `takeSecondaryClick()` | touch patch (`pointerUp` tap path) | Returns `true` (once) if the player armed the options-menu button (`#btn-secondary`, "next tap opens the options menu", in the classic layout's rail: the HUD has tap-to-drop in its place; it disarms after 5 s, another button or the HUD showing) → the tap clicks with button 2. |
 | `settings` | client patches | `{ stayLoggedIn: boolean, longPressMs: number, cameraSensitivity: number }` (read live; `longPressMs` is Settings › Hold for menu: 300, 400 (the default) or 600; the host's other settings are its own) |
+| `platform` | client patch 0026 (`lcPlatform()`) | Which app the page runs in, as the engine's `init` is told: `LostCityNative.platform` (`'ios'`, `'android'`), or `'web'` without an app (desktop tests). On `'android'` a canvas gets its whole frame when any of its pixels changed; everywhere else the rect of the changed pixels (§6.1) |
 | `onClientEvent(name, detail)` | client patches (optional) | `('ingame', bool)` (the host switches between the title canvas and the HUD in the same frame), `('menu-open', {serial, area, options, pointerId, x, y, width, height})` (the host shows its large menu, §6.2, and plays the long-press haptic), `('menu-close')`, `('action-label', {text, x, y})` (patch 0020: the host shows what a tap did beside x, y, page px) |
 
 Client fields the host touches at runtime (property names are preserved by esbuild; all listed in `HOST_FIELDS` in
@@ -237,7 +261,8 @@ in the HUD `#canvas` stays in the page (opacity 0, no pointer events) for exactl
 
 Without a layout set the client is the classic 765×503 canvas, unchanged. `setSurfaceLayout({game, map, side, chat,
 width, height, insets})` makes the in-game areas draw into four canvases of their own (`#surface-game`/`-map`/`-side`/
-`-chat`), which the page places and scales with CSS:
+`-chat`), which the page places and scales with CSS. Each draw sends its canvas only the pixels that changed (patch
+0026; on Android the whole frame, and only when a pixel changed):
 
 | Area | Size (game px) | Virtual rect (input) | HUD placement |
 |---|---|---|---|
@@ -256,6 +281,13 @@ and WKWebView's `pageZoom` alike, leave the text of any element that sets its ow
 the page zoom also centres `inset: 0` overlays in the unzoomed viewport), which Chrome does not show. The native launch
 cover computes the same zoom (§7).
 
+The HUD follows the client's frames, not the display's: `hud.js` runs its update right after each `mainredraw` (it
+wraps the client's), and the host calls it directly for its own events (a tap on the HUD, the keyboard, a layout). What
+it shows changes only then, so the update lands in the same rendering update as it would from a requestAnimationFrame
+loop, without asking the browser for a frame on every vsync (60 a second on an iPhone, up to 120 on a Pixel; in Chrome
+at 60 Hz the page's main frames went from 60 to 48 a second, their cost from 8.9 to 5.1 ms/s at idle). A client without
+`mainredraw` (the gallery's stub) keeps the display's frames.
+
 - **Orbs** (top right, left of the compass): hitpoints and prayer (`hudState().hp/hpMax/prayer/prayerMax`, coloured by
   how much is left; a tap opens the Stats / Prayer tab), and **Run** (the word and the run energy; red while running;
   dimmed during a dialogue, `runAvailable`). Hidden while a window is open or while typing.
@@ -273,7 +305,9 @@ cover computes the same zoom (§7).
   upstream's 2004 map applet with touch controls (client patch 0018, `client/mapview.js` with `worldmap.jag`) in an
   iframe of its own, `mapview.html`, so its GameShell, canvas and Pix2D are separate from the game's. The iframe is made
   at the first opening (~0.8 s to draw the world once in the simulator; about +75 MB footprint while open) and kept,
-  its loop asleep while the sheet is closed. Header: **Key** (the map's kinds of icons by name, from the map's `keys`
+  its loop asleep while the sheet is closed. It leaves out the applet's four grids that only its keys draw (items,
+  npcs, multi-combat and free-to-play areas, 9 MB), which a phone's map never shows. Header: **Key** (the map's kinds
+  of icons by name, from the map's `keys`
   message, with their `mapfunction` sprites; a tap flashes them all and glides to the nearest when none is in view),
   **Overview** (the applet's), **Surface / Underground** (the map shown; a switch shows what lies under or over the view;
   the map the player is on is shown when the sheet opens), a centre button (glides back to the player) and **Close**
@@ -409,7 +443,7 @@ Page → native: `window.webkit.messageHandlers.native.postMessage(msg)`
 | `{type:'fatal', message}` | Unrecoverable error. The page shows its own 2004 error screen with Restart; native logs it, plays the error haptic (unless Vibration is off) and lets the screen lock (no alert). |
 | `{type:'lm', id, mode, think, local, online, maxChars, timeoutMs, fallback?}` | **Bots**: a bot's reply for the chat model to write (§7.1; `think`: Settings › Bot chat › Think first). Answered through `LostCityHost.bots.lmReply`. |
 | `{type:'lm-key', action}` | **Bots**: `set` opens native's secure box for the Claude key; `remove` deletes it (§7.1). Answered with a status. |
-| `{type:'lm-warm'}` | **Bots**: the player entered the world with the on-device model chosen: native loads it in the background (§7.1). |
+| `{type:'lm-warm'}` | **Bots**: the player starts to chat with the on-device model chosen (and it is not loaded), or enters the world while no quick load is on record: native loads it in the background (§7.1). |
 
 Console output goes through the separate `log` handler: `{level, text}`.
 
@@ -488,10 +522,12 @@ engine worker (engine-bots.js)           page (host.js lm)                      
   with the note `noteTokens` and `noteMs`: `generatedTokens`, `generateMs` and `generateTps` are then the reply's alone)
   or `usage` (Claude: `input`, `output`, `cacheRead`, `cacheWrite` tokens). The note itself never reaches the page.
 - **native → page, `LostCityHost.bots.lmStatus(status)`** and `window.LostCityNative.lm`: `{local: {available, loaded,
-  think, name?, bytes?, reason?}, online: {keySet, hint?, valid?, problem?, model}}`. `think`: whether the on-device
+  think, name?, bytes?, reason?, lastLoadMs?}, online: {keySet, hint?, valid?, problem?, model}}`. `think`: whether the on-device
   model writes its note, from its model.json template: `'never'` (also with no model that runs here), `'always'`, or
   `'option'` (the request's `think` decides: the page offers Think first only then). `reason`: `simulator` (no llama.cpp
-  there), `no-model` (an app built without one). `hint`: the key's last four characters (`…abcd`); the key itself never
+  there), `no-model` (an app built without one). `lastLoadMs`: how long the model's last load took on this install,
+  app version and system version, kept across launches (`ModelLoadRecord`: UserDefaults; Android SharedPreferences
+  `lostcity-lm`); none until the first load after an install, an app update or a system update. `hint`: the key's last four characters (`…abcd`); the key itself never
   reaches the page. `valid`: false after Claude refused the key (401), true after it answered. `problem`: the last
   trouble in plain words (`key refused`, `declined`, `timed out`, `rate limited`, `overloaded`, `billing problem`, `no
   permission`, `error <code>`, `no connection`, `empty reply`, `not a key`).
@@ -520,8 +556,18 @@ process, whose memory it would share).
   note variant), `qwen-chatml-hybrid` when the request's `think` asks (one model trained in both modes, Qwen3.5's
   thinking switch; Settings › Bot chat › Think first). A request writes the note when hybrid ? its `think` : the
   template's.
-- Loaded at the first request, or ahead of it when the player enters the world with On-device chosen (or Claude online
-  without a key, which answers with it: the page's `{type:'lm-warm'}`), but not when memory is short: under 256 MB left
+- Loaded at the first request, or ahead of it with On-device chosen (or Claude online without a key, which answers with
+  it): the page's `{type:'lm-warm'}` (host.js `lm.warm`) when the player starts to chat while it is not loaded (the chat
+  keyboard opens on the chat, a private message or another social prompt, or a hardware keyboard types there, not a
+  Space that continues a dialogue; asked once while it loads), so it loads while the line is typed. A staff character
+  (Settings › World › Jmod) warms it only at a chat line a bot may hear: once the line is neither empty, `:` nor a `::`
+  command, which the client sends as a command and never as chat, judged with the keys the client has not read yet
+  (its key queue and the page's), so a `::tele` typed however fast does not load it; a normal player's `::` does
+  nothing, so for them the keyboard's opening does, the timing measured on the iPhone. And on entering the world (or
+  choosing it there) only until a load here has been quick (the status's `lastLoadMs` under 5 s): the first load after
+  an install, an app or a system update is the slow one on an iPhone, and it starts as soon as the player is in the
+  world. A world entry with no chat after it so leaves the model out (about 140 MB of the app process for 5 minutes on
+  an iPhone 13 mini, about 680 MB on Android). Not when memory is short: under 256 MB left
   for the app (`os_proc_available_memory`; Android: under 1 GB free above ActivityManager's low-memory line, the load
   itself being about 680 MB there) the request answers `unavailable` and the bots say their own lines. Unloaded after 5
   idle minutes, on a memory warning and in the background; a memory warning also stops the reply being written and
@@ -581,7 +627,9 @@ the tests never call the real API), `lm-key-alert` (type into the key's secure b
 `activity` (keep the screen awake during a long in-app test).
 
 **Tests**: `web/test/e2e.mjs --lm-stub` (the relay in Chrome, a stub native, a request posted from inside the engine
-worker; Think first: shown for `'option'`, the requests' `think` as the setting says at once, kept across a reload),
+worker; Think first: shown for `'option'`, the requests' `think` as the setting says at once, kept across a reload;
+the warm-up: a chat line typed either way loads the model once; a Jmod's `::` command typed any way, with no gap
+between the keys too, never does; with `--no-jmod` the chat keyboard's opening does),
 `web/test/native/lm-harness.mjs` (the app's BotChatModel, OnlineModel and LocalModel compiled for the Mac against the
 macOS framework and a local mock of the Messages API, `web/test/lm/mock-claude.mjs`; with a hybrid model, the base GGUF
 with a model.json `"template": "qwen-chatml-hybrid"` beside it put in by `prepare-model.sh`: no note when off, the note

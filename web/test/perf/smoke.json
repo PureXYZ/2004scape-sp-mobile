@@ -1,0 +1,14 @@
+{
+    "description": "A short run of every kind of phase, to check the harness itself (2 launches, then the title, Lumbridge idle, walking, Music off, the AudioContext suspended, the background, Lumbridge again). --bots N runs it among N bots.",
+    "bots": 0,
+    "startup": { "launches": 2 },
+    "phases": [
+        { "name": "title", "where": "title", "sec": 15, "traces": [{ "set": "am", "at": 2, "sec": 10 }] },
+        { "name": "lumbridge-idle", "tele": "0,50,50,22,18", "vars": { "option_music": 2, "option_sounds": 2 }, "sec": 20, "traces": [{ "set": "am", "at": 2, "sec": 15 }] },
+        { "name": "lumbridge-walk", "walk": true, "sec": 15, "traces": [{ "set": "am", "at": 2, "sec": 10 }] },
+        { "name": "music-off", "vars": { "option_music": 4, "option_sounds": 4 }, "sec": 15, "traces": [{ "set": "am", "at": 2, "sec": 10 }] },
+        { "name": "audio-suspended", "audioOff": true, "sec": 10, "traces": [{ "set": "am", "at": 2, "sec": 6 }] },
+        { "name": "background", "background": true, "sec": 15 },
+        { "name": "lumbridge-after", "vars": { "option_music": 2, "option_sounds": 2 }, "sec": 15, "traces": [{ "set": "am", "at": 2, "sec": 10 }] }
+    ]
+}

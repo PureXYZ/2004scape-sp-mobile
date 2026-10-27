@@ -23,6 +23,7 @@ import World from '#/engine/World.js';
 import LocType from '#/cache/config/LocType.js';
 import NpcType from '#/cache/config/NpcType.js';
 import { Items, setSpotWeight, type SkillStep } from '#/engine/bot/BotKnowledge.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** the least weight a full spot keeps (a pick can still land on it when nothing else is near) */
 export const MIN_WEIGHT = 0.05;
@@ -251,7 +252,7 @@ function recount(): void {
     counts.clear();
     spotOfBot.clear();
     countedAt = World.currentTick;
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p.is_bot !== true) continue;
         const ai = (p as unknown as { _bot?: { currentTask?: Tasked | null } })._bot;
         const step = stepOfTask(ai?.currentTask);

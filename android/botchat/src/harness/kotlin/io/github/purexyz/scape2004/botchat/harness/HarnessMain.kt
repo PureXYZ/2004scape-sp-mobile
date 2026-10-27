@@ -2,7 +2,7 @@
 // this): the app's own BotChatModel, OnlineModel and LocalModel (:botchat) with the C++ core (android/llm/src/main/cpp,
 // built for macOS against llama.cpp b11297's macOS prebuilt, CPU only, as on Android) against the local mock of the
 // Messages API (web/test/lm/mock-claude.mjs), so the online path is tested without a key and the fallback chain without a
-// phone. The Kotlin port of the iOS harness, web/test/native/lm-harness/main.swift: the same 49 checks, with the same names
+// phone. The Kotlin port of the iOS harness, web/test/native/lm-harness/main.swift: the same 51 checks, with the same names
 // in the same order, then the Android extras A1-A5:
 //   A1 the GGUF read through a file descriptor at an offset (an APK's stored asset): mmapped when aligned, read when not
 //   A2 a pause stops a long prompt inside its batch (llama.cpp's abort callback), and the next request works
@@ -25,6 +25,7 @@ import io.github.purexyz.scape2004.botchat.LocalModel
 import io.github.purexyz.scape2004.botchat.LogSink
 import io.github.purexyz.scape2004.botchat.MainPoster
 import io.github.purexyz.scape2004.botchat.MemoryKeyStore
+import io.github.purexyz.scape2004.botchat.MemoryLoadRecord
 import io.github.purexyz.scape2004.botchat.ModelInfo
 import io.github.purexyz.scape2004.botchat.ModelSource
 import io.github.purexyz.scape2004.botchat.OnlineModel
@@ -175,11 +176,23 @@ class Harness(private val modelInfo: ModelInfo?, private val mockUrl: String, pr
         val hasLocal = model.local.available
         println("INFO local model: ${modelInfo?.name ?: "none"} (available $hasLocal${if (!LlmJni.loaded) ", liblcllm: ${LlmJni.loadError}" else ""})")
 
-        // warm: the model loads ahead of the first request (the page asks when the player enters the world)
+        // the last load's time (the status's lastLoadMs; the app keeps it in SharedPreferences, here in memory): none
+        // before a load
+        val record = MemoryLoadRecord()
+        main.run { model.loadRecord = record }
+        check("status: no lastLoadMs before the model has loaded here", !localStatus.containsKey("lastLoadMs"), "$localStatus")
+
+        // warm: the model loads ahead of the first request (the page asks when the player starts to chat, and on entering
+        // the world until a load has been quick)
         if (hasLocal) {
             main.run { model.warm() }
             waitLoaded(model.local)
             check("warm: the model loads ahead of the first request", model.local.isLoaded, "load ${model.local.lastLoad?.map { it.toInt() } ?: "?"} ms (total, model, context)")
+            val deadline = System.nanoTime() + 5_000_000_000L
+            while (record.lastLoadMs == null && System.nanoTime() < deadline) Thread.sleep(10) // (the loaded change, on the main thread)
+            val loadMs = model.local.lastLoad?.first() ?: -1.0
+            check("status: lastLoadMs is the load's time, in the status and kept in the record", localStatus["lastLoadMs"] == Math.round(loadMs).toDouble() && record.lastLoadMs == loadMs,
+                "lastLoadMs ${localStatus["lastLoadMs"]}, load $loadMs ms, record ${record.lastLoadMs}")
         }
 
         // no key: the status says so; Claude online with the fallback answers from the model in the app (or not at all)

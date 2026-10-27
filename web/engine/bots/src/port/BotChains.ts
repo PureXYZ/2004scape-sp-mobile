@@ -59,6 +59,7 @@ import {
     type Step,
     type StepResult
 } from '#/engine/bot/tasks/ErrandTask.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 // ── places (274's map: the loc and NPC debugnames checked by test/content-names.test.mjs) ─────────────────────────────
 
@@ -193,7 +194,7 @@ const line = (kind: string, chance = 0.35): Step => say(`chain-${kind}`, chance)
 /** players at level 0 within 12 tiles of `at` (the emptier cow field) */
 function playersNear(at: At): number {
     let n = 0;
-    for (const q of World.playerLoop.all()) if (q.level === at[2] && Math.max(Math.abs(q.x - at[0]), Math.abs(q.z - at[1])) <= 12) n++;
+    for (const q of worldPlayers()) if (q.level === at[2] && Math.max(Math.abs(q.x - at[0]), Math.abs(q.z - at[1])) <= 12) n++;
     return n;
 }
 

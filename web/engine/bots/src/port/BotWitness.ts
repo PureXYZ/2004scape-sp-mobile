@@ -51,6 +51,7 @@ import { botEmote, EMOTES, type Emote } from '#/engine/bot/port/BotEmote.js';
 import { notableGearOf as fashionNotableGear, statusPieceOf } from '#/engine/bot/port/BotFashion.js';
 import { inThread } from '#/engine/bot/port/BotThreads.js';
 import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 // ── the log (the humanlike runner: W10, W14, W15) ────────────────────────────
 
@@ -243,7 +244,7 @@ function atDuelArena(x: number, z: number): boolean {
 
 /** every tick: a player whose Hitpoints fell to 0 died where it stands: a bot near may say so (a human's: a reaction to it) */
 function deaths(now: number): void {
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p.slot === -1) continue;
         const hp = p.levels[PlayerStat.HITPOINTS];
         const was = hpSeen.get(p);
@@ -296,7 +297,7 @@ const FIGHT_AREA_GAP = 100;
  */
 function fightsSeen(now: number): void {
     const seen = new Set<Player>();
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         const t = p.target;
         if (p.slot === -1 || !(t instanceof Player) || t.slot === -1 || seen.has(p) || seen.has(t)) continue;
         if ((p.levels[PlayerStat.HITPOINTS] ?? 0) <= 0 || (t.levels[PlayerStat.HITPOINTS] ?? 0) <= 0 || !pkGround(p.x, p.z)) continue;
@@ -591,12 +592,12 @@ export function tickWitness(): void {
 /** the humans in the world (a rare or a high level on the human is noticed too) */
 function humansIn(): Player[] {
     const out: Player[] = [];
-    for (const p of World.playerLoop.all()) if (!p.is_bot && p.slot !== -1) out.push(p);
+    for (const p of worldPlayers()) if (!p.is_bot && p.slot !== -1) out.push(p);
     return out;
 }
 
 function hasCompany(bot: Player): boolean {
-    for (const p of World.playerLoop.all()) if (p !== bot && p.level === bot.level && Math.max(Math.abs(p.x - bot.x), Math.abs(p.z - bot.z)) <= 15) return true;
+    for (const p of worldPlayers()) if (p !== bot && p.level === bot.level && Math.max(Math.abs(p.x - bot.x), Math.abs(p.z - bot.z)) <= 15) return true;
     return false;
 }
 

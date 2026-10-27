@@ -84,7 +84,7 @@ The rules that apply to every route:
 | `{type:'fatal', message}` | The page shows its own 2004 error screen with Restart, so native shows nothing: it logs the message, plays the `error` haptic (unless Vibration is off), lets the screen lock and hides the keyboard and any loading cover still up |
 | `{type:'lm', id, mode, think, local, online, maxChars, timeoutMs, fallback?}` | **Bots**: `BotChatModel.handle`; the answer comes as `LostCityHost.bots.lmReply` (ARCHITECTURE.md §7.1) |
 | `{type:'lm-key', action:'set'\|'remove'}` | **Bots**: `set` presents a `UIAlertController` with a secure field ("Claude API key"; the keyboard bridge gives up first responder while it is up); Save keeps a key that can be one in the Keychain. The page hears a status (`LostCityHost.bots.lmStatus`) |
-| `{type:'lm-warm'}` | **Bots**: loads the on-device model in the background (the player entered the world with a model chosen) |
+| `{type:'lm-warm'}` | **Bots**: loads the on-device model in the background (the player starts to chat with a model chosen, or enters the world while no quick load is on record: `BotChatModel`'s `ModelLoadRecord`, the status's `lastLoadMs`) |
 | `{type:'debug', id, action, …}` | DEBUG builds only; see [Testing](#testing) |
 
 The separate `log` handler takes `{level, text}`, printed as `[js:<level>] text`. A document-start
@@ -269,6 +269,8 @@ whole 4 s deadline, and through the run loop 6 ms (above, Threading).
 | `lm-endpoint` | `{url}`: Claude's endpoint (a local mock in the tests; none: the API's) |
 | `lm-key-alert` | `{text, button: 'save' \| 'cancel'}`: types into the presented key box and presses the button; returns `shown`, `secure`, `firstResponder`, `title` |
 | `activity` | Counts as user activity (keeps the screen awake during a long in-app test) |
+| `keep-awake` | `{on}`: keeps the screen awake outside the world too (a soak measuring the title, `app-test --soak`); returns the keep-awake flag |
+| `launch-test` | Returns the `-LostCityTest` launch argument (base64 JSON: the soak and which launch of a series, `app-test --soak`; the argument domain only), or null |
 
 `{type:'lm-bench', id, action}` (DEBUG) runs the on-device model directly for its benchmark on a phone (`app-test.mjs
 --lm-bench`): `generate` {system, user, think?, timeoutMs} (the line, its timings and its note; `think` from `--lm-think`),

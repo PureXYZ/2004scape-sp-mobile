@@ -42,6 +42,16 @@
             canvas.height = Math.max(1, innerHeight | 0);
         }
     </script>
-    <script type="module" src="client/mapview.js"></script>
+    <!-- libbzip2 for worldmap.jag while the map loads it (bzip2.js; worldmap.js drops it once the map is ready), then the
+         map, fetched meanwhile -->
+    <link rel="modulepreload" href="client/mapview.js">
+    <script src="bzip2.js"></script>
+    <script type="module">
+        const decoder = await window.__lcBzip2?.load('engine/bzip2.wasm');
+        if (decoder) {
+            globalThis.__LC_BZIP2__ = decoder;
+        }
+        await import('./client/mapview.js');
+    </script>
 </body>
 </html>

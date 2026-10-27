@@ -287,6 +287,7 @@ class AndroidBotChat private constructor(
             val local = LocalModel(ModelAssets.load(app, log, debug), native, MainThread, log) { DeviceStats.headroomBytes(app) }
             val keyStore = AndroidModelKeyStore(app, log)
             val model = BotChatModel(local, OnlineModel(MainThread), keyStore, log)
+            model.loadRecord = AndroidLoadRecord(app)
             return AndroidBotChat(app, model, keyStore, ThermalGate(app), log, debug)
         }
     }

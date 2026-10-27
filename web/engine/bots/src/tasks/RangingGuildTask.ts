@@ -36,6 +36,7 @@ import { botAnswerDialogue, botScript, interactHeldOp, getBaseLevel, PlayerStat 
 import { moveItems } from '#/engine/bot/port/BotInventoryCompat.js';
 import { MembersPlaces } from '#/engine/bot/BotKnowledge.js';
 import { countMinigame, noteOutingEnd, noteOutingStart, sayMembers } from '#/engine/bot/port/BotOutings.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** the competition's fee (274's judge) */
 export const RANGING_FEE = 200;
@@ -381,7 +382,7 @@ export class RangingGuildTask extends BotTask {
         for (let i = 0; i < stands.length; i++) {
             const [x, z] = stands[(start + i) % stands.length];
             let taken = false;
-            for (const other of World.playerLoop.all()) {
+            for (const other of worldPlayers()) {
                 if (other !== player && other.level === 0 && other.x === x && other.z === z) {
                     taken = true;
                     break;

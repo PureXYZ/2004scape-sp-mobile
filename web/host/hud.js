@@ -123,7 +123,9 @@
         zoomNotch: null, // where the knob last stopped with a click: 'min', 'max', 'detent'
         yaw: -1,
         tapDrop: false, // tap-to-drop is on (the chat bar's drop button, Client.setTapToDrop); off in a new session
-        rafId: 0
+        followFrames: false, // update() runs after each of the client's frames (startLoop)...
+        hookedClient: null, // ...through this client's mainredraw
+        rafId: 0 // (a client without mainredraw: the display's frames instead)
     };
 
     function init(hostApi) {
@@ -953,13 +955,49 @@
 
     // ---------------------------------------------------------------------------------------------------- state
 
+    // The HUD follows the client's frames, not the display's: what it shows changes only when the client draws (its
+    // mainredraw, at the game's frame rate) or when the host calls update() itself (a tap on the HUD, the keyboard, a
+    // layout), so an update right after each client frame lands in the same rendering update as before, without a
+    // requestAnimationFrame callback, and the browser frame it asks for, on every vsync (60 a second on an iPhone, up
+    // to 120 on a Pixel). A client without mainredraw (the gallery's stub) keeps the display's frames.
     function startLoop() {
-        if (!state.rafId) {
+        if (state.followFrames || state.rafId) {
+            return;
+        }
+        if (followClientFrames()) {
+            state.followFrames = true;
+        } else {
             state.rafId = requestAnimationFrame(loop);
         }
     }
 
+    function followClientFrames() {
+        const c = api.client();
+        if (typeof c?.mainredraw !== 'function') {
+            return false;
+        }
+        if (state.hookedClient !== c) {
+            const draw = c.mainredraw;
+            c.mainredraw = async function (...args) {
+                const result = await draw.apply(this, args);
+                if (state.followFrames && state.active) {
+                    try {
+                        update();
+                    } catch (err) {
+                        // (as the frame loop did: the HUD stops updating, the game goes on)
+                        state.followFrames = false;
+                        console.error('[hud] update failed', err);
+                    }
+                }
+                return result;
+            };
+            state.hookedClient = c;
+        }
+        return true;
+    }
+
     function stopLoop() {
+        state.followFrames = false;
         if (state.rafId) {
             cancelAnimationFrame(state.rafId);
             state.rafId = 0;

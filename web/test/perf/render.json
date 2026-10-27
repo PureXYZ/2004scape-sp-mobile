@@ -1,0 +1,9 @@
+{
+    "description": "The rendering A/B in one run (0 bots): the title, Lumbridge idle and walking, 70 s each, recorded 60 s each.",
+    "bots": 0,
+    "phases": [
+        { "name": "title", "where": "title", "sec": 70, "traces": [{ "set": "am", "at": 3, "sec": 60 }] },
+        { "name": "lumbridge-idle", "tele": "0,50,50,22,18", "vars": { "option_music": 2, "option_sounds": 2 }, "sec": 70, "traces": [{ "set": "am", "at": 3, "sec": 60 }] },
+        { "name": "lumbridge-walk", "walk": true, "sec": 70, "traces": [{ "set": "am", "at": 3, "sec": 60 }] }
+    ]
+}

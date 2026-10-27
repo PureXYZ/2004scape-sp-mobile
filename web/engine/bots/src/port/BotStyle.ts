@@ -11,8 +11,8 @@
 //     followed by a "*word" correction line.
 // A styled line the 274 word filter would change (the filter reads across words) or with a character the chat codec
 // drops falls back to the line as written.
-import WordEnc from '#/cache/wordenc/WordEnc.js';
 import type { Persona } from '#/engine/bot/port/BotPersona.js';
+import { botFilter } from '#/engine/bot/port/BotFilter.js';
 
 export interface Styled {
     /** the line to say */
@@ -79,7 +79,7 @@ const LAUGH_WORD = /\b(lol|lmao|haha|rofl|xd|hehe)\b/;
 
 /** the 274 filter leaves the line alone and the chat codec carries every character */
 export function sayable(line: string): boolean {
-    return CHARSET.test(line.toLowerCase()) && WordEnc.filter(line) === line;
+    return CHARSET.test(line.toLowerCase()) && botFilter(line) === line;
 }
 
 /**

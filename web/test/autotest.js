@@ -19,6 +19,15 @@
 //   LCTEST INFO lm-bench {...}          (app-test --lm-bench) a sample of the on-device chat model's bench, every 10 s
 //   LCTEST INFO lm-bench-summary {...}  its summary per phase, before the gate's PASS/FAIL lines
 //   LCTEST DONE pass=<n> fail=<m>
+// With app-test --soak (a soak of web/test/perf/, sent at launch: below, "soak") the run measures phases instead of the
+// checks after the login:
+//   LCTEST INFO soak-startup {...}      this launch's start-up marks
+//   LCTEST ACTION relaunch [{...}]      (a start-up series) the driver launches the app again, with the next number
+//                                       and the settings to set back at the end (restoreBots), which a launch forgets
+//   LCTEST INFO soak-phase-start <name> <epoch ms>
+//   LCTEST ACTION soak <name>.<set> <seconds> <set>   driver records the window (xctrace on the iPhone, samples elsewhere)
+//   LCTEST INFO soak-summary {...}      a phase's numbers; soak-raw {...} its frame and tick samples
+//   LCTEST INFO <kind>-part <id> <i>/<n> <text>   a line longer than the console's 16,000 characters, in parts
 (() => {
     'use strict';
 
@@ -28,17 +37,21 @@
     const STATE_KEY = 'lctest.state';
     const BOTS_KEY = 'lctest.bots'; // the Bots setting this run restarted the page for
     const BOTS_BEFORE_KEY = 'lctest.botsBefore'; // {bots, jmod}: the settings the app had before this run changed them
+    const SOAK_KEY = 'lctest.soak'; // the soak's phase while it runs (a page that comes back with it set was reloaded)
     // (the app's handler as host.js picks it: WKWebView's on iOS, the Android app's bridge there: docs/ANDROID.md §3.1)
     const native = (window.webkit?.messageHandlers ?? window.LostCityNativeBridge)?.native ?? null;
 
     // ---- the engine worker's messages, seen by a wrapper around the page's Worker (this script runs before host.js
     // starts the engine on DOMContentLoaded): what the page asks for (init), what the engine says it loaded (booted,
     // ready), its error lines, and when its data arrives (in game: one message per tick, at the end of the tick)
-    const engine = { init: null, booted: null, ready: null, errors: [], arrivals: [] };
+    // (and for a soak: when the worker was made and the world's start began, the engine's 'lctest-perf' answers)
+    const engine = { init: null, booted: null, ready: null, errors: [], arrivals: [], worker: null, createdAt: null, startAt: null, perfWaiters: new Map() };
     const PageWorker = window.Worker;
     window.Worker = class extends PageWorker {
         constructor(...args) {
             super(...args);
+            engine.worker = this;
+            engine.createdAt = performance.now();
             this.addEventListener('message', event => {
                 const msg = event.data;
                 if (msg?.type === 'data') {
@@ -47,7 +60,12 @@
                         engine.arrivals.splice(0, 2048);
                     }
                 } else if (msg?.type === 'booted' || msg?.type === 'ready') {
-                    engine[msg.type] = { ...msg };
+                    engine[msg.type] = { ...msg, at: performance.now() };
+                } else if (msg?.type === 'progress' && msg.stage === 'start' && engine.startAt === null) {
+                    engine.startAt = performance.now();
+                } else if (msg?.type === 'lctest-perf') {
+                    engine.perfWaiters.get(msg.reqId)?.(msg);
+                    engine.perfWaiters.delete(msg.reqId);
                 } else if (msg?.type === 'log' && msg.level === 'error') {
                     engine.errors.push(String(msg.text).slice(0, 300));
                 }
@@ -60,6 +78,22 @@
             return super.postMessage(...args);
         }
     };
+
+    // When host.js makes the client (window.__client), for a soak's start-up marks: the first assignment turns this into
+    // a plain property again and notes the time; nothing else changes.
+    const clientMade = { at: null, hooks: [] };
+    Object.defineProperty(window, '__client', {
+        configurable: true,
+        enumerable: true,
+        get: () => undefined,
+        set(value) {
+            Object.defineProperty(window, '__client', { value, writable: true, configurable: true, enumerable: true });
+            clientMade.at = performance.now();
+            for (const hook of clientMade.hooks) {
+                hook(value);
+            }
+        }
+    });
 
     // A count of bots the Settings sheet does not offer (app-test --bots 75) is added to its Bots row before host.js
     // checks the stored settings against the sheet, which would take the nearest count it offers.
@@ -135,6 +169,27 @@
             }, 5000);
         });
     }
+
+    // What the driver launched the app with (app-test --soak; the DEBUG builds' launch-test action: the iOS launch argument
+    // -LostCityTest, Android's launch extra lostcity.test): base64 of {soak, launch, clean}, or null (a run without one).
+    // Asked at once, before the client exists, so that a soak's start-up marks see it made (soak, below).
+    let launchTest = null;
+    const launchTestRead = (async () => {
+        const raw = await debug('launch-test');
+        if (typeof raw !== 'string' || !raw) {
+            return null;
+        }
+        try {
+            launchTest = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(raw), ch => ch.charCodeAt(0))));
+        } catch (error) {
+            out(`INFO soak: the launch's test argument is not base64 JSON (${error})`);
+            return null;
+        }
+        if (launchTest?.soak) {
+            trackStartup();
+        }
+        return launchTest;
+    })();
 
     // ---- driver requests are fire-and-forget (the driver cannot reach the page); the page waits for their effects
     async function shot(name) {
@@ -354,6 +409,10 @@
     }
 
     async function wantedBots() {
+        const soakBots = (await launchTestRead)?.soak?.bots;
+        if (Number.isInteger(soakBots) && soakBots >= 0) {
+            return soakBots; // (app-test --soak: the soak's count, which --bots can set)
+        }
         const config = await readConfig();
         const count = Number(config?.bots);
         return config && Number.isInteger(count) && count >= 0 ? count : null;
@@ -370,6 +429,7 @@
         } catch {
             // no sessionStorage: no restart either (see below)
         }
+        settingsRestart = restarted;
         if (wanted === null) {
             if (current > 0) {
                 out(`INFO the app runs ${current} bots (its own setting: 500 by default; app-test --bots 0 turns them off)`);
@@ -382,13 +442,15 @@
             wanted = current;
         }
         const name = `bots: the page asks the engine for ${wanted ? `${wanted} bots` : 'none'} (Settings › World › Bots${restarted ? ', set by a restart' : ''} → init config.bots.count)`;
-        // the bots' checks teleport the character with ::tele: with Settings › World › Jmod Off the run turns it on too
-        const jmodOff = wanted > 0 && window.LostCityHost?.settings?.jmod === false;
+        // the bots' checks teleport the character with ::tele: with Settings › World › Jmod Off the run turns it on too (a
+        // soak too: its phases teleport and set the game's options with :: commands)
+        const jmodOff = (wanted > 0 || !!launchTest?.soak) && window.LostCityHost?.settings?.jmod === false;
         if ((current !== wanted || jmodOff) && !restarted) {
             const values = { bots: wanted, ...(jmodOff ? { jmod: true } : {}) };
             try {
                 sessionStorage.setItem(BOTS_KEY, String(wanted));
-                sessionStorage.setItem(BOTS_BEFORE_KEY, JSON.stringify({ bots: Number.isInteger(current) ? current : 0, ...(jmodOff ? { jmod: false } : {}) })); // (set back at the end)
+                // (set back at the end; a soak's later launch has what the first one changed)
+                sessionStorage.setItem(BOTS_BEFORE_KEY, JSON.stringify(launchTest?.before ?? { bots: Number.isInteger(current) ? current : 0, ...(jmodOff ? { jmod: false } : {}) }));
             } catch {
                 check(name, false, `the setting is ${current}, and without sessionStorage the run cannot restart to change it`);
                 return true;
@@ -513,15 +575,28 @@
         check('bots: the title ("Continue as", Characters) lists only human characters, no bot', ok, JSON.stringify({ continueAs: names[0] ?? null, listed, humans: humans.size, botsInStore: bots.length }));
     }
 
+    // What applyBots changed, as it was before ({bots, jmod?}, or a number from an older run), or null: kept in the page's
+    // sessionStorage, which a soak's next launch does not have, so the driver hands it on (ACTION relaunch, launchTest).
+    function settingsBefore() {
+        try {
+            const saved = JSON.parse(sessionStorage.getItem(BOTS_BEFORE_KEY) ?? 'null');
+            if (saved !== null) {
+                return saved;
+            }
+        } catch {
+            // no sessionStorage
+        }
+        return launchTest?.before ?? null;
+    }
+
     // The Bots setting as it was before the run changed it (applyBots), stored natively again; the page that runs now
     // keeps its own until it restarts. Nothing if the run did not change it.
     async function restoreBots() {
-        let saved = null;
+        const saved = settingsBefore();
         try {
-            saved = JSON.parse(sessionStorage.getItem(BOTS_BEFORE_KEY) ?? 'null');
             sessionStorage.removeItem(BOTS_BEFORE_KEY);
         } catch {
-            saved = null;
+            // ignore
         }
         const before = Number.isInteger(saved) ? saved : saved?.bots; // (a number: from a run before Jmod was restored too)
         if (!Number.isInteger(before)) {
@@ -757,6 +832,551 @@
         }
     }
 
+    // ---- soak (app-test --soak <config>: web/test/perf/*.json, docs/BUILDING.md §4)
+    // With a soak in the launch's test argument (launchTest above) the run measures instead of checking. Every launch
+    // reports its start-up marks (soak-startup: the page's own and the engine's, src/autotest/perf.ts). A start-up series
+    // (soak.startup.launches N) asks the driver for another launch until N clean ones (launched, not the run's restart
+    // for the settings) are measured. Then the phases, in the soak's order: those `where: 'title'` before the login, the
+    // others after it. Each is a window of `sec` seconds (after `settleSec`, 3) in which it asks the driver to record
+    // (`traces`: [{set, at, sec}], xctrace on the iPhone, samples on a simulator or Android; by default one 'am' over the
+    // window) and measures from inside: the client's frames (mainredraw and mainloop wrapped), the page's display frames
+    // (rAF), the engine's ticks as the engine times them (durations, start to start, World's phases, the bots' share) and
+    // as the page sees them, the app's memory and heat (native stats), music and audio. Before its window a phase can
+    // teleport (`tele`: "level,mx,mz,lx,lz"), wait for the bots to fill the world (`waitFill`: seconds at most), set game
+    // options (`vars`: {varp: value} with ::setvar, e.g. option_music 4 = Music off, 2 = the default), suspend the
+    // AudioContext (`audioOff`), walk to and fro (`walk`, a minimap tap every `walkEveryMs`, 3500), ask the chat model
+    // (`lm`: {everySec, think}, the build's lmPrompts) or go to the background for its seconds (`background`).
+    let settingsRestart = false; // (applyBots: this page is the run's restart for the settings)
+    const boot = { client100: null, client100Exact: false, loaderFade: null };
+
+    // the client reaching 100 % (its drawProgress wrapped from the moment host.js makes it) and the loader starting to fade
+    function trackStartup() {
+        const hook = client => {
+            const draw = client?.drawProgress;
+            if (typeof draw !== 'function' || (client.lastProgressPercent ?? 0) >= 100) {
+                return; // (too late: soakRun's poll notes it)
+            }
+            client.drawProgress = function (message, progress) {
+                if (progress >= 100 && boot.client100 === null) {
+                    boot.client100 = performance.now();
+                    boot.client100Exact = true;
+                }
+                return draw.call(this, message, progress);
+            };
+        };
+        if (window.__client) {
+            hook(window.__client);
+        } else {
+            clientMade.hooks.push(hook);
+        }
+        const watchLoader = () => {
+            const loading = document.getElementById('loading');
+            if (!loading) {
+                return;
+            }
+            const seen = () => {
+                if (boot.loaderFade === null && (loading.classList.contains('fade') || loading.hidden)) {
+                    boot.loaderFade = performance.now();
+                }
+            };
+            seen();
+            new MutationObserver(seen).observe(loading, { attributes: true, attributeFilter: ['class', 'hidden'] });
+        };
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', watchLoader, { once: true });
+        } else {
+            watchLoader();
+        }
+    }
+
+    // A soak's value, with the run it belongs to (the driver's: a phone's app log keeps earlier runs' lines); a line too
+    // long for the console bridges (16,000 characters) goes out in numbered parts the drivers join.
+    let partsSent = 0;
+    function emit(kind, value) {
+        const text = JSON.stringify({ run: launchTest?.run ?? null, ...value });
+        const size = 15000;
+        if (text.length <= size) {
+            out(`INFO ${kind} ${text}`);
+            return;
+        }
+        const id = `${kind}-${launchTest?.run ?? 'run'}-${launchTest?.launch ?? 1}-${++partsSent}`;
+        const n = Math.ceil(text.length / size);
+        for (let i = 0; i < n; i++) {
+            out(`INFO ${kind}-part ${id} ${i + 1}/${n} ${text.slice(i * size, (i + 1) * size)}`);
+        }
+    }
+
+    let perfRequests = 0;
+    // the engine's own numbers (src/autotest/perf.ts): the ticks from `since` on, the start-up marks, the world's counts
+    function enginePerf(since) {
+        if (!engine.worker) {
+            return Promise.resolve(null);
+        }
+        return new Promise(resolve => {
+            const reqId = `perf-${++perfRequests}`;
+            engine.perfWaiters.set(reqId, resolve);
+            engine.worker.postMessage({ type: 'lctest-perf', reqId, since });
+            setTimeout(() => {
+                if (engine.perfWaiters.delete(reqId)) {
+                    resolve(null);
+                }
+            }, 5000);
+        });
+    }
+
+    const pageMs = epochMs => (Number.isFinite(epochMs) ? Math.round((epochMs - performance.timeOrigin) * 10) / 10 : null);
+    const round = v => (Number.isFinite(v) ? Math.round(v * 10) / 10 : null);
+
+    function dist(list) {
+        const d = list.filter(Number.isFinite).sort((a, b) => a - b);
+        const n = d.length;
+        if (!n) {
+            return null;
+        }
+        const q = p => +d[Math.min(n - 1, Math.floor(p * n))].toFixed(2);
+        const sum = d.reduce((a, b) => a + b, 0);
+        return { n, avg: +(sum / n).toFixed(2), p50: q(0.5), p90: q(0.9), p95: q(0.95), p99: q(0.99), max: +d[n - 1].toFixed(2), sum: Math.round(sum) };
+    }
+    const over = (list, ms) => list.filter(v => v > ms).length;
+
+    async function soakStartup(titlePolledAt) {
+        await waitFor(() => boot.loaderFade !== null, 3000, 20); // (host.js checks for the title every 200 ms)
+        const nav = performance.getEntriesByType('navigation')[0];
+        const clean = nav?.type !== 'reload' && !settingsRestart;
+        const marks = (await enginePerf(1e12))?.marks ?? {};
+        const ready = engine.ready?.at ?? null;
+        const client100 = boot.client100 ?? (c()?.lastProgressPercent === 100 ? titlePolledAt : null);
+        const stats = await lmBench('stats');
+        const record = {
+            launch: launchTest.launch ?? 1,
+            clean,
+            navigation: nav?.type ?? null,
+            settingsRestart,
+            bots: window.LostCityHost?.settings?.bots ?? 0,
+            bundle: engine.booted?.bundle ?? null,
+            // ms after the page's navigation started (performance.now()); the engine's marks put on the same clock
+            page: { domInteractive: round(nav?.domInteractive), domContentLoaded: round(nav?.domContentLoadedEventStart), load: round(nav?.loadEventEnd) },
+            workerCreated: round(engine.createdAt),
+            engineBooted: round(engine.booted?.at),
+            preloadMs: round(engine.booted?.preloadMs),
+            evalMs: round(engine.booted?.evalMs),
+            engineEvaluated: pageMs(marks.evaluated),
+            worldStart: pageMs(marks.worldStart),
+            worldStarted: pageMs(marks.worldStarted),
+            firstTickStart: pageMs(marks.firstTickStart),
+            firstTickEnd: pageMs(marks.firstTickEnd),
+            readySent: pageMs(marks.ready),
+            engineReady: round(ready),
+            readyMs: round(engine.ready?.ms),
+            clientCreated: round(clientMade.at),
+            client100: round(client100),
+            client100Exact: boot.client100Exact,
+            // what host.js waits for to fade its loader (titleReady: the client at 100 % with its flames, the engine ready)
+            titleReady: client100 !== null && ready !== null ? round(Math.max(client100, ready)) : round(titlePolledAt),
+            titlePolled: round(titlePolledAt),
+            loaderFade: round(boot.loaderFade),
+            native: stats ? { footprintMB: round(stats.footprintMB), availableMB: round(stats.availableMB), thermal: stats.thermal ?? null } : null
+        };
+        emit('soak-startup', record);
+        return record;
+    }
+
+    // the client's frames and the page's display frames, recorded while `on` (a phase's window)
+    const frames = { intervals: [], draw: [], loop: [], last: 0, on: false };
+    const raf = { times: [], cbMs: [], lastT: -1, on: false };
+    let frameHooks = false;
+
+    function installFrameHooks() {
+        const client = c();
+        if (frameHooks || !client) {
+            return;
+        }
+        frameHooks = true;
+        const redraw = client.mainredraw;
+        const loop = client.mainloop;
+        if (typeof redraw !== 'function' || typeof loop !== 'function') {
+            out('INFO soak: the client has no mainredraw/mainloop to time');
+            return;
+        }
+        client.mainredraw = function (...a) {
+            if (!frames.on) {
+                return redraw.apply(this, a);
+            }
+            const t = performance.now();
+            if (frames.last) {
+                frames.intervals.push(t - frames.last);
+            }
+            frames.last = t;
+            return Promise.resolve(redraw.apply(this, a)).then(r => {
+                frames.draw.push(performance.now() - t);
+                return r;
+            });
+        };
+        client.mainloop = function (...a) {
+            if (!frames.on) {
+                return loop.apply(this, a);
+            }
+            const t = performance.now();
+            return Promise.resolve(loop.apply(this, a)).then(r => {
+                frames.loop.push(performance.now() - t);
+                return r;
+            });
+        };
+        // (the HUD asks for every frame by name, so it gets this from its next frame on)
+        const pageRaf = window.requestAnimationFrame.bind(window);
+        window.requestAnimationFrame = cb =>
+            pageRaf(t => {
+                if (!raf.on) {
+                    return cb(t);
+                }
+                const s0 = performance.now();
+                try {
+                    return cb(t);
+                } finally {
+                    const ms = performance.now() - s0;
+                    if (t !== raf.lastT) {
+                        raf.lastT = t;
+                        raf.times.push(t);
+                        raf.cbMs.push(ms);
+                    } else if (raf.cbMs.length) {
+                        raf.cbMs[raf.cbMs.length - 1] += ms;
+                    }
+                }
+            });
+    }
+
+    // (on: from no samples; off: the samples kept for the phase's summary)
+    function recordFrames(on) {
+        if (on) {
+            frames.intervals = [];
+            frames.draw = [];
+            frames.loop = [];
+            frames.last = 0;
+            raf.times = [];
+            raf.cbMs = [];
+            raf.lastT = -1;
+        }
+        frames.on = on;
+        raf.on = on;
+    }
+
+    const WALK = [[18, 8], [-18, -8], [8, -18], [-8, 18]]; // minimap taps around its centre: a few tiles there and back
+
+    async function soakPrepare(spec) {
+        if (spec.tele) {
+            await dismissTutorialMessage();
+            const [lv, mx, mz, lx, lz] = String(spec.tele).split(',').map(Number);
+            window.LostCityHost.keyboard.insertText(`::tele ${spec.tele}\n`);
+            const there = await waitFor(() => same(position(), [mx * 64 + lx, mz * 64 + lz, lv]), 10000);
+            out(`INFO soak: ::tele ${spec.tele} ${there.ok ? 'arrived' : `did not arrive (${JSON.stringify(position())})`}`);
+            await sleep(3000);
+        }
+        for (const [name, value] of Object.entries(spec.vars ?? {})) {
+            window.LostCityHost.keyboard.insertText(`::setvar ${name} ${value}\n`);
+            await sleep(1200);
+        }
+        if (spec.vars) {
+            out(`INFO soak: game options ${JSON.stringify(spec.vars)}: music ${c()?.midiActive ? 'on' : 'off'}, sound ${c()?.waveEnabled ? 'on' : 'off'}`);
+        }
+        if (spec.waitFill) {
+            const want = Math.floor((window.LostCityHost?.settings?.bots ?? 0) * 0.95);
+            const started = performance.now();
+            let active = 0;
+            while (performance.now() - started < spec.waitFill * 1000) {
+                active = (await enginePerf(1e12))?.extra?.active ?? 0;
+                if (active >= want) {
+                    break;
+                }
+                await sleep(3000);
+                void debug('activity');
+            }
+            out(`INFO soak: ${active} bots active after ${Math.round((performance.now() - started) / 1000)} s (want ${want})`);
+        }
+        if (spec.audioOff) {
+            try {
+                await window.audioContext?.suspend();
+            } catch {
+                // no audio
+            }
+            out(`INFO soak: the AudioContext is ${window.audioContext?.state ?? 'absent'}`);
+        }
+    }
+
+    async function soakBackground(spec) {
+        recordLifecycle();
+        const before = lifecycleEvents.length;
+        const p0 = await enginePerf(1e12);
+        const n0 = await lmBench('stats');
+        const at = Date.now();
+        out(`INFO soak-phase-start ${spec.name} ${at}`);
+        const traces = spec.traces ?? [{ set: 'am', at: 0, sec: Math.max(5, spec.sec - 8) }];
+        for (const t of traces) {
+            out(`ACTION soak ${spec.name}.${t.set} ${t.sec} ${t.set}`);
+        }
+        await sleep(300);
+        out(`ACTION background ${spec.sec}`);
+        const back = await waitFor(() => lifecycleEvents.slice(before).some(e => e.event === 'foreground' || e.event === 'resume'), (spec.sec + 90) * 1000, 250);
+        const p1 = await enginePerf(1e12);
+        await sleep(3000);
+        const n1 = await lmBench('stats');
+        emit('soak-summary', {
+            name: spec.name,
+            kind: 'background',
+            sec: spec.sec,
+            window: { start: at, end: Date.now() },
+            back: back.ok,
+            events: lifecycleEvents.slice(before).map(e => e.event),
+            ticksWhileAway: p0 && p1 ? p1.ticks - p0.ticks : null,
+            ingame: !!c()?.ingame,
+            native: { footprintMB: [n0, n1].map(n => round(n?.footprintMB)), thermal: [n0, n1].map(n => n?.thermal ?? null) }
+        });
+        await sleep(5000);
+    }
+
+    async function soakPhase(spec) {
+        const name = spec.name;
+        try {
+            sessionStorage.setItem(SOAK_KEY, name);
+        } catch {
+            // (a reload then goes unnoticed: the driver counts WebContent terminations too)
+        }
+        if (spec.background) {
+            return soakBackground(spec);
+        }
+        await soakPrepare(spec);
+        // the chat model: loaded (one reply, cold) before the window, then a reply every lm.everySec in it
+        const lm = spec.lm ?? null;
+        const prompts = (autotestConfig?.lmPrompts ?? []).filter(p => p?.system && p?.user);
+        const gens = [];
+        let lmRunning = null;
+        let lmIndex = 0;
+        if (lm) {
+            if (!prompts.length) {
+                check(`soak ${name}: the build has the chat model's prompts (lmPrompts)`, false);
+            } else {
+                out(`INFO soak: lm options ${JSON.stringify(await lmBench('options', { idleSec: 3600 }))}`);
+                const cold = await lmBench('generate', { system: prompts[0].system, user: prompts[0].user, think: lm.think === true, timeoutMs: 120000 }, 130000);
+                out(`INFO soak: lm cold ${JSON.stringify({ text: cold?.text ?? null, error: cold?.error ?? null, timings: cold?.timings ?? null })}`);
+            }
+        }
+        await sleep((spec.settleSec ?? 3) * 1000);
+        void debug('activity');
+
+        const traces = (spec.traces ?? [{ set: 'am', at: 1, sec: Math.max(5, spec.sec - 6) }]).map(t => ({ ...t, sent: false }));
+        const sendTraces = elapsedSec => {
+            for (const t of traces) {
+                if (!t.sent && elapsedSec >= t.at) {
+                    t.sent = true;
+                    out(`ACTION soak ${name}.${t.set}${t.tag ?? ''} ${t.sec} ${t.set}`);
+                }
+            }
+        };
+        const p0 = await enginePerf(1e12);
+        const ticks = { start: [], tickMs: [], callbackMs: [], phases: [], extraMs: [] };
+        let nextTick = p0?.ticks ?? 0;
+        const pollTicks = async () => {
+            const r = await enginePerf(nextTick);
+            if (!r) {
+                return null;
+            }
+            for (let k = 0; k < r.start.length; k++) {
+                ticks.start.push(r.start[k]);
+                ticks.tickMs.push(r.tickMs[k]);
+                ticks.callbackMs.push(r.callbackMs[k]);
+                ticks.phases.push(r.phases.slice(k * 12, k * 12 + 12));
+                ticks.extraMs.push(r.extraMs?.[k] ?? null);
+            }
+            nextTick = r.ticks;
+            return r;
+        };
+        const nat = [await lmBench('stats')];
+        const startEpoch = Date.now();
+        out(`INFO soak-phase-start ${name} ${startEpoch}`);
+        sendTraces(0);
+        recordFrames(true);
+        const t0 = performance.now();
+        const t0Epoch = performance.timeOrigin + t0;
+        const fps = [];
+        let crowd = 0;
+        let walkI = 0;
+        let nextWalk = t0;
+        let nextGen = t0;
+        let lastActivity = t0;
+        let lastPoll = t0;
+        while (performance.now() - t0 < spec.sec * 1000) {
+            await sleep(1000);
+            const now = performance.now();
+            fps.push(c().fps);
+            crowd = Math.max(crowd, c().playerCount ?? 0);
+            sendTraces((now - t0) / 1000);
+            if (lm && prompts.length && now >= nextGen && !lmRunning) {
+                const prompt = prompts[lmIndex++ % prompts.length];
+                const at = performance.now();
+                nextGen += (lm.everySec ?? 10) * 1000;
+                lmRunning = lmBench('generate', { system: prompt.system, user: prompt.user, think: lm.think === true, timeoutMs: 12000 }, 25000).then(reply => {
+                    gens.push({ at: Math.round(at - t0), ms: Math.round(performance.now() - at), chars: reply?.text?.length ?? null, error: reply?.error ?? (reply ? null : 'no answer'), timings: reply?.timings ?? null });
+                    lmRunning = null;
+                });
+            }
+            if (spec.walk && now >= nextWalk) {
+                const [dx, dy] = WALK[walkI++ % WALK.length];
+                clickGame(627 + dx, 85 + dy);
+                nextWalk += spec.walkEveryMs ?? 3500;
+            }
+            if (now - lastActivity > 50000) {
+                lastActivity = now;
+                void debug('activity'); // (the screen stays on while the run plays by itself)
+            }
+            if (fps.length % 15 === 0) {
+                nat.push(await lmBench('stats'));
+            }
+            if (now - lastPoll > 30000) {
+                lastPoll = now;
+                await pollTicks();
+            }
+        }
+        const t1 = performance.now();
+        const t1Epoch = performance.timeOrigin + t1;
+        recordFrames(false);
+        const endEpoch = Date.now();
+        const last = await pollTicks();
+        nat.push(await lmBench('stats'));
+        if (lmRunning) {
+            await lmRunning;
+        }
+        const audio = window.audioContext?.state ?? null; // (the window's: an audioOff phase resumes it now)
+        if (spec.audioOff) {
+            try {
+                await window.audioContext?.resume();
+            } catch {
+                // no audio
+            }
+        }
+        // the ticks that started in the window, and their start-to-start intervals (from the tick before the window)
+        const inWindow = [];
+        for (let k = 0; k < ticks.start.length; k++) {
+            if (ticks.start[k] >= t0Epoch && ticks.start[k] < t1Epoch) {
+                inWindow.push(k);
+            }
+        }
+        const pick = list => inWindow.map(k => list[k]);
+        const startIntervals = inWindow.filter(k => k > 0).map(k => ticks.start[k] - ticks.start[k - 1]);
+        const tickMs = pick(ticks.tickMs);
+        const PHASE_NAMES = ['cycle', 'world', 'clientIn', 'npc', 'player', 'logout', 'login', 'zone', 'clientOut', 'cleanup'];
+        const phasesAvgMs = inWindow.length ? Object.fromEntries(PHASE_NAMES.map((key, i) => [key, +(inWindow.reduce((sum, k) => sum + ticks.phases[k][i], 0) / inWindow.length).toFixed(2)])) : null;
+        const botsMs = pick(ticks.extraMs).filter(v => v !== null);
+        const rafIntervals = raf.times.slice(1).map((t, i) => t - raf.times[i]);
+        const wallMs = t1 - t0;
+        const footprints = nat.map(n => round(n?.footprintMB));
+        emit('soak-summary', {
+            name,
+            kind: spec.where === 'title' ? 'title' : 'ingame',
+            sec: Math.round(wallMs / 100) / 10,
+            window: { start: startEpoch, end: endEpoch },
+            bots: window.LostCityHost?.settings?.bots ?? 0,
+            ingame: !!c()?.ingame,
+            position: position(),
+            crowdMax: crowd,
+            fps: { median: median(fps), min: Math.min(...fps), samples: fps.length },
+            frames: { perSec: +(frames.intervals.length / (wallMs / 1000)).toFixed(1), interval: dist(frames.intervals), over25: over(frames.intervals, 25), over33: over(frames.intervals, 33), over50: over(frames.intervals, 50), over100: over(frames.intervals, 100), draw: dist(frames.draw), loopPerSec: +(frames.loop.length / (wallMs / 1000)).toFixed(1), loop: dist(frames.loop) },
+            raf: { perSec: +(raf.times.length / (wallMs / 1000)).toFixed(1), interval: dist(rafIntervals), over20: over(rafIntervals, 20), over34: over(rafIntervals, 34), over50: over(rafIntervals, 50), cbMs: dist(raf.cbMs) },
+            tickPage: tickTiming(t0),
+            ticks: last
+                ? {
+                      n: inWindow.length,
+                      tickMs: dist(tickMs),
+                      callbackMs: dist(pick(ticks.callbackMs)),
+                      startInterval: dist(startIntervals),
+                      intervalOver650: over(startIntervals, 650),
+                      intervalOver700: over(startIntervals, 700),
+                      intervalOver900: over(startIntervals, 900),
+                      over100: over(tickMs, 100),
+                      over300: over(tickMs, 300),
+                      phasesAvgMs,
+                      botsMs: botsMs.length ? dist(botsMs) : null,
+                      clamps: last.clamps - (p0?.clamps ?? 0),
+                      state: last.state,
+                      players: last.players,
+                      npcs: last.npcs
+                  }
+                : null,
+            botsState: last?.extra ?? null,
+            native: { footprintMB: footprints, availableMB: nat.map(n => round(n?.availableMB)), thermal: nat.map(n => n?.thermal ?? null), battery: nat.map(n => (n?.battery ? `${Math.round(n.battery.level * 100)}% ${n.battery.state}` : null)), lowPower: nat.at(-1)?.lowPower ?? null, lmLoaded: nat.map(n => n?.loaded ?? null) },
+            audio,
+            music: { song: c()?.midiSong ?? null, active: c()?.midiActive ?? null, volume: c()?.midiVolume ?? null, wave: c()?.waveEnabled ?? null },
+            lm: lm ? { gens: gens.length, ms: dist(gens.map(g => g.ms)), errors: gens.filter(g => g.error).length, list: gens } : null,
+            engineErrors: engine.errors.length
+        });
+        // the samples themselves (rounded to 0.1 ms; the ticks' starts in ms from the window's start)
+        emit('soak-raw', {
+            name,
+            frameIntervals: frames.intervals.map(round),
+            drawMs: frames.draw.map(round),
+            rafIntervals: rafIntervals.map(round),
+            tickStart: inWindow.map(k => round(ticks.start[k] - t0Epoch)),
+            tickMs: tickMs.map(round),
+            callbackMs: pick(ticks.callbackMs).map(round),
+            botsMs: botsMs.map(round)
+        });
+    }
+
+    async function soakRun(test) {
+        const soak = test.soak;
+        await readConfig(); // (the build's autotest.json: the chat model's prompts)
+        const title = await waitFor(() => c()?.lastProgressPercent === 100 && c()?.titleFlames && window.LostCityHost?.engineState === 'ready', 120000, 50);
+        const titlePolledAt = performance.now();
+        check('soak: title screen and world ready', title.ok, `${Math.round(titlePolledAt)} ms after navigation`);
+        if (!title.ok) {
+            return soakEnd();
+        }
+        const startup = await soakStartup(titlePolledAt);
+        const series = soak.startup?.launches ?? 0;
+        if (series > 0 && (test.clean ?? 0) + (startup.clean ? 1 : 0) < series) {
+            const before = settingsBefore();
+            out(`ACTION relaunch${before !== null ? ` ${JSON.stringify(before)}` : ''}`); // (the driver ends this launch and starts the next)
+            return;
+        }
+        const phases = soak.phases ?? [];
+        const firstIngame = phases.findIndex(p => (p.where ?? 'ingame') !== 'title');
+        if (firstIngame >= 0 && phases.slice(firstIngame).some(p => p.where === 'title')) {
+            check('soak: the title phases come before the others (the run cannot go back to the title)', false, phases.map(p => `${p.name}:${p.where ?? 'ingame'}`).join(' '));
+            return soakEnd();
+        }
+        out(`INFO soak: ${JSON.stringify({ name: soak.name ?? null, phases: phases.map(p => p.name), bots: window.LostCityHost?.settings?.bots ?? 0, nativeInfo: window.LostCityNative ? { platform: window.LostCityNative.platform ?? 'ios', build: window.LostCityNative.build, os: window.LostCityNative.osVersion, model: window.LostCityNative.deviceModel, simulator: window.LostCityNative.simulator, emulator: window.LostCityNative.emulator, webView: window.LostCityNative.webView } : null, ua: navigator.userAgent })}`);
+        if (window.LostCityNative?.platform !== 'android') {
+            // (the iPhone locks after its Auto-Lock time outside the world; Android's driver keeps the screen on itself)
+            out(`INFO soak: keep-awake ${JSON.stringify(await debug('keep-awake', { on: true }))}`);
+        }
+        installFrameHooks();
+        for (const spec of phases.slice(0, firstIngame < 0 ? phases.length : firstIngame)) {
+            await soakPhase(spec);
+        }
+        if (firstIngame >= 0) {
+            if (!(await login(null))) {
+                return soakEnd();
+            }
+            await sleep(3000);
+            await enterWorld();
+            for (const spec of phases.slice(firstIngame)) {
+                await soakPhase(spec);
+            }
+        }
+        return soakEnd();
+    }
+
+    async function soakEnd() {
+        try {
+            sessionStorage.removeItem(SOAK_KEY);
+        } catch {
+            // ignore
+        }
+        if (window.LostCityNative?.platform !== 'android') {
+            await debug('keep-awake', { on: false });
+        }
+        check('soak: no engine error lines', engine.errors.length === 0, engine.errors.slice(0, 3).join(' | '));
+        return finish();
+    }
+
     // ---- phases
     // ---- the World map (worldmap.js): the globe opens it; the map (mapview.html in an iframe on the app's own scheme)
     // loads, tells the host so (postMessage) and draws the player at its centre; what it costs in memory; Close puts its
@@ -791,19 +1411,9 @@
         check('Close closes the World map and its loop sleeps', asleep.ok);
     }
 
-    async function phaseA() {
-        out(`INFO phase A: ${JSON.stringify({ native: !!native, ua: navigator.userAgent, nativeInfo: window.LostCityNative ? { platform: window.LostCityNative.platform ?? 'ios', build: window.LostCityNative.build, os: window.LostCityNative.osVersion, model: window.LostCityNative.deviceModel, simulator: window.LostCityNative.simulator, emulator: window.LostCityNative.emulator, webView: window.LostCityNative.webView } : null })}`);
-        if (!(await login(null))) {
-            return finish();
-        }
-        await shot('ingame');
-        out('ACTION measure ingame');
-        if (native) {
-            check('screen kept awake while playing', (await debug('idle-timer')) === true);
-        }
-        await sleep(3000);
-
-        // Tutorial Island's first login opens the character designer; accept it, then walk with the minimap.
+    // After a login: Tutorial Island's first login opens the character designer (accepted), and the first visit's "how to
+    // play" card (checked and closed).
+    async function enterWorld() {
         if (c().mainModalId !== -1) {
             // "Accept" (classic 260,286: the designer is drawn at the viewport's modal offset, which the mobile layout
             // moves into the part of the world its HUD leaves free)
@@ -827,6 +1437,25 @@
             document.getElementById('howto-ok').click();
             await sleep(300);
         }
+    }
+
+    async function phaseA() {
+        if (launchTest?.soak) {
+            return soakRun(launchTest);
+        }
+        out(`INFO phase A: ${JSON.stringify({ native: !!native, ua: navigator.userAgent, nativeInfo: window.LostCityNative ? { platform: window.LostCityNative.platform ?? 'ios', build: window.LostCityNative.build, os: window.LostCityNative.osVersion, model: window.LostCityNative.deviceModel, simulator: window.LostCityNative.simulator, emulator: window.LostCityNative.emulator, webView: window.LostCityNative.webView } : null })}`);
+        if (!(await login(null))) {
+            return finish();
+        }
+        await shot('ingame');
+        out('ACTION measure ingame');
+        if (native) {
+            check('screen kept awake while playing', (await debug('idle-timer')) === true);
+        }
+        await sleep(3000);
+
+        // Tutorial Island's character designer and the how-to card, then walk with the minimap.
+        await enterWorld();
         const hudShown = !document.getElementById('hud')?.hidden;
         const surface = document.getElementById('surface-game');
         out(`INFO layout ${window.lcHost?.settings?.layout ?? '?'}: HUD ${hudShown ? 'shown' : 'hidden'}, world ${surface?.width}x${surface?.height}`);
@@ -982,6 +1611,14 @@
                 // the page was loaded again during the lm-bench: its WebContent process was terminated
                 sessionStorage.removeItem('lctest.lmbench');
                 check('lm-bench gate: no WebContent termination', false, 'the page was reloaded during the bench');
+                finish();
+                return;
+            }
+            const soakPhaseRunning = sessionStorage.getItem(SOAK_KEY);
+            if (soakPhaseRunning !== null) {
+                // the page was loaded again during a soak's phase (its WebContent process was terminated)
+                sessionStorage.removeItem(SOAK_KEY);
+                check('soak: the page is not reloaded during a phase', false, `reloaded during ${soakPhaseRunning}`);
                 finish();
                 return;
             }

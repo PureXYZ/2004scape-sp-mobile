@@ -32,6 +32,7 @@ import { CoordGrid } from '#/engine/CoordGrid.js';
 import ServerTriggerType from '#/engine/script/ServerTriggerType.js';
 import { personaOf, isRude } from '#/engine/bot/port/BotPersona.js';
 import type { PlannerKey } from '#/engine/bot/port/BotRoster.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 // ── the rates and caps (the spec's defaults; tuned to the humanlike runs where said) ─────────────────────────────────
 
@@ -306,7 +307,7 @@ export function humansNow(): readonly Player[] {
     if (now !== humansTick) {
         humansTick = now;
         humans = [];
-        for (const p of World.playerLoop.all()) if (p.is_bot !== true && p.slot !== -1) humans.push(p);
+        for (const p of worldPlayers()) if (p.is_bot !== true && p.slot !== -1) humans.push(p);
     }
     return humans;
 }

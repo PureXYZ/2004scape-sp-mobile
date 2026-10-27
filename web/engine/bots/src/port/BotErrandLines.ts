@@ -16,6 +16,7 @@ import { sayTyped } from '#/engine/bot/port/BotChat.js';
 import { countAsOwnLine } from '#/engine/bot/port/BotChatter.js';
 import { voiceFree } from '#/engine/bot/port/BotVoice.js';
 import { setErrandLineHook } from '#/engine/bot/tasks/ErrandTask.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** another player this near, on its floor */
 const COMPANY_TILES = 15;
@@ -24,7 +25,7 @@ const COMPANY_TILES = 15;
 export const errandLineStats = { said: 0, alone: 0, none: 0, byKind: {} as Record<string, number>, quest: 0, held: 0 };
 
 function companyNear(bot: Player): boolean {
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p !== bot && p.level === bot.level && Math.abs(p.x - bot.x) <= COMPANY_TILES && Math.abs(p.z - bot.z) <= COMPANY_TILES) return true;
     }
     return false;

@@ -12,7 +12,8 @@
 // - At most 3 requests at a time; more are answered 'busy' at once. Each has the page's `timeoutMs` (9 s) in all.
 // - The status (`LostCityHost.bots.lmStatus`, and `window.LostCityNative.lm` at document start): the on-device model (in
 //   this build at all, its name and size, whether it is loaded, whether it writes the note: `think` 'never', 'always' or
-//   'option') and the Claude key (set, its last four characters, refused by the API, the last problem).
+//   'option', how long its last load took: `lastLoadMs`, [ModelLoadRecord]) and the Claude key (set, its last four
+//   characters, refused by the API, the last problem).
 //
 // Main thread only, as the Swift class is @MainActor: every method, and every completion (LocalModel and OnlineModel post
 // theirs to the main thread). Messages and replies are plain maps in the Swift shapes (JsonBridge converts at the edge).
@@ -34,6 +35,9 @@ class BotChatModel(
 
     /** The Claude key, when a request needs it (the key store; a test's stand-in). */
     var readKey: () -> String? = { keyStore.read() }
+
+    /** The on-device model's last load time, kept across launches (the status's `lastLoadMs`; the app's, or in memory). */
+    var loadRecord: ModelLoadRecord = MemoryLoadRecord()
 
     /** A reply for the page (`LostCityHost.bots.lmReply`). */
     var onReply: ((Map<String, Any?>) -> Unit)? = null
@@ -71,7 +75,7 @@ class BotChatModel(
     private val stats = Stats()
 
     init {
-        local.onLoadedChange = { statusChanged() }
+        local.onLoadedChange = { loaded -> loadedChanged(loaded) }
     }
 
     // --------------------------------------------------------------------------------------------------------- status
@@ -84,6 +88,7 @@ class BotChatModel(
                 localStatus["bytes"] = it.bytes
             }
             local.unavailableReason?.let { localStatus["reason"] = it }
+            loadRecord.lastLoadMs?.let { localStatus["lastLoadMs"] = Math.round(it).toDouble() }
             val hint = ModelKeyStore.hint(readKey())
             val onlineStatus = linkedMapOf<String, Any?>("keySet" to (hint != null), "model" to OnlineModel.MODEL)
             hint?.let { onlineStatus["hint"] = it }
@@ -94,6 +99,11 @@ class BotChatModel(
 
     private fun statusChanged() {
         onStatus?.invoke(status)
+    }
+
+    private fun loadedChanged(loaded: Boolean) {
+        if (loaded) local.lastLoad?.firstOrNull()?.let { loadRecord.record(it) }
+        statusChanged()
     }
 
     // ------------------------------------------------------------------------------------- the key (Settings › Bot chat)
@@ -301,4 +311,30 @@ class BotChatModel(
             "requests" to stats.requests, "local" to stats.local, "online" to stats.online, "failed" to stats.failed,
             "busy" to stats.busy, "hot" to stats.hot, "inFlight" to inFlight,
         )
+}
+
+/**
+ * The on-device model's last load time on this phone (the status's `local.lastLoadMs`), kept across launches with the
+ * versions of the app and of Android it was measured under (android/llm AndroidLoadRecord): after an install, an app
+ * update or a system update there is none until the next load. The page loads the model on entering the world only
+ * until a load has been quick; after that, when the player starts to chat (host.js lm.warm). The iOS app's
+ * ModelLoadRecord, whose first load after an install is the slow one (Metal prepares the shaders, about 15 s); here
+ * the CPU's loads all take about as long (1.2-1.8 s on the emulator), so the first is quick already.
+ */
+interface ModelLoadRecord {
+    /** The last load's time (ms), when it was measured under these versions; null: none. */
+    val lastLoadMs: Double?
+
+    fun record(ms: Double)
+}
+
+/** A record in memory, for one launch (the unit tests and the Mac harness). */
+class MemoryLoadRecord(lastLoadMs: Double? = null) : ModelLoadRecord {
+    @Volatile
+    override var lastLoadMs: Double? = lastLoadMs
+        private set
+
+    override fun record(ms: Double) {
+        lastLoadMs = ms
+    }
 }

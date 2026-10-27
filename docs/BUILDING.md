@@ -228,11 +228,13 @@ node web/test/hud.mjs                     # the mobile HUD with real touches, ev
 node web/test/gallery/capture.mjs         # once: real game pixels for the gallery
 node web/test/gallery/gallery.mjs         # the HUD in every state at every phone size, in seconds (--platform android too)
 node web/test/upstream.test.mjs           # the upstream pins, the resolver and fetch-upstream
+node web/test/bzip2.test.mjs              # libbzip2 for the client's archives: the same bytes as its own decoder, and the fallback
 node web/client/test/typecheck.mjs        # the patched client type-checks like upstream
 node web/client/test/run.mjs --quick      # the client's touch, keyboard and login checks
 node web/engine/test/all.mjs              # the engine worker: vm sandbox, JavaScriptCore, Chrome, the bots' glue (about 10 min)
 node web/engine/bots/test/all.mjs         # the bot library (most of an hour; --full adds the long simulations)
 node web/test/native/lm-harness.mjs       # the iOS app's chat model code compiled for the Mac, against a mock of Claude's API
+node web/test/perf/perf.test.mjs          # the soak tooling below (configs, summaries, the A/B table), on made-up runs
 ```
 
 Screenshots and logs go to `build/tmp/`. The bots' own test tools (the world simulator, the humanlike report) are
@@ -253,12 +255,74 @@ The in-app test builds a self-playing variant and plays through boot, the native
 backgrounding, a dropped connection, a reload and a re-login, with screenshots in `build/tmp/app-test/`. After a device
 run, put the normal app back with `ios/scripts/deploy.sh`.
 
+### A/B on the phone (soaks)
+
+`app-test --soak <name>` measures instead of checking: a soak of `web/test/perf/` (`node web/test/perf/soak.mjs` lists
+them) runs its phases in the real app and writes per-phase numbers, so that a branch can be compared with main on the
+same phone. The soaks:
+
+| Soak | Bots | What |
+|---|---|---|
+| `title`, `lumbridge-idle`, `lumbridge-walk` | 0 | one phase each, 70 s (recorded 60 s) |
+| `render` | 0 | the three above in one run |
+| `varrock-500`, `varrock-1000` | 500, 1000 | Varrock West once the bots are in: idle 150 s, walking 90 s |
+| `background` | 0 | Lumbridge, 2 minutes behind the Settings app, Lumbridge again |
+| `music` | 0 | Music and Sound on, both off (the game's Options), the AudioContext suspended, on again |
+| `startup`, `startup-500` | 0, 500 | 5 clean launches, no phases: each launch's start-up marks |
+| `startup-memory` | 0 | 3 launches, each recorded with Instruments from before it starts (the boot's peak footprint) |
+| `smoke` | 0 (`--bots N`) | a short run of every kind of phase, to check the harness |
+
+What a phase measures:
+- **from inside the page** (`web/test/autotest.js`): the client's frames (rate, interval p50/p95/p99/max, frames over
+  33, 50 and 100 ms, draw time), the HUD's display frames, the engine's tick as the engine times it (avg, p50, p95, p99,
+  max; start to start; World's phases; the bots' share) and the app's footprint and thermal state;
+- **from outside**: on the iPhone an xctrace recording per phase (`am`: Activity Monitor, Core Animation FPS and Thermal
+  State, for the CPU per process in % of a core, the footprints and compressed memory, the composited frame rate and
+  the GPU's utilisation; `tp` adds Time Profiler, `gpu` the GPU instrument); on a simulator the app's processes' CPU
+  time and footprint (Mac CPU: it only checks the run); on Android the threads, frames and memory
+  (`android/test/app-test.mjs --soak`, the same soaks);
+- **start-up**: each launch's marks in ms after the page's navigation (the engine booted, World.start begun and done, the
+  first tick, the client at 100 %, the title ready, the loader's fade), from the page and the engine's own clock.
+
+A soak needs the test build's measurements (`build-web.mjs --autotest`: `web/engine/src/autotest`, the page's
+`autotest.js` and two DEBUG-only native hooks, `launch-test` and `keep-awake`); a normal build has none of them, and
+build-web checks that. The soak itself goes to the app at launch, so one test build runs every soak with `--no-build`.
+It plays in the save profile `bench` (`players/bench/`, `bots/bench/`), never in the phone's own world.
+
+Both sides of an A/B need the same soak tooling, so that they measure alike (a branch made before it takes it with a
+rebase onto main). The `bench` world carries over from run to run on the phone (the simulator's is wiped each run),
+which the interleaving evens out. To compare a branch with main on the iPhone (the phone unlocked, its Auto-Lock off
+for the background soak):
+
+```sh
+# one worktree per side, each with its own test build (on a shared Mac: the Xcode build under its lock)
+(cd ../ios-main   && node web/test/app-test.mjs --device --soak render --build-only)
+(cd ../ios-branch && node web/test/app-test.mjs --device --soak render --build-only)
+# then A B A B A B (each run installs its side's build; about 5 minutes each for render)
+for i in 1 2 3; do
+  (cd ../ios-main   && node web/test/app-test.mjs --device --soak render --no-build)
+  (cd ../ios-branch && node web/test/app-test.mjs --device --soak render --no-build)
+done
+node web/test/perf/compare.mjs --names main,branch \
+  --a ../ios-main/build/tmp/app-test/device-*-render --b ../ios-branch/build/tmp/app-test/device-*-render
+ios/scripts/deploy.sh   # the normal app back on the phone
+```
+
+Each run's folder (`build/tmp/app-test/<device|sim>-<time>-<soak>/`) has `soak.jsonl` (the page's numbers per phase),
+`soak-raw.jsonl` (its frame and tick samples), `startup.jsonl`, the recordings (`traces/` with `traces.jsonl`; a
+simulator's `samples/`), `summary.json` and `summary.txt` (`web/test/perf/summary.mjs <run>` makes them again).
+`compare.mjs` prints a table per phase: each side's median over its runs with the range, B − A, which way is better,
+and "apart" where the two ranges do not overlap; `--json` and `--md` write it to a file. Options: `--bots N` (the
+soak's count), `--no-trace` (no xctrace), `--trace` (record also where the soak says Instruments cannot: at 500+ bots it
+disconnects about a second in), `--no-summary`, `--sim "<name>"` (a simulator of your own).
+
 ### In the Android app
 
 ```sh
 (cd android && ./gradlew :app:testDebugUnitTest :botchat:test)   # the JVM unit tests
 (cd android && ./gradlew :app:lintDebug)
 node android/test/all.mjs --serial emulator-5554                 # every device test from one build (--quick: build, JVM, smoke)
+node android/test/app-test.mjs --serial emulator-5554 --soak render   # a soak (above), sampled on the device itself
 ```
 
 The individual device tests (`smoke.mjs`, `keyboard.mjs`, `shell.mjs`, `lm.mjs`, `crisp.mjs`, `drive.mjs`,
@@ -269,7 +333,7 @@ The individual device tests (`smoke.mjs`, `keyboard.mjs`, `shell.mjs`, `lm.mjs`,
 This project is not a fork: it builds unmodified Lost City sources at the commits [upstream.json](../upstream.json)
 pins (Engine-TS, Content and Client-TS, all on their `274` branches). Its own changes to them are:
 
-- `web/client/patches/*.patch`: 25 patches to Client-TS, made against the commit in `web/client/patches/BASE`, plus
+- `web/client/patches/*.patch`: 28 patches to Client-TS, made against the commit in `web/client/patches/BASE`, plus
   whole-module overrides in `web/client/overrides/` ([web/client/README.md](../web/client/README.md)).
 - `web/engine/`: shims that let Engine-TS run in a browser worker; no engine source is patched
   ([web/engine/README.md](../web/engine/README.md)).

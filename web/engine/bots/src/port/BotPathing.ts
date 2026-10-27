@@ -6,9 +6,14 @@
 // the first turn and re-ran the 128×128 search. 25 is what PathingEntity.queueWaypoints can hold anyway (it keeps
 // the last 25 of a longer path, i.e. upstream skipped the first turns of a path with more): identical for paths of up
 // to 25 turns, and the bot re-paths after the 25th otherwise.
-import rsmod, { CollisionType } from '#/engine/routefinder/index.js';
+//
+// port (perf, 2026-10-23): the four searches run port/BotPathFinder's exact copy of 274's search (the same routes,
+// cheaper flag reads), not the engine's PathFinder.
+import rsmod from '#/engine/routefinder/index.js';
 import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
+import { botRoute } from '#/engine/bot/port/BotPathFinder.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 export const BOT_MAX_WAYPOINTS = 25;
 
@@ -105,7 +110,7 @@ export function beginPathTick(): void {
     searchesThisTick = 0;
     farSearches = 0;
     humans = [];
-    for (const p of World.playerLoop.all()) if (p.is_bot !== true && p.slot !== -1) humans.push(p);
+    for (const p of worldPlayers()) if (p.is_bot !== true && p.slot !== -1) humans.push(p);
 }
 
 export function pathSearchesThisTick(): number {
@@ -122,16 +127,25 @@ export function pathBudgetLeft(from?: { x: number; z: number; level: number }): 
     return Math.min(left, Math.max(0, farSearchBudget() - farSearches));
 }
 
+/** The search the four functions below run: botRoute, or a test's wrapper of it (wrapBotRouteForTest). */
+type Route = typeof botRoute;
+let route: Route = botRoute;
+
+/** (tests) every bot search goes through `wrap(search)` (to count or record them, compare them with the engine's, fail some; wrappers stack); null: botRoute again */
+export function wrapBotRouteForTest(wrap: ((search: Route) => Route) | null): void {
+    route = wrap ? wrap(route) : botRoute;
+}
+
 /** Exact path to (destX, destZ), or empty if the destination itself cannot be reached. */
 export function botFindPath(level: number, srcX: number, srcZ: number, destX: number, destZ: number): Uint32Array {
     count(level, srcX, srcZ);
-    return rsmod.findPath(level, srcX, srcZ, destX, destZ, 1, 1, 1, 0, -1, false, 0, BOT_MAX_WAYPOINTS, CollisionType.NORMAL);
+    return route(level, srcX, srcZ, destX, destZ, 1, 1, 0, -1, false, 0, BOT_MAX_WAYPOINTS);
 }
 
 /** Path to (destX, destZ), or to the closest reachable tile near it (moveNear), like a player's walk click. */
 export function botWalkPath(level: number, srcX: number, srcZ: number, destX: number, destZ: number): Uint32Array {
     count(level, srcX, srcZ);
-    return rsmod.findPath(level, srcX, srcZ, destX, destZ, 1, 1, 1, 0, -1, true, 0, BOT_MAX_WAYPOINTS, CollisionType.NORMAL);
+    return route(level, srcX, srcZ, destX, destZ, 1, 1, 0, -1, true, 0, BOT_MAX_WAYPOINTS);
 }
 
 /**
@@ -142,7 +156,7 @@ export function botWalkPath(level: number, srcX: number, srcZ: number, destX: nu
  */
 export function botPathToLoc(level: number, srcX: number, srcZ: number, destX: number, destZ: number, width: number, length: number, angle: number, shape: number, forceapproach: number, moveNear: boolean): Uint32Array {
     count(level, srcX, srcZ);
-    return rsmod.findPath(level, srcX, srcZ, destX, destZ, 1, width, length, angle, shape, moveNear, forceapproach, BOT_MAX_WAYPOINTS, CollisionType.NORMAL);
+    return route(level, srcX, srcZ, destX, destZ, width, length, angle, shape, moveNear, forceapproach, BOT_MAX_WAYPOINTS);
 }
 
 /**
@@ -151,7 +165,7 @@ export function botPathToLoc(level: number, srcX: number, srcZ: number, destX: n
  */
 export function botPathToEntity(level: number, srcX: number, srcZ: number, destX: number, destZ: number, width: number, length: number): Uint32Array {
     count(level, srcX, srcZ);
-    return rsmod.findPath(level, srcX, srcZ, destX, destZ, 1, width, length, 0, -2, true, 0, BOT_MAX_WAYPOINTS, CollisionType.NORMAL);
+    return route(level, srcX, srcZ, destX, destZ, width, length, 0, -2, true, 0, BOT_MAX_WAYPOINTS);
 }
 
 /** port (variety round 1, F): does a player on (srcX, srcZ) reach the NPC there from where it stands (274's reachedEntity: no wall between, no corner)? */

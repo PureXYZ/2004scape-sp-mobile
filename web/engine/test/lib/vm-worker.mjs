@@ -65,7 +65,11 @@ export function createVmWorker({ gameDir, documentsDir, testOptions = null }) {
             log: (...a) => console.log(...a)
         }
     };
-    const ctx = vm.createContext(sandbox, { name: 'engine-worker', codeGeneration: { strings: true, wasm: true } });
+    // An ordinary global object (DONT_CONTEXTIFY), as a worker's is: a contextified sandbox object gets V8's named
+    // property interceptors, which made every global lookup (Math, Date, Uint8Array...) ~200x slower than in a real
+    // worker, V8's idle tick ~1.6x and World.start ~8 % slower than they are.
+    const ctx = vm.createContext(vm.constants.DONT_CONTEXTIFY, { name: 'engine-worker', codeGeneration: { strings: true, wasm: true } });
+    Object.assign(ctx, sandbox);
     vm.runInContext(
         `
     'use strict';

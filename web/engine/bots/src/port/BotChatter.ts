@@ -71,6 +71,7 @@ import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
 import { inThread, startThread } from '#/engine/bot/port/BotThreads.js';
 import { voiceFree } from '#/engine/bot/port/BotVoice.js';
 import { dropBrag, respondTo } from '#/engine/bot/port/BotWitness.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** A moment that comes with a line: going away for a moment, coming back, leaving the game. */
 export type Occasion = 'brb' | 'back' | 'departure';
@@ -409,7 +410,7 @@ const COMPANY_DISTANCE = 15;
 /** the other players within 15 tiles of the bot on its level (one loop over the players) */
 function companyNear(bot: Player): number {
     let n = 0;
-    for (const p of World.playerLoop.all()) {
+    for (const p of worldPlayers()) {
         if (p !== bot && p.level === bot.level && Math.abs(p.x - bot.x) <= COMPANY_DISTANCE && Math.abs(p.z - bot.z) <= COMPANY_DISTANCE) n++;
     }
     return n;
@@ -1112,7 +1113,7 @@ function sayLevelUp(bot: Player, st: ChatState, p: Pending, now: number): void {
     const { line, correction } = styleLine(raw, st.persona);
     st.lastLevelUpLine = now;
     speak(bot, line, 'levelup', 'levelup', null, correction, now, { raw });
-    for (const q of World.playerLoop.all()) {
+    for (const q of worldPlayers()) {
         if (q !== bot && q.is_bot && q.level === bot.level && Math.max(Math.abs(q.x - bot.x), Math.abs(q.z - bot.z)) <= 15) {
             BotChat.onBotLine(bot, line, 'levelup');
             break;

@@ -1,0 +1,10 @@
+{
+    "description": "Music and sound in Lumbridge (0 bots): Music and Sound on (the defaults) 70 s, both off in the game's Options 70 s, the AudioContext suspended as well 50 s, then both on again 40 s.",
+    "bots": 0,
+    "phases": [
+        { "name": "music-on", "tele": "0,50,50,22,18", "vars": { "option_music": 2, "option_sounds": 2 }, "sec": 70, "traces": [{ "set": "am", "at": 3, "sec": 60 }] },
+        { "name": "music-off", "vars": { "option_music": 4, "option_sounds": 4 }, "sec": 70, "traces": [{ "set": "am", "at": 3, "sec": 60 }] },
+        { "name": "audio-suspended", "audioOff": true, "sec": 50, "traces": [{ "set": "am", "at": 3, "sec": 40 }] },
+        { "name": "music-on-again", "vars": { "option_music": 2, "option_sounds": 2 }, "sec": 40, "traces": [{ "set": "am", "at": 3, "sec": 30 }] }
+    ]
+}

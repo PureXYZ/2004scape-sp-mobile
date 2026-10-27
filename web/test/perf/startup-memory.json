@@ -1,0 +1,5 @@
+{
+    "description": "Start-up memory (0 bots), 3 clean launches, each recorded with xctrace's Activity Monitor from before the launch (the boot's peak footprint per process; the recording slows the start a little, so time it with startup.json).",
+    "bots": 0,
+    "startup": { "launches": 3, "trace": "am", "traceSec": 20 }
+}

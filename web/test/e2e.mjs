@@ -18,6 +18,12 @@
 // Last, Settings › Saved data (every run): a second character is deleted (the one in the world cannot be), Reset world
 // (with a bots' store: the store goes, the character stays) and Delete everything restart the game with those saves gone.
 //
+// Every run also checks the client's archives: unpacked with libbzip2 at boot, every stream the client reads (134 of the
+// 141: web/host/bzip2.js, dropped once the client has loaded) and, last, in a page without WebAssembly (Lockdown Mode), with the client's own decoder into the same
+// title images. And at the title, the AudioContext in a silence: running on through it in both sound modes while host.js's
+// AUDIO_IDLE_SUSPEND is 'off' and on Android; with 'ambient' (as shipped) or 'all', suspended after 10 s where that says,
+// the next song resuming it with the same samples.
+//
 // --no-jmod: Settings › World › Jmod Off (stored before the page loads, like --bots): the character is a normal player
 // (staff level 0 in the client, no "::" chips on the chat keyboard). Every run checks the staff level it asked for.
 //
@@ -28,7 +34,9 @@
 // native with its prompts and native's line comes back to the worker (bots-lm-reply, with ms); Settings › Bot chat (the
 // model, Think first: shown only for a model that offers it, every On-device request carrying think as the setting
 // says at once, greyed out with Claude online (think false), kept across a reload; Set key, Test, Remove); Rules, no native, a failed reply and a reply that never comes are
-// answered for the engine; with the bots off the engine hears nothing of it. Only these checks (no login): a short run.
+// answered for the engine; the model's warm-up (in the world: a chat line typed on the chat keyboard or a hardware
+// keyboard loads it when it is not in memory, a Jmod's '::' command never does; entering the world only while no quick load is
+// on record); with the bots off the engine hears nothing of it. Only these checks (two short sessions in the world for the warm-up): a short run.
 //
 // --platform android: the page as the Android app runs it (docs/ANDROID.md §3), in desktop Chrome: an Android phone's
 // screen (914x411 CSS px at 2.625) and WebView's user agent, and before host.js, on every load, what the app's
@@ -50,6 +58,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { ENGINE_DIR } from '../../scripts/lib/upstream.mjs';
+import { deriveClientFiles, readPack } from '../client/lib/cache.mjs';
 import { ANDROID_SCREENS, ANDROID_UA, androidPageScript } from './android-stub.mjs';
 import { serve } from './serve.mjs';
 
@@ -479,6 +489,169 @@ async function login(user, pass, viaButton = false, newUser = false) {
     return s;
 }
 
+// ---------------------------------------------------------------------------------------------------- libbzip2 (bzip2.js)
+
+// In the page before host.js, on every load: libbzip2 as the page offers it to the client (globalThis.__LC_BZIP2__,
+// web/host/bzip2.js), counted in window.__e2eBzip2: offered, the client's decodes through it (each one's packed and
+// unpacked sizes), refusals, and whether the page has dropped it again (it does once the client has loaded).
+const BZIP2_PAGE = `(() => {
+    const seen = (window.__e2eBzip2 = { offered: 0, calls: 0, refused: 0, sizes: [] });
+    let decoder;
+    Object.defineProperty(window, '__LC_BZIP2__', {
+        configurable: true,
+        get: () => decoder,
+        set: value => {
+            seen.offered++;
+            decoder = value && { decompress: stream => { seen.calls++; try { const out = value.decompress(stream); seen.sizes.push([stream.length, out.length]); return out; } catch (err) { seen.refused++; throw err; } } };
+        }
+    });
+})();`;
+const bzip2Seen = () => evaluate(`({ ...window.__e2eBzip2, held: '__LC_BZIP2__' in window })`);
+
+// The bzip2 streams of the client's 8 jag archives (as the build derives them from the engine's pack: web/test/
+// bzip2.test.mjs has them all decode the same): an archive packed whole is one stream, else each entry is one, and the
+// client (JagFile.read) unpacks an entry only when it reads it. 141 streams; at boot it reads all but these 7, which it
+// never reads: config's seq.idx, flo.idx, spotanim.idx, idk.idx, varp.idx and varbit.idx (those types are read from their
+// .dat alone; only loc, npc and obj use their .idx) and media's gnomeball_buttons.dat (no interface draws it). Named by
+// archive and entry index (the pack is revision 274's and does not change).
+const BZIP2_UNREAD_AT_BOOT = ['config 1', 'config 5', 'config 7', 'config 13', 'config 15', 'config 17', 'media 30'];
+function jagStreams() {
+    const g2 = (b, p) => (b[p] << 8) | b[p + 1];
+    const g3 = (b, p) => (b[p] << 16) | (b[p + 1] << 8) | b[p + 2];
+    const out = [];
+    for (const { name, data } of deriveClientFiles(readPack(path.join(ENGINE_DIR, 'data/pack')), ENGINE_DIR).jags) {
+        if (g3(data, 0) !== g3(data, 3)) {
+            out.push({ id: `${name} (whole)`, packed: g3(data, 3), unpacked: g3(data, 0) });
+            continue;
+        }
+        for (let i = 0, p = 8; i < g2(data, 6); i++, p += 10) out.push({ id: `${name} ${i}`, packed: g3(data, p + 7), unpacked: g3(data, p + 4) });
+    }
+    return out;
+}
+
+// The streams libbzip2 decoded (by their sizes), and those it did not: { unknown: decodes that are none of the streams,
+// unread: the streams not decoded }.
+function bzip2Streams(sizes) {
+    const left = jagStreams();
+    const unknown = [];
+    for (const [packed, unpacked] of sizes ?? []) {
+        const i = left.findIndex(s => s.packed === packed && s.unpacked === unpacked);
+        if (i >= 0) left.splice(i, 1);
+        else unknown.push([packed, unpacked]);
+    }
+    return { all: jagStreams().length, unknown, unread: left.map(s => s.id) };
+}
+
+// The title's images, as the client made them from its title archive (the title.dat JPEG behind the flames, the title
+// box, its button and the runes, and the four fonts): a hash of each, the same whichever decoder unpacked the archive.
+const TITLE_IMAGES = `(() => { const c = window.__client; const f = c?.titleFlames;
+    const hash = parts => { let h = 2166136261; for (const a of parts) for (let i = 0; i < a.length; i++) h = Math.imul(h ^ (a[i] & 0xffffffff), 16777619); return (h >>> 0).toString(16); };
+    if (!f?.flameLeft || !c.imageTitlebox || !c.p11) return null;
+    return { background: hash([f.flameLeft.data, f.flameRight.data]), titlebox: hash([c.imageTitlebox.data, c.imageTitlebutton.data]), runes: hash(c.imageRunes.map(r => r.data)),
+        fonts: hash([c.p11, c.p12, c.b12, c.q8].flatMap(font => font.charMask.filter(Boolean))) }; })()`;
+
+// ---------------------------------------------------------------------------------------------------- the AudioContext in silences
+
+// A short song for the music checks (format 0, 96 ticks a beat, 120 bpm): a C major arpeggio of eight quarter-beat notes
+// on a piano, then a held chord: 3 s.
+function testMidi() {
+    const vlq = n => {
+        const out = [n & 0x7f];
+        while ((n >>= 7)) out.unshift((n & 0x7f) | 0x80);
+        return out;
+    };
+    const events = [];
+    for (const note of [60, 64, 67, 72, 67, 64, 60, 64]) events.push(...vlq(0), 0x90, note, 100, ...vlq(48), 0x80, note, 0);
+    events.push(0, 0x90, 60, 90, 0, 0x90, 64, 90, 0, 0x90, 67, 90, ...vlq(192), 0x80, 60, 0, 0, 0x80, 64, 0, 0, 0x80, 67, 0, 0, 0xff, 0x2f, 0);
+    const n = events.length;
+    return [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0, 96, 0x4d, 0x54, 0x72, 0x6b, n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255, ...events];
+}
+
+// The music's buffers as the client's tinymidipcm schedules them (stereo; the sound effects are mono), recorded from the
+// next song: its first 2 s of samples, both channels in order, hashed (whatever the buffers' lengths), the context's
+// state when its first buffer was scheduled and after, and whether its clock then runs.
+const MUSIC_RECORDER = `(() => {
+    if (window.__e2eMusic) return true;
+    const rec = (window.__e2eMusic = { on: false, buffers: [] });
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...args) {
+        if (rec.on && this.buffer?.numberOfChannels === 2) rec.buffers.push({ state: this.context.state, l: this.buffer.getChannelData(0).slice(), r: this.buffer.getChannelData(1).slice() });
+        return start.apply(this, args);
+    };
+    return true;
+})()`;
+const PLAY_RECORDED = `(async () => {
+    const rec = window.__e2eMusic;
+    const ctx = window.audioContext;
+    const SAMPLES = 2 * ctx.sampleRate;
+    rec.buffers = [];
+    rec.on = true;
+    const before = ctx.state;
+    await window._tinyMidiPlay(new Uint8Array(${JSON.stringify(testMidi())}), 0, false);
+    const t0 = performance.now();
+    while (rec.buffers.reduce((n, b) => n + b.l.length, 0) < SAMPLES && performance.now() - t0 < 8000) await new Promise(r => setTimeout(r, 50));
+    rec.on = false;
+    let h = 2166136261, n = 0;
+    for (const b of rec.buffers) {
+        const l = new Uint32Array(b.l.buffer), r = new Uint32Array(b.r.buffer);
+        for (let i = 0; i < l.length && n < SAMPLES; i++, n++) h = Math.imul(Math.imul(h ^ l[i], 16777619) ^ r[i], 16777619);
+    }
+    const clock = ctx.currentTime;
+    await new Promise(r => setTimeout(r, 300));
+    return { before, first: rec.buffers[0]?.state ?? null, after: ctx.state, ran: Math.round((ctx.currentTime - clock) * 1000), buffers: rec.buffers.length, samples: n, hash: (h >>> 0).toString(16) };
+})()`;
+
+// host.js audioIdle, as its AUDIO_IDLE_SUSPEND says (read from the host.js served): 'off', the client's AudioContext
+// runs on through 10 s of silence in both sound modes, as it always did; 'ambient' (as shipped), it is suspended after
+// them only while Settings › Sound follows the silent switch; 'all', in both. Never on Android. A suspended context is
+// resumed by the next song, with the same samples (the buffers tinymidipcm schedules: not what the output plays, nor
+// when: host.js has the iPhone's numbers). Each recording comes after the same history: the test song, stopped, then
+// 11 s of silence. (To check 'off' or 'all': a copy of build/Game with the constant changed in host.js, through --game.)
+const AUDIO_IDLE_SUSPEND = /\bconst AUDIO_IDLE_SUSPEND = '(\w+)';/.exec(fs.readFileSync(path.join(GAME, 'host.js'), 'utf8'))?.[1] ?? null;
+
+async function audioIdleChecks() {
+    const state = () => evaluate('window.audioContext?.state ?? null');
+    const afterSilence = async () => {
+        await evaluate('window._tinyMidiStop()');
+        await sleep(11000);
+        return state();
+    };
+    const soundMode = async mode => {
+        await tapId('btn-settings');
+        await tapId('nav-sound');
+        await tapQuery(`#sound-row .seg button[data-value="${mode}"]`);
+        await tapId('settings-close');
+    };
+    const runsOn = (label, silent, song) => check(label, silent === 'running' && song.first === 'running' && song.ran > 100 && song.samples > 0, JSON.stringify({ silent, song: { ...song, hash: undefined } }));
+    const suspends = (label, silent, song) => check(label, silent === 'suspended' && song.first === 'suspended' && song.after === 'running' && song.ran > 100, JSON.stringify({ silent, song: { ...song, hash: undefined } }));
+    check('audio: host.js names its idle suspend (AUDIO_IDLE_SUSPEND \'off\', \'ambient\' or \'all\')', ['off', 'ambient', 'all'].includes(AUDIO_IDLE_SUSPEND), String(AUDIO_IDLE_SUSPEND));
+    await evaluate(MUSIC_RECORDER);
+    await evaluate(PLAY_RECORDED);
+    const silent = await afterSilence();
+    const plain = await evaluate(PLAY_RECORDED);
+    if (ANDROID || AUDIO_IDLE_SUSPEND !== 'all') {
+        runsOn(ANDROID ? 'android: the AudioContext keeps running through 11 s of silence (no idle suspend on Android)' : `audio (${AUDIO_IDLE_SUSPEND}): with Settings › Sound on Play (the default) the AudioContext keeps running through 11 s of silence`, silent, plain);
+    } else {
+        suspends('audio (all): with Settings › Sound on Play the AudioContext is suspended after 10 s of silence; the next song resumes it and plays (its clock runs)', silent, plain);
+    }
+    if (ANDROID) {
+        await evaluate('window._tinyMidiStop()');
+        return;
+    }
+    await soundMode('ambient');
+    const muted = await afterSilence();
+    const song = await evaluate(PLAY_RECORDED);
+    if (AUDIO_IDLE_SUSPEND === 'off') {
+        runsOn('audio (off): with Settings › Sound on Mute (the silent switch) the AudioContext keeps running through 11 s of silence too', muted, song);
+    } else {
+        suspends(`audio (${AUDIO_IDLE_SUSPEND}): with Settings › Sound on Mute (the silent switch) the AudioContext is suspended after 10 s of silence; the next song resumes it and plays (its clock runs)`, muted, song);
+    }
+    check('audio: the two songs\' samples are the same (their first 2 s, both channels, as scheduled)', song.samples === plain.samples && song.samples > 0 && song.hash === plain.hash, JSON.stringify({ play: [plain.first, plain.samples, plain.hash], mute: [song.first, song.samples, song.hash] }));
+    await evaluate('window._tinyMidiStop()');
+    await soundMode('playback');
+    check('audio: back on Play, the AudioContext runs', (await state()) === 'running', await state());
+}
+
 // ---------------------------------------------------------------------------------------------------- the Android app (--platform android)
 
 // In the page before host.js (--platform android), on every load, after the harness's settings script: what the Android
@@ -572,13 +745,15 @@ function writesCarried(from = 0) {
 
 // In the page before host.js (--lm-stub): a stub "native" (window.webkit.messageHandlers.native) that keeps settings in
 // localStorage, answers {type:'lm'} after 40 ms through LostCityHost.bots.lmReply (a line, or as window.__lmStub.answer
-// says: 'fail' an error, 'none' nothing), and {type:'lm-key'} with a status through LostCityHost.bots.lmStatus; the
-// startup status in window.LostCityNative.lm (a model in the app trained both ways, think 'option': Settings › Bot chat ›
-// Think first shows; no key). What the page sends the worker and hears from it about the model is recorded (a wrapper
-// around the page's Worker).
+// says: 'fail' an error, 'none' nothing), {type:'lm-key'} with a status through LostCityHost.bots.lmStatus, and
+// {type:'lm-warm'} with a load 30 ms later (the status loaded, lastLoadMs 1300, which it keeps across reloads in
+// sessionStorage as native keeps it across launches); the startup status in window.LostCityNative.lm (a model in the app
+// trained both ways, think 'option': Settings › Bot chat › Think first shows; no key; no load on record). What the page
+// sends the worker and hears from it about the model is recorded (a wrapper around the page's Worker).
 const LM_PAGE = bots => `(() => {
     const stub = (window.__lmStub = { sent: [], toWorker: [], fromWorker: [], answer: 'line',
         status: { local: { available: true, loaded: false, name: 'Stub model', bytes: 532517120, think: 'option' }, online: { keySet: false, model: 'claude-haiku-5-5' } } });
+    try { const ms = Number(sessionStorage.getItem('lmStub.lastLoadMs')); if (ms > 0) stub.status.local.lastLoadMs = ms; } catch {}
     let settings = {};
     try { settings = JSON.parse(localStorage.getItem('lostcity.settings') ?? '{}') ?? {}; } catch {}
     settings = { ...settings, bots: ${bots}, seenHowToPlay: true };
@@ -596,6 +771,12 @@ const LM_PAGE = bots => `(() => {
         } else if (m.type === 'lm-key') {
             stub.status.online = m.action === 'set' ? { keySet: true, hint: '…abcd', model: 'claude-haiku-5-5' } : { keySet: false, model: 'claude-haiku-5-5' };
             call('lmStatus', JSON.parse(JSON.stringify(stub.status)), 20);
+        } else if (m.type === 'lm-warm') {
+            setTimeout(() => {
+                stub.status.local = { ...stub.status.local, loaded: true, lastLoadMs: 1300 };
+                try { sessionStorage.setItem('lmStub.lastLoadMs', '1300'); } catch {}
+                window.LostCityHost?.bots?.lmStatus?.(JSON.parse(JSON.stringify(stub.status)));
+            }, 30);
         }
     } } } };
     const PageWorker = window.Worker;
@@ -759,6 +940,8 @@ async function lmStubChecks(stubScriptId, botsScriptId) {
     await tapId('settings-close');
     check('lm: Display, from the categories, takes Bot chat\'s place', back);
 
+    await lmWarmChecks();
+
     // no native app (a desktop browser): every request is answered 'unavailable' at once; the page says why
     await S('Page.removeScriptToEvaluateOnNewDocument', { identifier: stubScriptId });
     workerSession = null;
@@ -792,12 +975,178 @@ async function lmStubChecks(stubScriptId, botsScriptId) {
     check('lm: no console errors or exceptions', errors.length === 0, errors.slice(0, 5).join(' | '));
 }
 
+// The model loads when the player starts to chat (host.js lm.warm, startsToChat), while it is not in memory (asked once
+// while it loads): for a normal player (--no-jmod) when the chat keyboard opens or a hardware keyboard types into the
+// chat (or a social prompt opens), as measured on the iPhone; for a Jmod (the default here) at a chat line a bot may
+// hear, never for a '::' command (the client sends those as CLIENT_CHEAT, not as chat: a Jmod's, or the soak harness's
+// '::tele'), however fast its keys come (judged with the keys the client has not read yet); on entering the world only
+// until a load has been quick (the status's lastLoadMs: the first load after an install is the slow one on an iPhone).
+async function lmWarmChecks() {
+    const warms = async () => (await lmStub()).sent.filter(m => m.type === 'lm-warm').length;
+    const unload = () => evaluate(`(() => { const s = window.__lmStub.status; s.local = { ...s.local, loaded: false }; window.LostCityHost.bots.lmStatus(JSON.parse(JSON.stringify(s))); })()`);
+    const loadedNow = () => waitFor('the stub loaded', 'window.__lmStub.status.local.loaded === true', 3000, 20);
+    const chatLine = () => evaluate('window.__client?.chatInput ?? null');
+    // (one key at a time, as a hardware keyboard sends them: the client has the line before the next one)
+    const typeKeys = async keys => {
+        for (const key of keys) {
+            await evaluate(`window.LostCityHost.keyboard.insertText(${JSON.stringify(key)})`);
+            await sleep(120);
+        }
+    };
+    const clearLine = async () => {
+        await evaluate('for (let i = (window.__client?.chatInput ?? \'\').length; i > 0; i--) window.LostCityHost.keyboard.deleteBackward()');
+        await waitFor('the chat line cleared', "window.__client?.chatInput === ''", 3000, 20);
+    };
+    // the chat keyboard opened, `typed` typed into it (one insertText each: its keys, or a chip's whole text), the line
+    // it left (the watcher has seen it), closed
+    const chatKeyboard = async (...typed) => {
+        await evaluate('window.LostCityHost.keyboard.show()');
+        await sleep(200);
+        const kind = await evaluate('window.lcHost.keyboard.context?.kind ?? null');
+        for (const text of typed) {
+            await evaluate(`window.LostCityHost.keyboard.insertText(${JSON.stringify(text)})`);
+            await sleep(120);
+        }
+        await sleep(typed.length ? 300 : 0);
+        const line = await chatLine();
+        await evaluate('window.LostCityHost.keyboard.dismissed()');
+        return { kind, line };
+    };
+    check('lm: no warm-up at the title', (await warms()) === 0);
+
+    // no load on record (a new install): entering the world warms the model up
+    await login(`lmw${Date.now() % 100000}`, null, false, true);
+    const entered = await waitFor('the entry\'s warm-up', `window.__lmStub.sent.some(m => m.type === 'lm-warm')`, 5000, 50);
+    await loadedNow();
+    await sleep(300);
+    check('lm: with no load on record, entering the world warms the model up (one lm-warm)', entered.ok && (await warms()) === 1, `${await warms()} lm-warm`);
+
+    if (!JMOD) {
+        // a normal player (their '::' does nothing: the engine ignores it): the timing measured on the iPhone. Unloaded,
+        // the chat keyboard opening on an empty line warms the model, once while it loads; loaded, it asks nothing
+        await unload();
+        const opened = await chatKeyboard();
+        const atOpen = await warms();
+        const typedIn = await chatKeyboard('h', 'i');
+        const whileLoading = await warms();
+        await clearLine();
+        await loadedNow();
+        const loaded = await chatKeyboard();
+        const whileLoaded = await warms();
+        check('lm: a normal player, unloaded: the chat keyboard opening on an empty line warms the model (one lm-warm, not again while typing within 10 s); loaded, opening it asks nothing', opened.kind === 'chat' && opened.line === '' && atOpen === 2 && typedIn.line === 'hi' && whileLoading === 2 && loaded.kind === 'chat' && whileLoaded === 2, JSON.stringify({ opened, atOpen, typedIn, whileLoading, whileLoaded }));
+        // unloaded, 10 s on: a hardware keyboard typing into the chat warms it at its first key, a '::' too
+        await unload();
+        await sleep(10200);
+        await typeKeys([':']);
+        const colon = await warms();
+        await typeKeys([':', 'b', 'a', 'n', 'k']);
+        const keyByKey = await chatLine();
+        const typed = await warms();
+        await clearLine();
+        check('lm: a normal player, unloaded: a hardware keyboard typing \'::bank\' into the chat warms it at the first \':\' (one lm-warm for the six keys)', colon === 3 && typed === 3 && keyByKey === '::bank', JSON.stringify({ colon, typed, keyByKey }));
+        await loadedNow();
+    } else {
+        // unloaded (its idle unload), no chat warm-up yet (so none is held back by the 10 s): a '::' command never loads
+        // it, however it is typed
+        await unload();
+        await evaluate(`window.LostCityHost.keyboard.insertText('::tele 3222 3218')`); // (as the soak harness types it)
+        await sleep(400);
+        const oneShot = await chatLine();
+        await clearLine();
+        await typeKeys([':', ':', 'b', 'a', 'n', 'k']);
+        const keyByKey = await chatLine();
+        await clearLine();
+        const soft = await chatKeyboard('::', 'b', 'a', 'n', 'k'); // (the chat keyboard's '::' chip, then the keys)
+        await clearLine();
+        const commands = await warms();
+        check('lm: unloaded, a \'::\' command asks nothing: typed at once (the soak harness\'s ::tele), key by key on a hardware keyboard, or on the chat keyboard (opening it on an empty line, its \'::\' chip, the keys)', commands === 1 && oneShot === '::tele 3222 3218' && keyByKey === '::bank' && soft.kind === 'chat' && soft.line === '::bank', JSON.stringify({ commands, oneShot, keyByKey, soft }));
+
+        // the same '::bank' key by key with no gap, faster than the client's cycle reads its key queue (a long frame, a
+        // hardware keyboard's backlog): in one task (every key waits unread) and one CDP call per key; the client's
+        // line at each key and its unread keys
+        const burst = await evaluate(`(() => { const c = window.__client; const seen = []; for (const ch of '::bank') { seen.push([c.chatInput, (c.keyQueueWritePos - c.keyQueueReadPos) & 127]); window.LostCityHost.keyboard.insertText(ch); } return seen; })()`);
+        await sleep(400);
+        const burstLine = await chatLine();
+        await clearLine();
+        const calls = [];
+        for (const ch of '::bank') {
+            calls.push(await evaluate(`(() => { const c = window.__client; const b = [c.chatInput, (c.keyQueueWritePos - c.keyQueueReadPos) & 127]; window.LostCityHost.keyboard.insertText(${JSON.stringify(ch)}); return b; })()`));
+        }
+        await sleep(400);
+        const callsLine = await chatLine();
+        await clearLine();
+        const bursts = await warms();
+        check('lm: unloaded, \'::bank\' typed faster than the client reads its keys (no gap: in one task, and one call per key) asks nothing: judged with the keys still unread', bursts === 1 && burstLine === '::bank' && callsLine === '::bank' && burst.at(-1)[0] === '' && burst.at(-1)[1] === 5, JSON.stringify({ bursts, burstLine, callsLine, burst, calls }));
+
+        // still unloaded: a hardware keyboard typing a chat line warms it, once while it loads (':' alone may still be a
+        // command; ':)' is chat)
+        await typeKeys([':']);
+        const colon = await warms();
+        await typeKeys([')', 'x']);
+        const typed = await warms();
+        await loadedNow();
+        await clearLine();
+        const loaded = await chatKeyboard('h', 'i');
+        const whileLoaded = await warms();
+        await clearLine();
+        check('lm: unloaded, a hardware keyboard typing \':)x\' into the chat warms it at \')\' (one lm-warm for the three keys); loaded, the chat keyboard and typing into it ask nothing (its idle unload is not put off)', colon === 1 && typed === 2 && loaded.kind === 'chat' && loaded.line === 'hi' && whileLoaded === 2, JSON.stringify({ colon, typed, loaded, whileLoaded }));
+
+        // unloaded again: typing on the chat keyboard warms it, not again within 10 s of the last chat warm-up (one ask while
+        // it loads); opening it on an empty line asks nothing
+        await unload();
+        const soonLine = (await chatKeyboard('h')).line;
+        const soon = await warms();
+        await clearLine();
+        await sleep(10200);
+        const opened = await chatKeyboard();
+        const atOpen = await warms();
+        const later = await chatKeyboard('h');
+        const afterTyping = await warms();
+        await clearLine();
+        check('lm: unloaded, the chat keyboard: opening it on an empty line asks nothing, its first character of chat warms it (asked again only 10 s after the last)', soonLine === 'h' && soon === 2 && opened.kind === 'chat' && atOpen === 2 && later.line === 'h' && afterTyping === 3, JSON.stringify({ soonLine, soon, opened, atOpen, later, afterTyping }));
+        await loadedNow();
+
+        // unloaded, 10 s on, in one task: '::x', three Backspaces (the line is empty again), then 'yo': a chat line,
+        // warmed at its 'y' though the client has read none of these keys yet
+        await unload();
+        await sleep(10200);
+        const steps = await evaluate(`(() => { const k = window.LostCityHost.keyboard; const n = () => window.__lmStub.sent.filter(m => m.type === 'lm-warm').length; const seen = []; for (const ch of '::x') { k.insertText(ch); } seen.push(n()); for (let i = 0; i < 3; i++) { k.deleteBackward(); } k.insertText('y'); seen.push(n()); k.insertText('o'); seen.push(n()); return seen; })()`);
+        await sleep(400);
+        const editedLine = await chatLine();
+        await clearLine();
+        check('lm: unloaded, \'::x\', three Backspaces and \'yo\' typed in one task warm the model at the \'y\' (Backspaces still unread are counted)', steps.join() === '3,4,4' && editedLine === 'yo', JSON.stringify({ steps, editedLine }));
+        await loadedNow();
+    }
+
+    // a quick load on record (lastLoadMs 1300, kept across the reload): entering the world asks nothing; the chat does
+    await S('Page.reload', {});
+    await waitFor('title (a load on record)', 'window.__client?.lastProgressPercent === 100 && !!window.__client?.titleFlames', 60000);
+    await waitFor('engine (a load on record)', "window.LostCityHost?.engineState === 'ready'", 60000);
+    await sleep(500);
+    const onRecord = (await lmStub()).status.local.lastLoadMs;
+    await login(`lmx${Date.now() % 100000}`, null, false, true);
+    await sleep(3000);
+    const atEntry = await warms();
+    const after = await chatKeyboard('y', 'o');
+    const afterChat = await warms();
+    await clearLine();
+    check('lm: with a quick load on record (lastLoadMs 1300 at document start), entering the world asks nothing, typing on the chat keyboard warms the model', onRecord === 1300 && atEntry === 0 && after.kind === 'chat' && after.line === 'yo' && afterChat === 1, JSON.stringify({ onRecord, atEntry, after, afterChat }));
+    await loadedNow();
+}
+
 class LmStubDone extends Error {}
 
 let exitCode = 1;
 let botNames = new Set(); // (--bots) the other players seen in the first session
 let firstStore = null; // (--bots) the bots' store after the first save
 try {
+    // the world this run checks, not the app's defaults (500 bots, Jmod Off, 10× XP): Jmod as --no-jmod says, 1× XP, and
+    // without --bots no bots (first: the --lm-stub page's LostCityNative.settings carries what it stored, as the app's
+    // would; registered after it, a stub run was Jmod Off whatever it asked)
+    const world = { jmod: JMOD, xpRate: 1, ...(BOTS === null ? { bots: 0 } : {}) };
+    await S('Page.addScriptToEvaluateOnNewDocument', {
+        source: `try { const s = JSON.parse(localStorage.getItem('lostcity.settings') ?? 'null'); localStorage.setItem('lostcity.settings', JSON.stringify({ ...(s && typeof s === 'object' ? s : {}), ...${JSON.stringify(world)} })); } catch {}`
+    });
     let lmStubScript = null;
     let botsScript = null;
     if (LM_STUB) {
@@ -816,12 +1165,8 @@ try {
         fs.utimesSync(other, new Date(Date.now() - 3 * 86400e3), new Date(Date.now() - 3 * 86400e3));
     }
 
-    // the world this run checks, not the app's defaults (500 bots, Jmod Off, 10× XP): Jmod as --no-jmod says, 1× XP, and
-    // without --bots no bots
-    const world = { jmod: JMOD, xpRate: 1, ...(BOTS === null ? { bots: 0 } : {}) };
-    await S('Page.addScriptToEvaluateOnNewDocument', {
-        source: `try { const s = JSON.parse(localStorage.getItem('lostcity.settings') ?? 'null'); localStorage.setItem('lostcity.settings', JSON.stringify({ ...(s && typeof s === 'object' ? s : {}), ...${JSON.stringify(world)} })); } catch {}`
-    });
+    await S('Page.addScriptToEvaluateOnNewDocument', { source: BZIP2_PAGE });
+
     if (ANDROID) {
         // (after the settings script: LostCityNative.settings carries what it stored, as the app's would)
         await S('Page.addScriptToEvaluateOnNewDocument', { source: ANDROID_PAGE });
@@ -836,6 +1181,14 @@ try {
     check('engine worker reaches ready', engineReady.ok, `${Date.now() - bootStart} ms total`);
     await sleep(500);
     await screenshot('1-title.png');
+    const bzip2 = await bzip2Seen();
+    const streams = bzip2Streams(bzip2.sizes);
+    check(
+        `the client unpacked its archives with libbzip2 (engine/bzip2.wasm, offered once, none refused): every stream it reads at boot, ${streams.all - BZIP2_UNREAD_AT_BOOT.length} of ${streams.all}; dropped once it had loaded`,
+        bzip2.offered === 1 && bzip2.refused === 0 && !bzip2.held && bzip2.calls === streams.all - BZIP2_UNREAD_AT_BOOT.length && streams.unknown.length === 0 && JSON.stringify(streams.unread) === JSON.stringify(BZIP2_UNREAD_AT_BOOT),
+        JSON.stringify({ ...bzip2, sizes: undefined, ...streams })
+    );
+    const titleImages = await evaluate(TITLE_IMAGES);
 
     if (ANDROID) {
         const stub = await androidStub();
@@ -862,6 +1215,8 @@ try {
         await lmStubChecks(lmStubScript, botsScript);
         throw new LmStubDone();
     }
+
+    await audioIdleChecks();
 
     // ---------------------------------------------------------------- login (new account)
     await login(USER, null, false, true);
@@ -1177,6 +1532,16 @@ try {
     check('Saved data: Delete everything restarts with no character and no bots\' store; "Everything was deleted."; the title asks for a name', askedAll === 'Delete everything?' && backAll && saidAll.ok && left.length === 0 && !fs.existsSync(botStoreFile) && fs.existsSync(`${userSave}.bak`) && title.hint && !title.continueAs, JSON.stringify({ askedAll, backAll, said: saidAll.ok, left, store: fs.existsSync(botStoreFile), title }));
     const savedDataErrors = consoleLines.slice(savedDataFrom).filter(line => /\[(error|exception)\]/.test(line));
     check('Saved data: no console errors', savedDataErrors.length === 0, savedDataErrors.slice(0, 5).join(' | '));
+
+    // a page without WebAssembly (as in Lockdown Mode): no libbzip2, and the client unpacks its archives with its own
+    // decoder into the same title images (the music, which needs WebAssembly too, is silent there as it was before)
+    const noWasm = await S('Page.addScriptToEvaluateOnNewDocument', { source: 'delete globalThis.WebAssembly;' });
+    await S('Page.navigate', { url: server.url });
+    const noWasmTitle = await waitFor('title (no WebAssembly)', 'window.__client?.lastProgressPercent === 100 && !!window.__client?.titleFlames', 90000);
+    const noWasmSeen = await bzip2Seen().catch(() => null);
+    const noWasmImages = await evaluate(TITLE_IMAGES).catch(() => null);
+    await S('Page.removeScriptToEvaluateOnNewDocument', { identifier: noWasm.result?.identifier });
+    check('no WebAssembly (Lockdown Mode): the title loads with the client\'s own decoder (no libbzip2), its images the same as with libbzip2', noWasmTitle.ok && noWasmSeen?.offered === 0 && !!titleImages && JSON.stringify(noWasmImages) === JSON.stringify(titleImages), JSON.stringify({ ms: noWasmTitle.ms, seen: noWasmSeen, titleImages, noWasmImages }));
 
     if (ANDROID) {
         // last: a WebView without the iterator helpers the engine needs (older than Chrome 122) gets a plain error that

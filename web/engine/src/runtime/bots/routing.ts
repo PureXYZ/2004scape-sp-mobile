@@ -28,7 +28,7 @@ import { NetworkPlayer } from '#/engine/entity/NetworkPlayer.js';
 import { PlayerLoading } from '#/engine/entity/PlayerLoading.js';
 import World from '#/engine/World.js';
 import Packet from '#/io/Packet.js';
-import { toSafeName } from '#/util/JString.js';
+import { toBase37, toSafeName } from '#/util/JString.js';
 
 import { hasExited } from '../../shims/globals.js';
 import { testOptions } from '../options.js';
@@ -315,9 +315,56 @@ export function humanInWorld(): boolean {
 export function isReservedName(name: string): boolean {
     const n = toSafeName(name);
     if (humanNames.has(n)) return true;
-    const p = World.getPlayerByUsername(n);
+    if (playersThisTick !== null) {
+        const answer = isHumanThisTick(n);
+        if (reservedCheck.on) {
+            reservedCheck.calls++;
+            if (answer !== isHumanNow(n)) reservedCheck.mismatches++;
+        }
+        return answer;
+    }
+    return isHumanNow(n);
+}
+
+/** World.getPlayerByUsername(name) is a human (a NetworkPlayer; a bot never is) */
+function isHumanNow(name: string): boolean {
+    const p = World.getPlayerByUsername(name);
     return !!p && p instanceof NetworkPlayer;
 }
+
+/**
+ * port (perf, 2026-10-23): while BotManager.tick runs (hooks.ts), isReservedName answers from one map of the players,
+ * made at its first call of the tick. Admitting a newcomer asks it of every unused name (NameSource.remaining: about
+ * 2,800 at 1000 bots), and World.getPlayerByUsername walks every player and the queued logins for each: millions of
+ * generator steps in one tick. The map has what getPlayerByUsername finds: for each username37, the first player in
+ * World.playerLoop, then World.newPlayers, and whether it is a NetworkPlayer. Nothing leaves either during the tick and
+ * no human joins (their logins arrive between ticks); a bot queued later in the tick goes at the end of newPlayers, after
+ * every player in the map, so it changes no answer, and a name only it has is not a human's either way.
+ */
+let playersThisTick: Map<bigint, boolean> | null | undefined = null;
+
+/** hooks.ts, around BotManager.tick */
+export function beginBotTick(): void {
+    playersThisTick = undefined; // made at the first isReservedName of the tick
+}
+
+export function endBotTick(): void {
+    playersThisTick = null;
+}
+
+function isHumanThisTick(name: string): boolean {
+    let players = playersThisTick;
+    if (players === undefined) {
+        players = new Map();
+        for (const p of World.playerLoop.all()) if (!players.has(p.username37)) players.set(p.username37, p instanceof NetworkPlayer);
+        for (const p of World.newPlayers) if (!players.has(p.username37)) players.set(p.username37, p instanceof NetworkPlayer);
+        playersThisTick = players;
+    }
+    return players!.get(toBase37(name)) === true;
+}
+
+/** (tests) on: every answer from the tick's map is also asked of World.getPlayerByUsername and compared */
+export const reservedCheck = { on: false, calls: 0, mismatches: 0 };
 
 export function loadSave(name: string): { status: 'ok'; data: Uint8Array } | { status: 'missing' } | { status: 'error'; error: string } {
     const data = botStore.get(toSafeName(name));

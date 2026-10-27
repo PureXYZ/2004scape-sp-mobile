@@ -57,6 +57,7 @@ import {
     joinArena, leaveArena, liveDuelOf, liveDuels, noteDuelEnd, noteDuelStart, noteHumanChallenge, noteHumanDuel, pickStakeSpot, rand, refuseHuman, rulesOf,
     sampleSpectators, sayArena, sayArenaText, stakeRoom, testDeal, visitEnded, type BigStakeRun, type DuelRecord
 } from '#/engine/bot/port/BotArena.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 export type ArenaRole = 'staker' | 'watcher' | 'bigstake' | 'crowd';
 
@@ -559,7 +560,7 @@ export class DuelArenaTask extends BotTask {
 
     private _playersNear(player: Player, r: number): number {
         let n = 0;
-        for (const p of World.playerLoop.all()) {
+        for (const p of worldPlayers()) {
             if (p !== player && p.level === player.level && cheb(p, player) <= r && ++n >= 3) break;
         }
         return n;
@@ -634,7 +635,7 @@ export class DuelArenaTask extends BotTask {
     /** who challenged it: a player within 15 tiles whose %duel2accept is this bot */
     private _challenger(player: Player): Player | null {
         const uid = player.uid | 0;
-        for (const p of World.playerLoop.all()) {
+        for (const p of worldPlayers()) {
             if (p === player || p.level !== player.level || cheb(p, player) > 15) continue;
             if (duelPartnerVar(p) === uid) return p;
         }

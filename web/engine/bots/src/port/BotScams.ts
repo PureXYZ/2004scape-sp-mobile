@@ -37,6 +37,7 @@ import { isNewbie } from '#/engine/bot/port/BotNewbie.js';
 import { isAway } from '#/engine/bot/port/BotHabits.js';
 import { cliqueMateNear, sameClique } from '#/engine/bot/port/BotCliques.js';
 import { BotChat } from '#/engine/bot/port/BotChat.js';
+import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 // ── the defaults ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -435,7 +436,7 @@ export function drawScamVenue(random: () => number = Math.random): ScamVenue {
 }
 
 function humanInWorld(): boolean {
-    for (const p of World.playerLoop.all()) if (!p.is_bot) return true;
+    for (const p of worldPlayers()) if (!p.is_bot) return true;
     return false;
 }
 

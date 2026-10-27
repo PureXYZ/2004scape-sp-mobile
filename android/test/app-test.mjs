@@ -26,6 +26,16 @@
 //            asks, which needs model.json's template qwen-chatml-hybrid or qwen-chatml-think),
 //            --profile NAME (the run plays in players/NAME/ and bots/NAME/, so the phone's own characters and world,
 //            profile main, stay as they are),
+//            --soak NAME|FILE (a performance soak instead of the checks after the login: web/test/perf/NAME.json or a file
+//            of that shape, as on the iPhone; docs/BUILDING.md §4 "A/B on the phone"). The soak goes to the app at launch
+//            (the debug build's lostcity.test extra), so --no-build runs any soak on the last test build; it implies
+//            --profile bench, and --bots N sets the soak's count. Each phase's window is sampled here: the app's,
+//            its renderer's and the compositor's threads (top -H, /proc stat before and after), the app's frames (dumpsys
+//            gfxinfo), the composed frame rate (SurfaceFlinger --latency) and memory (meminfo). A soak with
+//            startup.launches N launches the app (am start -S -W) until N clean launches have reported their start-up
+//            marks. Output beside the console log: soak.jsonl, soak-raw.jsonl, startup.jsonl (from the app's log file,
+//            whose lines are whole), soak/ (the samples), summary.json + summary.txt (web/test/perf/summary.mjs;
+//            --no-summary: not made),
 //            --keep-test-build (leave the test build installed at the end)
 //
 // The test APK is the debug build with the autotest web variant (Gradle :app:buildWeb -PwebAutotest, i.e. build-web.mjs
@@ -48,11 +58,12 @@
 // (the sandboxed process its SandboxedProcessService binding names); a renderer's death is the native log's "WebView
 // renderer gone". Output: android/build/app-test/<emulator|device>-<time>/ (console.log, driver.log, screenshots,
 // memory.txt, app-log.txt; with --lm-bench lm-bench.jsonl, lm-bench-summary.json, lm-native.log).
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ACTIVITY, ADB, PKG, device, sleep } from './lib/adb.mjs';
 import { ANDROID, REPO, WEB_GAME, apkFile, buildTestApk, firstUsbDevice, gradle, normalApk } from './lib/testbuild.mjs';
+import { SoakLines, launchTestArg, lmPrompts, loadSoak, procStatScript, soakBuildProblem, soakTimeoutMin } from '../../web/test/perf/soak.mjs';
 
 const argv = process.argv.slice(2);
 const flag = name => argv.includes(name);
@@ -76,7 +87,19 @@ if (LM_THINK && LM_BENCH_MIN === null) {
     process.exit(1);
 }
 const BOTS = flag('--bots') ? Number(argv[argv.indexOf('--bots') + 1]) : LM_BENCH_MIN ? 500 : null; // null: the setting stays as it is
-const PROFILE = flag('--profile') ? argv[argv.indexOf('--profile') + 1] : LM_BENCH_MIN !== null ? 'bench' : null;
+// (--soak: the soak's phases; its bots from --bots or the soak)
+const SOAK = (() => {
+    if (!flag('--soak')) {
+        return null;
+    }
+    try {
+        return loadSoak(argv[argv.indexOf('--soak') + 1], { bots: flag('--bots') ? BOTS : undefined });
+    } catch (error) {
+        console.error(error.message);
+        process.exit(1);
+    }
+})();
+const PROFILE = flag('--profile') ? argv[argv.indexOf('--profile') + 1] : LM_BENCH_MIN !== null || SOAK ? 'bench' : null;
 if (PROFILE !== null && !/^[a-z0-9_-]{1,32}$/.test(PROFILE)) {
     console.error('--profile takes a name of lowercase letters, digits, - and _');
     process.exit(1);
@@ -92,7 +115,7 @@ if (!SERIAL) {
 const BUILD_DIR = path.join(ANDROID, 'build', 'app-test');
 const TEST_APK = path.join(BUILD_DIR, 'app-autotest.apk');
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-const OUT = path.join(BUILD_DIR, `${emulator ? 'emulator' : 'device'}-${stamp}`);
+const OUT = path.join(BUILD_DIR, `${emulator ? 'emulator' : 'device'}-${stamp}${SOAK ? `-${SOAK.name}` : ''}`);
 fs.mkdirSync(OUT, { recursive: true });
 
 const d = device(SERIAL);
@@ -148,11 +171,12 @@ if (!flag('--no-build')) {
         out: TEST_APK,
         makeBundle: game => {
             gradle(':app:buildWeb', '-PwebAutotest', ...(flag('--debug-web') ? ['-PwebDebug'] : []), ...(flag('--pack') ? ['-PwebPack'] : []));
-            if (BOTS !== null || LM_BENCH_MIN !== null) {
-                // what autotest.js reads (the test bundle only)
-                const config = { ...(BOTS !== null ? { bots: BOTS } : {}), ...(LM_BENCH_MIN !== null ? { lmBench: lmBenchConfig() } : {}) };
+            if (BOTS !== null || LM_BENCH_MIN !== null || SOAK) {
+                // what autotest.js reads (the test bundle only); a soak build has the chat model's prompts, for any soak's
+                // lm phase (the soak itself comes at launch, and its bots with it)
+                const config = { ...(BOTS !== null && !SOAK ? { bots: BOTS } : {}), ...(LM_BENCH_MIN !== null ? { lmBench: lmBenchConfig() } : {}), ...(SOAK ? { lmPrompts: lmPrompts(REPO) } : {}) };
                 fs.writeFileSync(path.join(game, 'autotest.json'), `${JSON.stringify(config)}\n`);
-                note(`autotest.json: ${BOTS ?? "the app's"} bots${LM_BENCH_MIN !== null ? `, lm-bench ${JSON.stringify({ ...config.lmBench, prompts: config.lmBench.prompts.length })}` : ''}`);
+                note(`autotest.json: ${SOAK ? `the soak's ${SOAK.bots} bots, the chat model's prompts` : `${BOTS ?? "the app's"} bots`}${LM_BENCH_MIN !== null ? `, lm-bench ${JSON.stringify({ ...config.lmBench, prompts: config.lmBench.prompts.length })}` : ''}`);
             }
             if (PROFILE !== null) {
                 // the save profile, before host.js reads it (host.js PROFILE)
@@ -177,9 +201,17 @@ const builtBots = (() => {
         return null;
     }
 })();
-if (builtBots !== BOTS) {
+if (!SOAK && builtBots !== BOTS) {
     console.error(`${TEST_APK} was built ${builtBots === null ? 'without --bots' : `with --bots ${builtBots}`}; build it again (without --no-build) for ${BOTS === null ? 'no --bots' : `--bots ${BOTS}`}`);
     process.exit(1);
+}
+if (SOAK) {
+    // (the soak comes at launch; what it needs of the build: the save profile, the prompts for an lm phase)
+    const problem = soakBuildProblem({ index: apkFile(TEST_APK, 'assets/Game/index.html')?.toString() ?? null, autotest: apkFile(TEST_APK, 'assets/Game/autotest.json')?.toString() ?? null }, SOAK, PROFILE);
+    if (problem) {
+        console.error(`${TEST_APK}: ${problem}; build it again (without --no-build) with --soak`);
+        process.exit(1);
+    }
 }
 if (LM_BENCH_MIN !== null && !apkFile(TEST_APK, 'assets/Model/model.json')) {
     console.error(`${TEST_APK} has no model (assets/Model): build it again with the model (android/scripts/prepare-model.sh, no -Plc.model=none)`);
@@ -249,17 +281,89 @@ function measure(label) {
     fs.appendFileSync(path.join(OUT, 'memory.txt'), `${lines.join('\n')}\n`);
 }
 
+// ---- a soak's windows (ACTION soak <name> <seconds> <set>), one at a time: the app's, its renderer's, the compositor's
+// and the audio server's threads (top -H over the window, and /proc/<pid>/task/*/stat before and after), the app's frames
+// (gfxinfo, reset at the start), the composed frames (SurfaceFlinger --latency), the display's rate and the memory
+// (meminfo); web/test/perf/summary.mjs reads them. A request made while one runs waits for it.
+let sampleChain = Promise.resolve();
+const sampling = new Set();
+const OTHERS = ['surfaceflinger', 'android.hardware.graphics.composer3-service.ranchu', 'android.hardware.graphics.allocator-service.ranchu', 'android.hardware.graphics.composer@2.4-service', 'audioserver', 'android.hardware.audio.service', 'android.hardware.audio.service.ranchu', 'system_server'];
+
+function pidsOf(name) {
+    return d.adbQuiet('shell', 'pidof', name).trim().split(/\s+/).filter(Boolean).map(Number).filter(Number.isFinite);
+}
+
+function sampleWindow(name, seconds) {
+    const dir = path.join(OUT, 'soak');
+    fs.mkdirSync(dir, { recursive: true });
+    const requestedAt = Date.now();
+    const done = (sampleChain = sampleChain.then(async () => {
+        const app = Number(d.pid());
+        const renderers = rendererPids();
+        const names = {};
+        for (const other of OTHERS) {
+            for (const pid of pidsOf(other)) names[pid] = other.replace(/^android\.hardware\.(graphics|audio)\./, '').replace(/-service.*$/, '');
+        }
+        const pids = [...new Set([app, ...renderers, ...Object.keys(names).map(Number)].filter(Boolean))];
+        const stat = () => d.adbQuiet('shell', procStatScript(pids)); // (one argument: procStatScript says why)
+        const startedAt = Date.now();
+        note(`soak window ${name}: ${seconds} s (${((startedAt - requestedAt) / 1000).toFixed(1)} s after the request), app ${app}, renderers ${renderers.join(',')}`);
+        d.adbQuiet('shell', 'dumpsys', 'gfxinfo', PKG, 'reset');
+        const stat0 = stat();
+        const top = await new Promise(resolve => {
+            const child = spawn(ADB, ['-s', SERIAL, 'shell', 'top', '-b', '-H', '-d', String(seconds), '-n', '2', '-p', pids.join(','), '-o', 'PID,TID,%CPU,TIME+,CMD,NAME'], { stdio: ['ignore', 'pipe', 'pipe'] });
+            let text = '';
+            child.stdout.on('data', c => (text += c));
+            child.stderr.on('data', c => (text += c));
+            child.on('exit', () => resolve(text));
+        });
+        const stat1 = stat();
+        const endedAt = Date.now();
+        const layers = d.adbQuiet('shell', 'dumpsys', 'SurfaceFlinger', '--list');
+        const layer = layers.split('\n').map(l => l.trim()).filter(l => l.includes(PKG) && !/Background|Bounds/.test(l)).pop() ?? '';
+        const files = {
+            'top.txt': top,
+            'stat0.txt': stat0,
+            'stat1.txt': stat1,
+            'gfxinfo.txt': d.adbQuiet('shell', 'dumpsys', 'gfxinfo', PKG),
+            'latency.txt': `${layer}\n${layer ? d.adbQuiet('shell', 'dumpsys', 'SurfaceFlinger', '--latency', layer) : ''}`,
+            'display.txt': d.adbQuiet('shell', 'dumpsys display | grep -iE "mActiveRenderFrameRate|renderFrameRate|mActiveSfDisplayMode|refreshRate=" | head -10'),
+            'mem.txt': [`app ${app}: ${pssOf(PKG)}`, ...renderers.map(pid => `renderer ${pid}: ${pssOf(pid)}`)].join('\n')
+        };
+        for (const [suffix, text] of Object.entries(files)) {
+            fs.writeFileSync(path.join(dir, `${name}.${suffix}`), text);
+        }
+        fs.appendFileSync(path.join(dir, 'windows.jsonl'), `${JSON.stringify({ name, seconds, requestedAt, startedAt, endedAt, app, renderers, names, layer })}\n`);
+        note(`soak window ${name}: done (${((endedAt - startedAt) / 1000).toFixed(1)} s); ${files['mem.txt'].replace(/\n/g, '; ')}`);
+    }));
+    sampling.add(done);
+    void done.then(() => sampling.delete(done));
+}
+
+// (a soak's: the soak and which launch this is, for the debug build's launch-test; am start -W says how long it took)
+let launches = 0;
+let settingsBefore = null; // (the settings the series' first launch changed, for its last to set back: ACTION relaunch)
 function launchApp({ fresh }) {
-    return d.adbQuiet('shell', 'am', 'start', ...(fresh ? ['-W', '-S'] : []), '-n', ACTIVITY);
+    if (!fresh || !SOAK) {
+        return d.adbQuiet('shell', 'am', 'start', ...(fresh ? ['-W', '-S'] : []), '-n', ACTIVITY);
+    }
+    launches++;
+    const output = d.adbQuiet('shell', 'am', 'start', '-W', '-S', '-n', ACTIVITY, '--es', 'lostcity.test', launchTestArg({ soak: SOAK, launch: launches, clean: soakLines.cleanLaunches, run: stamp, before: settingsBefore }));
+    const times = Object.fromEntries([...output.matchAll(/^(TotalTime|WaitTime|LaunchState): (\S+)/gm)].map(m => [m[1], /^\d+$/.test(m[2]) ? Number(m[2]) : m[2]]));
+    fs.appendFileSync(path.join(OUT, 'launches.jsonl'), `${JSON.stringify({ launch: launches, at: Date.now(), ...times })}\n`);
+    return output;
 }
 
 // ------------------------------------------------------------------------------------------------ run
 
 const consoleLog = fs.createWriteStream(path.join(OUT, 'console.log'));
+// (a soak's lines as they come, for the start-up series' count; the files are made again from the app's log at the end)
+const soakLines = SOAK ? new SoakLines(OUT, { run: stamp }) : null;
+const STARTUP_LAUNCHES = SOAK?.startup?.launches ?? 0;
 d.clearLog();
 const logcat = spawn(ADB, ['-s', SERIAL, 'logcat', '-v', 'threadtime', 'LostCity:V', '*:S'], { stdio: ['ignore', 'pipe', 'pipe'] });
-note(`launching: adb -s ${SERIAL} shell am start -W -S -n ${ACTIVITY}`);
-const launchedAt = Date.now();
+note(`launching: adb -s ${SERIAL} shell am start -W -S -n ${ACTIVITY}${SOAK ? ' --es lostcity.test <the soak>' : ''}`);
+let launchedAt = Date.now();
 launchApp({ fresh: true });
 
 let summary = null;
@@ -281,6 +385,22 @@ async function act(line) {
         launchApp({ fresh: false });
     } else if ((m = line.match(/LCTEST ACTION measure (\S+)/))) {
         measure(m[1]);
+    } else if ((m = line.match(/LCTEST ACTION soak (\S+) (\d+)(?: (\w+))?/))) {
+        sampleWindow(m[1], Number(m[2]));
+    } else if ((m = line.match(/LCTEST ACTION relaunch(?: (\{.*\}))?\s*$/)) && SOAK) {
+        settingsBefore = m[1] ? JSON.parse(m[1]) : settingsBefore;
+        if (launches >= STARTUP_LAUNCHES + 3) {
+            note(`the start-up series has had ${launches} launches for ${STARTUP_LAUNCHES} clean ones: giving up`);
+            finish(true);
+            return;
+        }
+        // (stopped, a moment for its processes to go, then the next launch; the process watch waits for it)
+        launchedAt = Date.now();
+        d.adbQuiet('shell', 'am', 'force-stop', PKG);
+        await sleep(3000);
+        note(`launching again (launch ${launches + 1}, ${soakLines.cleanLaunches} of ${STARTUP_LAUNCHES} clean launches measured)`);
+        launchedAt = Date.now();
+        launchApp({ fresh: true });
     } else if ((m = line.match(/LCTEST DONE (pass=\d+ fail=\d+)/))) {
         summary = m[1];
         await sleep(500);
@@ -314,7 +434,8 @@ function onLine(line) {
     if (/\[lm\]/.test(line) && LM_BENCH_MIN !== null) {
         fs.appendFileSync(path.join(OUT, 'lm-native.log'), `${line}\n`);
     }
-    if (/LCTEST (PASS|FAIL|INFO|DONE)/.test(line) || /\b(error|fatal|exception)\b/i.test(line)) {
+    soakLines?.line(line);
+    if ((/LCTEST (PASS|FAIL|INFO|DONE)/.test(line) && !/LCTEST INFO soak-(raw|summary|startup)(-part)? /.test(line)) || /\b(error|fatal|exception)\b/i.test(line)) {
         process.stdout.write(`${line.length > 2000 ? `${line.slice(0, 2000)} …` : line}\n`);
     }
 }
@@ -361,15 +482,17 @@ const watchProcess = setInterval(() => {
     }
 }, 5000);
 
-// Launch frames (launch screen → loading cover → title).
-void (async () => {
-    for (const ms of [1500, 4000, 9000]) {
-        await sleep(Math.max(0, launchedAt + ms - Date.now()));
-        if (!finished) {
-            screenshot(`launch-${ms}`);
+// Launch frames (launch screen → loading cover → title); not in a soak, whose start-up they would slow.
+if (!SOAK) {
+    void (async () => {
+        for (const ms of [1500, 4000, 9000]) {
+            await sleep(Math.max(0, launchedAt + ms - Date.now()));
+            if (!finished) {
+                screenshot(`launch-${ms}`);
+            }
         }
-    }
-})();
+    })();
+}
 
 /** The app's own log file (external files: readable with adb on a release build too), the rotated one first. */
 function pullAppLog() {
@@ -408,43 +531,77 @@ function finish(crashed = false) {
     }
     finished = true;
     clearInterval(watchProcess);
-    // (the iPhone's driver sends the app to the background, the simulator's terminates it: HOME flushes the saves, then on
-    // an emulator the app is stopped)
-    d.adbQuiet('shell', 'input', 'keyevent', 'KEYCODE_HOME');
-    setTimeout(() => {
-        if (emulator) d.adbQuiet('shell', 'am', 'force-stop', PKG);
-        logcat.kill('SIGTERM');
-        const files = d.adbQuiet('shell', 'run-as', PKG, 'find', 'files/Documents', '-type', 'f');
-        note(`Documents:\n${files.trim()}`);
-        const logText = pullAppLog();
-        if (LM_BENCH_MIN !== null) writeBench(logText);
-        if (terminations) {
-            note(`WebView renderer deaths during the run: ${terminations}`);
+    void (async () => {
+        if (sampling.size) {
+            note(`waiting for ${sampling.size} soak window(s)…`);
+            await Promise.race([Promise.all([...sampling]), sleep(5 * 60 * 1000)]);
         }
-        // the normal build back on the device (the test build has the self-playing page)
-        if (flag('--keep-test-build')) {
-            note(`the test build stays installed (--keep-test-build): run DEVICE=${SERIAL} android/scripts/deploy.sh to put the normal app back`);
+        // (the iPhone's driver sends the app to the background, the simulator's terminates it: HOME flushes the saves,
+        // then on an emulator the app is stopped)
+        d.adbQuiet('shell', 'input', 'keyevent', 'KEYCODE_HOME');
+        await sleep(2500);
+        finishRun(crashed);
+    })();
+}
+
+function finishRun(crashed) {
+    if (emulator) d.adbQuiet('shell', 'am', 'force-stop', PKG);
+    logcat.kill('SIGTERM');
+    const files = d.adbQuiet('shell', 'run-as', PKG, 'find', 'files/Documents', '-type', 'f');
+    note(`Documents:\n${files.trim()}`);
+    const logText = pullAppLog();
+    if (LM_BENCH_MIN !== null) writeBench(logText);
+    if (SOAK) writeSoak(logText);
+    if (terminations) {
+        note(`WebView renderer deaths during the run: ${terminations}`);
+    }
+    // the normal build back on the device (the test build has the self-playing page)
+    if (flag('--keep-test-build')) {
+        note(`the test build stays installed (--keep-test-build): run DEVICE=${SERIAL} android/scripts/deploy.sh to put the normal app back`);
+    } else {
+        const normal = normalApk();
+        if (normal) {
+            const ok = /Success/.test(d.adbQuiet('install', '-r', normal));
+            note(ok ? `the normal debug build is installed again (${path.relative(REPO, normal)}, built ${fs.statSync(normal).mtime.toISOString().slice(0, 16).replace('T', ' ')})` : `could not install ${normal}: run DEVICE=${SERIAL} android/scripts/deploy.sh`);
         } else {
-            const normal = normalApk();
-            if (normal) {
-                const ok = /Success/.test(d.adbQuiet('install', '-r', normal));
-                note(ok ? `the normal debug build is installed again (${path.relative(REPO, normal)}, built ${fs.statSync(normal).mtime.toISOString().slice(0, 16).replace('T', ' ')})` : `could not install ${normal}: run DEVICE=${SERIAL} android/scripts/deploy.sh`);
-            } else {
-                note(`no normal debug APK is built: run DEVICE=${SERIAL} android/scripts/deploy.sh to put the normal app back (the test build is still installed)`);
-            }
+            note(`no normal debug APK is built: run DEVICE=${SERIAL} android/scripts/deploy.sh to put the normal app back (the test build is still installed)`);
         }
-        d.adbQuiet('shell', 'settings', 'put', 'global', 'stay_on_while_plugged_in', /^\d+$/.test(stayOn) ? stayOn : '0');
-        d.adbQuiet('forward', '--remove', `tcp:${d.devtoolsPort}`);
-        note(`result: ${summary ?? (crashed ? 'the app stopped before the test finished' : 'timeout')} — ${OUT}`);
-        const failed = !summary || !summary.endsWith('fail=0');
-        fs.writeFileSync(path.join(OUT, 'result.json'), `${JSON.stringify({ serial: SERIAL, summary, crashed, terminations, bots: BOTS, lmBench: LM_BENCH_MIN, out: OUT }, null, 1)}\n`);
-        process.exit(failed ? 1 : 0);
-    }, 2500);
+    }
+    d.adbQuiet('shell', 'settings', 'put', 'global', 'stay_on_while_plugged_in', /^\d+$/.test(stayOn) ? stayOn : '0');
+    d.adbQuiet('forward', '--remove', `tcp:${d.devtoolsPort}`);
+    fs.writeFileSync(path.join(OUT, 'result.json'), `${JSON.stringify({ serial: SERIAL, target: emulator ? 'emulator' : 'device', summary, crashed, terminations, bots: SOAK ? SOAK.bots : BOTS, lmBench: LM_BENCH_MIN, soak: SOAK?.name ?? null, launches, port: builtPort(), out: OUT }, null, 1)}\n`);
+    if (SOAK && !flag('--no-summary')) {
+        const r = spawnSync(process.execPath, [path.join(REPO, 'web', 'test', 'perf', 'summary.mjs'), OUT], { stdio: 'inherit' });
+        if (r.status !== 0) note(`the summary failed (node web/test/perf/summary.mjs ${OUT})`);
+    }
+    note(`result: ${summary ?? (crashed ? 'the app stopped before the test finished' : 'timeout')} — ${OUT}`);
+    const failed = !summary || !summary.endsWith('fail=0');
+    process.exit(failed ? 1 : 0);
+}
+
+/** A soak's files from the app's log file, whose lines are whole (logcat's were joined), when it has them all. */
+function writeSoak(logText) {
+    const fromLog = new SoakLines(OUT, { run: stamp, live: false });
+    for (const line of logText.split('\n')) fromLog.line(line);
+    if (fromLog.values.length >= soakLines.values.length) {
+        fromLog.write();
+    }
+    note(`soak: ${fromLog.values.length} values in the app's log file, ${soakLines.values.length} from logcat (${fromLog.values.length >= soakLines.values.length ? "the log file's" : "logcat's"} kept)`);
+}
+
+/** The repository revision the test APK's web bundle was built from (its build-info.json). */
+function builtPort() {
+    try {
+        return JSON.parse(apkFile(TEST_APK, 'assets/Game/build-info.json')?.toString() ?? 'null')?.port ?? null;
+    } catch {
+        return null;
+    }
 }
 
 process.on('SIGINT', () => finish(true));
-// (with bots: a restart to apply the setting, waiting for them, measuring; the lm-bench: its phases)
-const TIMEOUT_MIN = (BOTS > 0 ? 12 : 8) + (LM_BENCH_MIN !== null ? (30 * LM_BENCH_MIN) / 20 + 10 : 0);
+// (with bots: a restart to apply the setting, waiting for them, measuring; the lm-bench: its phases; a soak: its phases
+// and launches)
+const TIMEOUT_MIN = (BOTS > 0 || SOAK?.bots > 0 ? 12 : 8) + (LM_BENCH_MIN !== null ? (30 * LM_BENCH_MIN) / 20 + 10 : 0) + (SOAK ? soakTimeoutMin(SOAK) : 0);
 setTimeout(() => {
     note(`TIMEOUT (${TIMEOUT_MIN} min)`);
     finish(true);

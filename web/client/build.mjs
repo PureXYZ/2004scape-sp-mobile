@@ -42,7 +42,7 @@ const HOST_FIELDS = [
     'keyHeld', 'timeoutTimer', 'idleTimer', 'noTimeoutTimer', 'ingame', 'loginscreen', 'loginSelect', 'loginUser', 'loginPass',
     'chatInput', 'dialogInputOpen', 'dialogInput', 'socialInputOpen', 'socialInput', 'socialInputHeader', 'socialInputType', 'reportAbuseInput',
     'setTargetedFramerate', 'mainModalId', 'sideModalId', 'reportAbuseComId', 'chatModalId', 'isMenuOpen',
-    'loginMes1', 'loginMes2', 'titleFlames', 'lastProgressPercent', 'keyQueueReadPos', 'keyQueueWritePos', 'nextMouseClickX',
+    'loginMes1', 'loginMes2', 'titleFlames', 'lastProgressPercent', 'keyQueue', 'keyQueueReadPos', 'keyQueueWritePos', 'nextMouseClickX',
     'nextMouseClickY', 'nextMouseClickTime', 'nextMouseClickButton', 'tfps', 'errorLoading', 'errorHost', 'errorStarted',
     // the mobile HUD (patch 0011)
     'setSurfaceLayout', 'setViewportInsets', 'cancelPointer', 'cancelPointerOn', 'tapAt', 'hudState', 'hudChatLines', 'hudSetRun',
