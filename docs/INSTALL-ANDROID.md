@@ -34,8 +34,8 @@ to sign in to GitHub. Scroll down to **Assets** and tap **one** file:
 
 | The file ending in | Size | Pick it if |
 |---|---|---|
-| **android.apk** (for example **2004Scape-1.0.0-android.apk**) | about 580 MB | You want the full app. The computer players ("bots") can answer you in their own words, using a small chat program that runs on the phone. |
-| **android-lite.apk** (for example **2004Scape-1.0.0-android-lite.apk**) | about 54 MB | Your phone is short on space, or you are on mobile data. Everything else is the same: the bots are there and chat with their own ready-made lines. |
+| **android.apk** (for example **2004Scape-1.1.0-android.apk**) | about 580 MB | You want the full app. The computer players ("bots") can answer you in their own words, using a small chat program that runs on the phone. |
+| **android-lite.apk** (for example **2004Scape-1.1.0-android-lite.apk**) | about 54 MB | Your phone is short on space, or you are on mobile data. Everything else is the same: the bots are there and chat with their own ready-made lines. |
 
 **Not sure?** On Wi-Fi with space to spare, take the full app; otherwise the lite one. You can switch later: installing
 one over the other keeps your saves.

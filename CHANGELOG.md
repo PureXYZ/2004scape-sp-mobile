@@ -3,7 +3,7 @@
 All notable changes to 2004Scape. Versions follow `VERSION` (major.minor.patch); each one is a GitHub release `v<version>`
 with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
-## [Unreleased]
+## [1.1.0] - 2026-10-27
 
 - **The game uses less memory, so a crowded world with the bots' chat model is less likely to be cut short.** On an
   iPhone, the app now has WebKit tidy the game page's memory every 30 seconds while you play, and at once when the
@@ -62,14 +62,33 @@ with an Android APK and an iPhone IPA, with and without the bots' chat model.
   official worlds are not supported. It saves the phone's memory (no world, no bots, no chat model on the phone), not
   much battery: drawing stays on the phone. How to run a server: [docs/ONLINE.md](docs/ONLINE.md). The world on the
   phone plays as before.
+- **Bots always answer you.** A line said to a bot (by its name, in a private message, in a conversation with it or in
+  its reply window) now always gets a reply, in every Bot chat mode: the chat model's words or the rules', or, when
+  nothing understood it or the model failed, the bot's own shrug or nod ("sry what?", "idk tbh", "wat", "oh ok"). A
+  line that asks for no answer ("ok", "ty", a smiley) is answered as often as before. A question to no one in
+  particular gets an answer more often, a bot on a short break answers when it is back (sometimes "sry was afk"
+  first), and with two conversations going only the bot you spoke to last replies.
+- **Fixed: coming back from a death poisoned.** A poisonous monster's hit in the tick before you died could poison you
+  again at Lumbridge (a bug in Lost City's content). Death now clears it, and so does the end of a duel. This fix is in
+  the bots' content, so it applies with the bots on; with Bots Off the game runs Lost City's scripts unchanged.
+- **No more free rune arrows in the Wilderness.** A bot's arrows in a fight with a player are used up instead of
+  dropping under its target, so Edgeville's Wilderness no longer fills with arrows that no bot picks up; your own arrows
+  drop as before. Ranged and magic bots training on monsters pick up their arrows and their kills' worthwhile drops,
+  and a bot vendor's falling price now stops above what High Alchemy pays for the item.
+- **Bots find their way better.** At the Agility Arena a bot plans a route across the platforms to the flashing pillar
+  instead of trying the nearest obstacle, so it tags pillars again. A bot beside a rock, a tree or water no longer
+  walks 50 tiles off when its destination is inside it, bots no longer walk in circles over White Wolf Mountain, and
+  bots on Rune Mysteries walk to the Wizards' Tower's door instead of ending up in the swamp.
 
 Performance work that changes nothing a player can see or hear: the same game state and bot behaviour, the same pixels
 and sound samples, 600 ms ticks, and saves that are byte for byte the same. Each change was checked against the code it
 replaces, and main and this build were run side by side from the same seeds at 0, 500 and 1,000 bots. The numbers below
 are from a Mac (M2), in WebKit as the iPhone runs it and in Chrome as Android's WebView does, except the audio line's
-and the chat model's, from an iPhone 13 mini, and Android's frame stalls, from the Android emulator. On that iPhone the
-whole phone uses about 20 % less CPU standing in the world or at the title (11 % walking), the title is up 0.8 s sooner,
-and the game holds 50 to 80 MB less memory while playing. The only new text is in Settings › About's licences: libbzip2
+and the chat model's, from an iPhone 13 mini, and Android's frame stalls, from the Android emulator. On that iPhone,
+measured before the last change below (Less drawing standing still), the whole phone used about 20 % less CPU standing
+in the world or at the title (11 % walking), the title was up 0.8 s sooner, and the game held 50 to 80 MB less memory
+while playing; on the iPhone that last change gives some of the CPU time and memory back (its bullet has the numbers).
+The only new text is in Settings › About's licences: libbzip2
 is now used by the client and the World map too.
 
 - **Faster start.** The client unpacks its archives with the engine's libbzip2 instead of its JavaScript decoder, the
@@ -85,14 +104,23 @@ is now used by the client and the World map too.
   display frame.
 - **Less drawing standing still.** While the camera does not move, the 3D world is drawn again only where something in
   it changed (a player or NPC moving or animating, a fire, the fountain's water), with the same pixels as when it is
-  drawn whole. Standing at Varrock West with 500 bots, WebKit's web process (the page and the engine) works about 23 %
-  less and the page's main thread in Chrome about 38 % less; at Lumbridge without bots 19 % and 29 % less. Walking and
-  turning the camera are as before. It holds about 5 to 7 MB more memory (the last frame and what it drew). Every frame
-  of the test play-throughs was checked against a full drawing of it, in WebKit and in Chrome, and a new test suite
-  (`web/test/render-verify`) plays 35 scenarios for it (people and NPCs coming and going, 500 bots, doors, fires, water,
-  fights, menus, every panel, other screen sizes, low detail) and compares each frame with a full drawing of it, pixel
-  by pixel and in what the frame leaves behind (the options menu, where a tap walks, the water's animation): over
-  400,000 frames drawn in part, in WebKit, in Chrome and as the Android app's page, and none differed.
+  drawn whole. Walking and turning the camera draw whole frames, as before. On the Mac, standing at Varrock West with
+  500 bots, WebKit's web process (the page and the engine) works about 23 % less and the page's main thread in Chrome
+  about 38 % less; at Lumbridge without bots 19 % and 29 % less. On the iPhone 13 mini the work standing still about
+  halves (the whole phone's CPU cycles −43 % at Lumbridge, −35 % at Varrock West with 500 bots), but iOS then runs the
+  rest at lower clocks and partly on its efficiency cores, so the time does not drop: standing at Lumbridge the whole
+  phone is busy about 4 points of a core more (92 → 96 %) and WebKit's GPU process about 32 % more, while fishing the
+  whole phone is busy about 6 points less. The game holds about 34 MB more memory at Lumbridge (up to 65 MB more at
+  Varrock West with 500 bots). Every 64 frames (about 1.3 s) one whole frame is drawn as a safety net, a little slower
+  than the rest (frame time p99 21 → 27 ms; still no frame over 33 ms standing at Lumbridge). Whether it saves battery
+  was not measured. On the Android emulator standing still runs at more frames a second (43 → 49 at Lumbridge, 38 → 45
+  at Varrock West with 500 bots), but a frame of 100 ms or more comes about three times as often, which undoes the
+  Lighter drawing gain above for standing still; walking is about the same. Every frame of the test play-throughs was
+  checked against a full drawing of it, and a new test suite (`web/test/render-verify`) plays 35 scenarios for it
+  (people and NPCs coming and going, 500 bots, doors, fires, water, fights, menus, every panel, other screen sizes, low
+  detail) and compares each frame with a full drawing of it, pixel by pixel and in what the frame leaves behind (the
+  options menu, where a tap walks, the water's animation): over 1.3 million frames drawn in part, in WebKit, in Chrome,
+  as the Android app's page and in the app on an iPhone, and none differed.
 - **Less memory.** Collision zones with nothing in them share one array, the scripts' bytecode is kept in typed arrays,
   and the music lets go of the sound it has played: the engine's heap after start is about 39 MB smaller in
   JavaScriptCore. The 30 MB of files the engine reads only to start are freed as soon as the world has started instead

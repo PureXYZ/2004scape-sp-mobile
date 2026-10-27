@@ -42,8 +42,8 @@ don't need to sign in to GitHub. Scroll down to **Assets** and download **one** 
 
 | The file ending in | Size | Pick it if |
 |---|---|---|
-| **ios.ipa** (for example **2004Scape-1.0.0-ios.ipa**) | about 550 MB | You want the full app. The computer players ("bots") can answer you in their own words, using a small chat program that runs on the phone. |
-| **ios-lite.ipa** (for example **2004Scape-1.0.0-ios-lite.ipa**) | about 40 MB | Your iPhone is short on space. Everything else is the same: the bots are there and chat with their own ready-made lines. |
+| **ios.ipa** (for example **2004Scape-1.1.0-ios.ipa**) | about 550 MB | You want the full app. The computer players ("bots") can answer you in their own words, using a small chat program that runs on the phone. |
+| **ios-lite.ipa** (for example **2004Scape-1.1.0-ios-lite.ipa**) | about 40 MB | Your iPhone is short on space. Everything else is the same: the bots are there and chat with their own ready-made lines. |
 
 An **IPA** is an iPhone app in a single file. **Not sure?** With space to spare, take the full app. You can switch
 between full and lite later the same way you refresh: your saves stay.
@@ -99,7 +99,7 @@ the game, without your saves.
    if asked. You can close iTunes afterwards.
 4. Open **Sideloadly**. Your iPhone appears in the **iDevice** box.
 5. Open your **Downloads** folder (Finder on a Mac, File Explorer on Windows). Drag the 2004Scape file you downloaded
-   (on Windows it may show as just **2004Scape-1.0.0-ios**, without .ipa) onto the **IPA** icon at the top left of
+   (on Windows it may show as just **2004Scape-1.1.0-ios**, without .ipa) onto the **IPA** icon at the top left of
    Sideloadly.
 6. Type your Apple Account email in the **Apple account** box. Leave everything else as it is.
 7. Click **Start**.
