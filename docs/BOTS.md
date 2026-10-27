@@ -44,7 +44,8 @@ Contents: [what they do](#1-what-the-bots-do) and [the design rules](#design-rul
   their home town. They start with tools, an iron scimitar, 5 shrimps and 200 coins, and buy their gear through the
   game's own shops as their levels and coins allow. Everything goes through the game's own interfaces and scripts:
   smithing, cooking, crafting, fletching, runecrafting, herblore, tanning and the bank. Nothing gives XP or items the
-  game would not give a player.
+  game would not give a player. Fighters loot their kills; rangers and mages pick up their arrows and the drops worth
+  carrying (stacks such as coins, runes and feathers, and items worth 20 gp or more), leaving bones and junk.
 - **Getting about.** They walk, using a walking graph of the overworld, and cross the toll gate, the boats and the
   stairs the game's way. A bot with the Magic level and the runes casts a real teleport spell on a long trip; members
   bots also ride the spirit trees and the gnome glider. A truly stuck bot may be moved by a rescue jump, but only where
@@ -56,7 +57,8 @@ Contents: [what they do](#1-what-the-bots-do) and [the design rules](#design-rul
 - **Trade.** Vendors and bank-standers sell at the 2004 trade banks, about half of them at Varrock West, with adverts
   in the period's forms ("selling lobs 150 ea", "wts rune scim 33k"); about half run an auto typer. Prices follow
   December 2004 street prices for about 45 items and the item's value for the rest, never below high alch and never
-  bought back for more than the value, so there is no profit loop. Rares sell one at a time at 2004 prices, only from
+  bought back for more than the value, so there is no profit loop; an unsold item's price drop stops at the item's
+  lowest ask, above high alch and above what any vendor pays back. Rares sell one at a time at 2004 prices, only from
   rich, high-level vendors. A request in chat ("buying lobsters", "wtb coal") gets a vendor's private message with its
   price and bank. Trades follow the real trade screens.
 - **PvP.** PKers attack only where the game's own PvP rules allow (inside the Wilderness, within the combat-level

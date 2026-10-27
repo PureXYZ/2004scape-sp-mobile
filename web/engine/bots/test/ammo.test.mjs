@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-// A bot's arrows in PvP (content patch 0004), in the real rev-274 world on a members world, with the content overlay
-// as the runtime installs it. Play-testing: free rune arrows on the ground about Edgeville (a PK ranger's kit is given
-// at every restock, and 274 drops 4 in 5 of its arrows under the target, anyone's after 100 ticks). Checks:
+// A bot's arrows (content patch 0004; the bot leak audit), in the real rev-274 world on a members world, with the content
+// overlay as the runtime installs it. Play-testing: free rune arrows on the ground about Edgeville (a PK ranger's kit is
+// given at every restock, and 274 drops 4 in 5 of its arrows under the target, anyone's after 100 ticks). Checks:
 //   bot -> human  a ranger bot shooting the human in the Wilderness uses its arrows up: none on the ground, now or after
 //                 the 100 ticks a drop is its dropper's alone
 //   bot -> bot    the same against another bot
 //   human -> bot  the human's arrows drop as before: under the bot, about 4 in 5, theirs
+//   PvM           (the audit: a ranger at monsters picked nothing up) a ranger bot at Lumbridge's chickens, its own task
+//                 (RangedMagicTask): it picks up most of the arrows it drops and wears them again, takes the feathers,
+//                 leaves the bones and the raw chicken; few of its arrows left about at the end
 //
-//   node web/engine/bots/test/ammo.test.mjs [--ticks=30] [--seed=N] [--debug]
+//   node web/engine/bots/test/ammo.test.mjs [--ticks=30] [--pvm-ticks=1500] [--seed=N] [--debug]
 //
 // Exit code 1 if a check fails. Nothing is written outside build/tmp/bots.
 import fs from 'fs';
@@ -23,6 +26,7 @@ const args = Object.fromEntries(
     })
 );
 const TICKS = Number(args.ticks ?? 30);
+const PVM_TICKS = Number(args['pvm-ticks'] ?? 1500);
 const DEBUG = args.debug === 'true';
 {
     let s = Number(args.seed ?? 1) >>> 0 || 1;
@@ -168,6 +172,67 @@ const show = r => `${r.shot} shot; on the ground at most ${r.most}, after the fi
     const r = shoot(human, a, [b]);
     const landed = r.during.human + r.during.pending;
     check('human -> bot: the human\'s arrows drop under the bot as in 274 (about 4 in 5, theirs)', r.shot >= 5 && landed >= Math.floor(r.shot * 0.5) && landed <= r.shot && r.during.bot === 0 && r.during.none === 0, show(r));
+}
+
+// ---- PvM: a ranger at the chickens ----
+{
+    const I = lib.Items;
+    const step = lib.SkillProgression.RANGED[0];
+    const [sx, sz] = step.location;
+    const bp = sim.botPlayer(b);
+    delete bp.tick;
+    for (const [stat, level] of [[PlayerStat.ATTACK, 1], [PlayerStat.STRENGTH, 1], [PlayerStat.DEFENCE, 1], [PlayerStat.HITPOINTS, 20], [PlayerStat.RANGED, 10], [PlayerStat.PRAYER, 1], [PlayerStat.MAGIC, 1]]) b.setLevel(stat, level);
+    kit(b, 0);
+    const pack = b.getInventory(InvType.INV);
+    for (let s = 0; s < pack.capacity; s++) pack.set(s, null);
+    pack.add(I.SHORTBOW, 1);
+    pack.add(I.BRONZE_ARROW, 400);
+    b.clearWaypoints();
+    b.clearPendingAction();
+    b.teleJump(sx, sz, 0);
+    const task = new lib.RangedMagicTask(step, PlayerStat.RANGED);
+    bp.currentTask?.interrupt?.();
+    bp.planner.pickTask = () => task;
+    bp.currentTask = task;
+    bp.planEnds = World.currentTick + 100000;
+    // every bronze arrow it drops (274's drop under the target: World.addObj, the bot its receiver)
+    let dropped = 0;
+    const addObj = World.addObj;
+    World.addObj = function (obj, receiver64, duration) {
+        if (obj.type === I.BRONZE_ARROW && receiver64 === b.hash64) dropped += obj.count;
+        return addObj.call(this, obj, receiver64, duration);
+    };
+    const packed = id => pack.getItemCount(id);
+    const worn = () => b.getInventory(InvType.WORN).get(13)?.id === I.BRONZE_ARROW ? b.getInventory(InvType.WORN).get(13).count : 0;
+    let picked = 0;
+    let rewielded = 0;
+    let lastPack = packed(I.BRONZE_ARROW);
+    let lastWorn = worn();
+    for (let t = 0; t < PVM_TICKS; t++) {
+        tickOnce();
+        const p = packed(I.BRONZE_ARROW);
+        const w = worn();
+        if (p > lastPack) picked += p - lastPack;
+        if (w > lastWorn && t > 50) rewielded++;
+        lastPack = p;
+        lastWorn = w;
+    }
+    World.addObj = addObj;
+    let left = 0;
+    for (let dx = -3; dx <= 3; dx++) {
+        for (let dz = -3; dz <= 3; dz++) {
+            for (const obj of World.gameMap.getZone(sx + dx * 8, sz + dz * 8, 0).getAllObjsUnsafe()) {
+                if (obj.isActive && obj.type === I.BRONZE_ARROW && obj.receiver64 === b.hash64) left += obj.count;
+            }
+        }
+    }
+    const feathers = packed(lib.ObjType.getId('feather'));
+    const junk = packed(I.BONES) + packed(lib.ObjType.getId('raw_chicken'));
+    // (274 deletes 1 shot in 5: a quarter of the drops; what it lost beyond that it never got back)
+    const lost = 400 - worn() - packed(I.BRONZE_ARROW);
+    const unrecovered = lost - Math.round(dropped / 4);
+    const detail = `${task.state}; ${dropped} arrows dropped, ${picked}+ picked up, ${rewielded} times worn again, ${left} of its own left about; ${lost} of 400 lost (${unrecovered} beyond 274's fifth); ${feathers} feathers, ${junk} bones or raw chicken`;
+    check('PvM: a ranger at the chickens picks up most of its arrows and wears them again, takes the feathers, leaves the bones and raw chicken', dropped >= 20 && picked > 0 && rewielded >= 2 && unrecovered <= dropped * 0.2 && left <= Math.max(10, dropped * 0.2) && feathers > 0 && junk === 0, detail);
 }
 
 check('errors: none (bot errors, console errors)', BotManager.stats().errors === 0 && consoleErrors.length === 0, `${BotManager.stats().errors} bot errors, ${consoleErrors.length} console errors ${consoleErrors.slice(0, 2).join(' | ')}`);

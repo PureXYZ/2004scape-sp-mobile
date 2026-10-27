@@ -45,7 +45,7 @@ const STEPS = [
     ['chat: market, conversations, come here', [test('chat.test.mjs')]],
     ['PKers and gates (free world gear, target claims, NPC claims, gate predicate)', [test('pk.test.mjs')]],
     ['PK tactics (kits, the KO switch on the fast tick, potions, eating, getting out, Edgeville fights)', ['--expose-gc', test('pkfight.test.mjs')]],
-    ['a bot\'s arrows in PvP are used up, a human\'s drop (content patch 0004)', [test('ammo.test.mjs')]],
+    ['a bot\'s arrows: used up in PvP, a human\'s dropped (content patch 0004); a ranger at monsters picks its arrows up', [test('ammo.test.mjs')]],
     ['trade', [test('trade.test.mjs')]],
     ['death cures a poison still on its way (content patch 0005)', ['--expose-gc', test('poison.test.mjs')]],
     ['economy (street prices, rares singly from real levels, stock by trade bank, adverts and nicknames, a vendor\'s look; realism phase 4)', ['--expose-gc', test('economy.test.mjs')]],

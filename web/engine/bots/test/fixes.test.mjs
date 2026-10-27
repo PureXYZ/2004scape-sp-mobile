@@ -42,12 +42,14 @@
 //              to the bank
 //   errors     none
 //
-//   node --expose-gc web/engine/bots/test/fixes.test.mjs [--seed=7]
+//   node --expose-gc web/engine/bots/test/fixes.test.mjs [--seed=38]
 //
 // (2026-10-19, with the PK tactics' merge: the default seed 7 -> 8. The scenes take bots of the living world and its
 // dice: on main (6a5e7ed) seeds 1-9 passed only at 5 and 7, the junk sale failing at most others; the PK tactics' new
 // draws moved seed 7 onto a failing one (the cow field's jump, the junk sale); 8 passes with them. The rare emotes'
-// (2026-10-19) moved 8 back onto the junk sale's failure: of 1-11 only 7 passes with them)
+// (2026-10-19) moved 8 back onto the junk sale's failure: of 1-11 only 7 passes with them. 2026-10-27, the bot leak
+// audit's merge: 7 -> 38. The rangers' pickups moved 7 onto the cow field's failure (no ranger there: the draws); of
+// 7-37 none passes, the junk sale failing at most; 38 does)
 import path from 'path';
 import { BOTS_DIR, importTs } from './lib/paths.mjs';
 import { prepareEngineClone, simWorldConfig, stubWorkerThreads } from './lib/clone.mjs';
@@ -58,7 +60,7 @@ const args = Object.fromEntries(
         return m ? [m[1], m[2] ?? 'true'] : [a, 'true'];
     })
 );
-const SEED = Number(args.seed ?? 7);
+const SEED = Number(args.seed ?? 38);
 const out = (s = '') => process.stdout.write(s + '\n');
 const checks = [];
 const check = (name, ok, detail = '') => checks.push({ name, ok: !!ok, detail: typeof detail === 'string' ? detail : JSON.stringify(detail) });

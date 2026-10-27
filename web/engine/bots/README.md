@@ -489,8 +489,9 @@ Every test file's header says exactly what it checks. In short:
 | `test/churn.mjs`, `test/arrivals.test.mjs` | The living world: sessions, returns restored exactly, newcomers, quits, the empty world; the session draw, near-you-first, newbies by levels, a restart |
 | `test/age.test.mjs`, `test/looks.test.mjs`, `test/outfits.test.mjs`, `test/fashion.test.mjs`, `test/persona.test.mjs` | A new world's ages; bodies, gear taste, rares; outfits and weapons; status gear and fashion; personas |
 | `test/chat.test.mjs`, `test/chat-filter.test.mjs`, `test/lines.test.mjs`, `test/talk.test.mjs`, `test/threads.test.mjs` | Addressing, intents, the marketplace, "come here", typed replies; every line through the real 274 word filter and chat codec; what bots say unprompted; threads, witnesses, the voice cap |
-| `test/trade.test.mjs`, `test/economy.test.mjs` | Trades through the screens (sales with change, overpayment, buy-backs, timeouts); prices, rares, stock by trade bank, adverts |
+| `test/trade.test.mjs`, `test/economy.test.mjs` | Trades through the screens (sales with change, overpayment, buy-backs, timeouts); prices (a price drop too: above high alch and any buy-back), rares, stock by trade bank, adverts |
 | `test/pk.test.mjs`, `test/pkfight.test.mjs` | PK gear on free worlds, target claims, prayers, the bow; fights between PKers: eating, potions, the KO, escapes |
+| `test/ammo.test.mjs` | A bot's arrows: used up in PvP (content patch 0004), a human's dropped as before; a ranger at monsters picks its arrows and the kill's worthwhile drops up |
 | `test/poison.test.mjs` | Content patch 0005: death cures a poison still on its way (the vanilla scripts poison the respawned player again; the overlay does not) |
 | `test/habits.test.mjs`, `test/texture.test.mjs`, `test/fixes.test.mjs` | Breaks, lingers, leaving, human timing; misclicks, danger, rudeness; stuck walks, futile loops, dungeons, the junk sale |
 | `test/social.test.mjs`, `test/tiles.test.mjs`, `test/hangout.test.mjs` | Regulars, lures, cliques; own tiles and the level of detail; hang-outs |

@@ -107,8 +107,22 @@ export function categoryOf(id: number, rare = false, market = false): PriceCateg
  * for dragon bones, and bankstanders asked their own list's 2,000: BankstandTask.askFor now asks this).
  */
 export function sellPrice(id: number, vendor: string, category: PriceCategory, fixedPrice = 0): number {
+    return priceAt(id, category, fixedPrice, seededRandom(nameSeed(vendor, `price:${id}`))());
+}
+
+/**
+ * port (the bot leak audit, 2026-10-26): the least any vendor asks for item `id` (its spread's low end, and above what
+ * any vendor pays back for one), so the least a price drop goes to (VendorTask): a dropped ask had no floor, and a
+ * 19.5k rune longsword dropped to 18k, under its high alch of 19.2k, with a stock that never runs out.
+ */
+export function lowestSellPrice(id: number, category: PriceCategory, fixedPrice = 0): number {
+    const mostPaid = buyPrice(id, priceAt(id, category, fixedPrice, 1), category);
+    return Math.max(priceAt(id, category, fixedPrice, 0), mostPaid > 0 ? ceilPrice(mostPaid + 1) : 0);
+}
+
+/** sellPrice at `roll` (0-1) of the spread */
+function priceAt(id: number, category: PriceCategory, fixedPrice: number, roll: number): number {
     const street = streetPrice(id);
-    const roll = seededRandom(nameSeed(vendor, `price:${id}`))();
     if (street !== null) return Math.max(priceFloor(id), roundPrice(street * (1 - STREET_SPREAD + 2 * STREET_SPREAD * roll)));
     if (category === 'rare') return fixedPrice;
     if (category === 'market') return fixedPrice > 0 ? Math.max(priceFloor(id), roundPrice(fixedPrice * (1 - STREET_SPREAD + 2 * STREET_SPREAD * roll))) : fixedPrice;

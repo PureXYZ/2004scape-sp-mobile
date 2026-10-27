@@ -101,15 +101,17 @@ import {
 import { canTravel, CollisionType } from '#/engine/routefinder/index.js';
 import { elementalsWanted } from '#/engine/bot/port/BotTeleport.js';
 import type { SkillStep, WindSpellTier } from '#/engine/bot/tasks/BotTaskBase.js';
-import { findNpcFiltered, npcMatchesName, npcWithin, interactHeldOp, _wornContains, _equipLoot, climbDownNear, tryOpenGateNear } from '#/engine/bot/BotAction.js';
+import { findNpcFiltered, npcMatchesName, npcWithin, interactHeldOp, interactObjOp, findLootObj, _wornContains, _equipLoot, climbDownNear, tryOpenGateNear } from '#/engine/bot/BotAction.js';
 import { bankStop } from '#/engine/bot/port/BotHabits.js';
 import NpcType from '#/cache/config/NpcType.js';
 import ObjType from '#/cache/config/ObjType.js';
+import type Obj from '#/engine/entity/Obj.js';
 import Environment from '#/util/Environment.js';
 import { botConsole as console } from '#/engine/bot/port/BotLog.js';
 import { moveItems, bankedId } from '#/engine/bot/port/BotInventoryCompat.js';
 import { dressForMode, needsModeDress } from '#/engine/bot/port/BotGear.js';
 import { usableOnThisWorld } from '#/engine/bot/port/BotPkGear.js';
+import { itemValue, streetPrice } from '#/engine/bot/port/BotPrices.js';
 import { levelUpStep, getProgressionStepWhere, SkillProgression } from '#/engine/bot/BotKnowledge.js';
 import { runFromAttackers } from '#/engine/bot/port/BotDefence.js';
 // (the variety work, round 1, Track D: the dungeons' clicks on the way in)
@@ -119,6 +121,20 @@ import { enterDungeon } from '#/engine/bot/port/BotDungeons.js';
 
 /** port (phase 5a): Varrock's shops (Aubury's, Zaff's, Lowe's), where a teleport to the spot after the shopping starts */
 const VARROCK_SHOPS: [number, number] = [3225, 3420];
+
+/**
+ * port (the bot leak audit, 2026-10-26): after a kill a ranger or a mage picks up its own: its arrows (274 drops 4 in 5
+ * under the target: the bot's for 100 ticks, then anyone's; it never picked one up, so piles of them and every drop of
+ * its kills lay about its spot for anyone) and what of the kill's drop is worth carrying (a stack: coins, runes,
+ * feathers; else LOOT_WORTH or more at the street's price or the item's value, with a slot left for its arrows), within
+ * LOOT_TILES of where it stands; a kill's drop of its own still after 274 has shown it to everyone, OWN_KILL_TICKS (as
+ * CombatTask's)
+ */
+const LOOT_TILES = 7;
+const OWN_KILL_TICKS = 300;
+const LOOT_WORTH = 20;
+/** never picked up: bones, bat bones, ashes (no bury here), goblin mail (as CombatTask) */
+const NO_LOOT = new Set<number>([Items.BONES, 530, Items.ASHES, 288]);
 
 /**
  * port (phase 5a): what a shop asks for an item, at least: the table's figure or the item's value (274's shops sell at
@@ -202,7 +218,12 @@ export class RangedMagicTask extends BotTask {
     private step: SkillStep;
     private primaryStat: PlayerStat; // RANGED or MAGIC
 
-    private state: 'check_equip' | 'shop_walk' | 'shop_open' | 'shop_buy' | 'equip' | 'walk' | 'patrol' | 'scan' | 'interact' | 'flee' | 'eat' | 'bank_walk' | 'bank_deposit' = 'check_equip';
+    private state: 'check_equip' | 'shop_walk' | 'shop_open' | 'shop_buy' | 'equip' | 'walk' | 'patrol' | 'scan' | 'interact' | 'loot' | 'flee' | 'eat' | 'bank_walk' | 'bank_deposit' = 'check_equip';
+    /** port (the bot leak audit): where its last kills fell (its task's clock), the item it is going for, ground items left until a task tick */
+    private readonly ownKills: { x: number; z: number; level: number; at: number }[] = [];
+    private lootObj: Obj | null = null;
+    private lootTicks = 0;
+    private readonly skipLoot = new WeakMap<Obj, number>();
 
     private shopQueue: ShopBuy[] = [];
     /** port: bank trips in a row that did not put the picked gear in hand (three end the task) */
@@ -823,6 +844,13 @@ export class RangedMagicTask extends BotTask {
         if (this.state === 'scan') {
             // port: no gate sweep (see patrol)
 
+            // port (the bot leak audit): its arrows and its kills' drops first (they land a few ticks after the shot or
+            // the death)
+            if (this.hasFoughtInArea && this._findLoot(player)) {
+                this.state = 'loot';
+                return;
+            }
+
             // port (the realism work): after a kill the next NPC a moment later, as a person looks round for one
             // (TargetPause; one that attacks meanwhile gets the game's own retaliation, and the HP checks above still run)
             if (!this.pause.ready) return;
@@ -860,6 +888,37 @@ export class RangedMagicTask extends BotTask {
             return;
         }
 
+        // ── LOOT ──────────────────────────────────────────────────────────────
+        // port (the bot leak audit): one item at a time, a person's moment after the last (TargetPause), as CombatTask's;
+        // its own arrows back in the quiver once there is nothing more to pick up
+        if (this.state === 'loot') {
+            let obj = this._findLoot(player);
+            if (obj && !this.pause.ready) return;
+            // (one it has gone for 10 ticks without picking it up, behind a fence: left for 300 ticks)
+            if (obj && obj === this.lootObj && ++this.lootTicks > 10) {
+                this.skipLoot.set(obj, this.taskTicks + 300);
+                obj = null;
+            }
+            if (obj && obj !== this.lootObj) {
+                this.lootObj = obj;
+                this.lootTicks = 0;
+            }
+            if (!obj) {
+                this.lootObj = null;
+                this._wieldPickedArrows(player);
+                this.state = 'scan';
+                return;
+            }
+            if (!isNear(player, obj.x, obj.z, 1)) {
+                walkTo(player, obj.x, obj.z);
+                return;
+            }
+            interactObjOp(player, obj, 3);
+            this.pause.held();
+            this.cooldown = randInt(1, 2);
+            return;
+        }
+
         // ── INTERACT ──────────────────────────────────────────────────────────
         if (this.state === 'interact') {
             if (!this.currentNpc) {
@@ -884,6 +943,7 @@ export class RangedMagicTask extends BotTask {
 
             // NPC dead — scan for next target
             if (!this._isNpcAlive(player, this.currentNpc)) {
+                this._noteOwnKill(this.currentNpc);
                 this._releaseNpc();
                 this.currentNpc = null;
                 this.state = 'scan';
@@ -1306,6 +1366,43 @@ export class RangedMagicTask extends BotTask {
         if (npc.nid >= 0) this.unreachable.set(npc.nid, this.taskTicks + UNREACHABLE_NPC_TICKS);
         this.state = 'scan';
         return true;
+    }
+
+    /** port (the bot leak audit): the nearest ground item of its own worth picking up (LOOT_TILES), with room for it */
+    private _findLoot(player: Player): Obj | null {
+        const inv = player.getInventory(InvType.INV);
+        if (!inv) return null;
+        return findLootObj(player, player.x, player.z, player.level, LOOT_TILES, o => {
+            if (NO_LOOT.has(o.type) || (this.skipLoot.get(o) ?? -1) > this.taskTicks) return false;
+            const mine = o.receiver64 === player.hash64 || this.ownKills.some(k => k.level === o.level && Math.abs(k.x - o.x) <= 1 && Math.abs(k.z - o.z) <= 1 && this.taskTicks - k.at <= OWN_KILL_TICKS);
+            if (!mine) return false;
+            const type = ObjType.get(o.type);
+            if (type.stackable && inv.getItemCount(o.type) > 0) return true;
+            if (RangedArrowsByCost.some(a => a.itemId === o.type)) return inv.freeSlotCount > 0;
+            if (!type.stackable && Math.max(itemValue(o.type), streetPrice(o.type) ?? 0) < LOOT_WORTH) return false;
+            return inv.freeSlotCount > 1;
+        });
+    }
+
+    /** port (the bot leak audit): where a kill of its own fell (its drop's tile) */
+    private _noteOwnKill(npc: Npc | null): void {
+        if (!npc) return;
+        this.ownKills.push({ x: npc.x, z: npc.z, level: npc.level, at: this.taskTicks });
+        if (this.ownKills.length > 4) this.ownKills.shift();
+    }
+
+    /** port (the bot leak audit): the arrows it picked up back in the quiver (274's wear adds them to the worn stack) */
+    private _wieldPickedArrows(player: Player): void {
+        if (this.mode !== 'ranged' || player.delayed) return;
+        const inv = player.getInventory(InvType.INV);
+        if (!inv) return;
+        for (let slot = 0; slot < inv.capacity; slot++) {
+            const it = inv.get(slot);
+            if (it?.id === this.currentArrowId) {
+                interactHeldOp(player, inv, it.id, slot, 2);
+                return;
+            }
+        }
     }
 
     private _depositLoot(player: Player): void {

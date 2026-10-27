@@ -82,7 +82,7 @@ import { botConsole as console } from '#/engine/bot/port/BotLog.js';
 import { botSay } from '#/engine/bot/port/BotSay.js';
 import { isMembersWorld } from '#/engine/bot/port/BotWorldRules.js';
 import { clearTradeTarget, tradeOffer, TradeSession, type TradeDeal, type TradeOutcome, type TradingTask } from '#/engine/bot/port/BotTradeScreen.js';
-import { buyPrice, categoryOf, formatGp, itemValue, sellPrice, stockCount } from '#/engine/bot/port/BotPrices.js';
+import { buyPrice, categoryOf, formatGp, itemValue, lowestSellPrice, sellPrice, stockCount } from '#/engine/bot/port/BotPrices.js';
 import { claimVendorStall, releaseStall, stallOf, takeAdvertTurn, TRADE_BANKS, type Stall } from '#/engine/bot/port/BotTradeSpots.js';
 import { nameSeed, seededRandom } from '#/engine/bot/port/BotSeed.js';
 import { composeReply, sayTyped } from '#/engine/bot/port/BotChat.js';
@@ -585,7 +585,7 @@ const BREAK_SAY = 0.25;
 const BACK_SAY = 0.2;
 /** unsold this long, it asks 5-10 % less, once */
 const PRICE_DROP_TICKS = 2000;
-const PRICE_DROP: [number, number] = [0.05, 0.1];
+export const PRICE_DROP: [number, number] = [0.05, 0.1];
 /** a second item after 30-60 minutes; after a sale, within 2-6 */
 const NEXT_ITEM: [number, number] = [3000, 6000];
 const NEXT_ITEM_AFTER_SALE: [number, number] = [200, 600];
@@ -658,6 +658,13 @@ function droppedPrice(price: number, off: number): number {
     const p = price * (1 - off);
     const step = p >= 10_000 ? 1000 : p >= 1000 ? 100 : p >= 100 ? 5 : 1;
     return Math.max(1, Math.min(price - 1, Math.round(p / step) * step));
+}
+/**
+ * port (the bot leak audit, 2026-10-26): the price `off` lower, never under the item's lowest ask (BotPrices.lowestSellPrice:
+ * above high alch and any vendor's buy-back)
+ */
+export function vendorDroppedPrice(stock: VendorStock, price: number, off: number): number {
+    return Math.max(lowestSellPrice(stock.itemId, categoryOf(stock.itemId, stock.rare, stock.market), stock.priceEach), droppedPrice(price, off));
 }
 
 export class VendorTask extends BotTask implements TradingTask {
@@ -1042,11 +1049,14 @@ export class VendorTask extends BotTask implements TradingTask {
         return this.adverts.length > 0 ? this.adverts[Math.floor(Math.random() * this.adverts.length)] : null;
     }
 
-    /** (variety round 1, S8) 5-10 % off, its adverts redone at the new price, and told once ("price drop!! glory 95k") */
+    /**
+     * (variety round 1, S8) 5-10 % off, its adverts redone at the new price, and told once ("price drop!! glory 95k");
+     * port (the bot leak audit): never under the item's lowest ask (vendorDroppedPrice), so none at that ask already
+     */
     private _dropPrice(player: Player): void {
         if (!this.stock) return;
         this.dropped = true;
-        const price = droppedPrice(this.price, PRICE_DROP[0] + Math.random() * (PRICE_DROP[1] - PRICE_DROP[0]));
+        const price = vendorDroppedPrice(this.stock, this.price, PRICE_DROP[0] + Math.random() * (PRICE_DROP[1] - PRICE_DROP[0]));
         if (price >= this.price) return;
         this.price = price;
         asks.set(player, { itemId: this.stock.itemId, price });

@@ -2,3 +2,5 @@
 export * from './pkfight.js';
 export { installBotsContent } from './botscontent.js';
 export { refreshWorn } from '#/engine/bot/BotAction.js';
+export { RangedMagicTask } from '#/engine/bot/tasks/RangedMagicTask.js';
+export { SkillProgression, Items } from '#/engine/bot/BotKnowledge.js';

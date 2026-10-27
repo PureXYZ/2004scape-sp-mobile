@@ -21,14 +21,14 @@ import ResumePCountDialog from '#/network/game/client/model/ResumePCountDialog.j
 import type { NetworkPlayer } from '#/engine/entity/NetworkPlayer.js';
 import { Items } from '#/engine/bot/BotKnowledge.js';
 import { BankstandTask } from '#/engine/bot/tasks/BankstandTask.js';
-import { TRADE_TALK, VendorTask, vendorAdverts, vendorStock } from '#/engine/bot/tasks/VendorTask.js';
-import { buyPrice, categoryOf, formatGp, itemValue, sellPrice } from '#/engine/bot/port/BotPrices.js';
+import { PRICE_DROP, TRADE_TALK, VendorTask, vendorAdverts, vendorDroppedPrice, vendorStock } from '#/engine/bot/tasks/VendorTask.js';
+import { buyPrice, categoryOf, formatGp, itemValue, lowestSellPrice, sellPrice } from '#/engine/bot/port/BotPrices.js';
 import { nameSeed } from '#/engine/bot/port/BotSeed.js';
 import { SocialTask } from '#/engine/bot/tasks/SocialTask.js';
 import { isTradingTask, sameItems, tradeOffer, tradeScreen, tradeStatus, TradeStatus } from '#/engine/bot/port/BotTradeScreen.js';
 export { installBotsContent } from './botscontent.js';
 
-export { Component, InvType, ObjType, VarPlayerType, WordEnc, Player, Items, BankstandTask, VendorTask, SocialTask, vendorAdverts, vendorStock, buyPrice, categoryOf, itemValue, sellPrice };
+export { Component, InvType, ObjType, VarPlayerType, WordEnc, Player, Items, BankstandTask, VendorTask, SocialTask, vendorAdverts, vendorStock, buyPrice, categoryOf, itemValue, sellPrice, lowestSellPrice, vendorDroppedPrice, PRICE_DROP };
 // (the realism work, phase 4: economy) trade talk's lines, prices as written, a name's dice
 export { TRADE_TALK, formatGp, nameSeed };
 export { isTradingTask, sameItems, tradeOffer, tradeScreen, tradeStatus, TradeStatus };

@@ -21,6 +21,7 @@
 //   - (the realism work, phase 4: economy) vendor prices and adverts in each vendor's own forms pass the filter; in a
 //     trade "how much?" gets the vendor's price, a lowball a "lol no" and its price a "k" (the trade unchanged); a rare
 //     is one item, the item itself, at its 2004 price, and once sold the vendor stocks something else
+//   - (the bot leak audit, 2026-10-26) a price drop never goes to high alch or under, nor to what any vendor pays back
 //
 //   node --expose-gc web/engine/bots/test/trade.test.mjs [--members=false] [--seed=N] [--debug]
 import { spawnSync } from 'child_process';
@@ -315,6 +316,30 @@ out(`trade: ${sim.bots().length} bots, ${MEMBERS ? 'members' : 'free'} world, ov
     }
     check(`vendor prices: never below high alch, never buying back above the item's value (${T.vendorStock().length} items)`, unsafe.length === 0, unsafe.slice(0, 5).join('; '));
     check('vendor adverts: every stock item at three vendors\' prices, in each vendor\'s own forms, passes the word filter whole (2+ lines each)', masked.length === 0, masked.slice(0, 5).join(' | '));
+}
+{
+    // (the bot leak audit, 2026-10-26: a dropped ask had no floor, a 19.5k rune longsword went to 18k under its 19.2k
+    // high alch) at 200 vendors' prices, the most a drop takes off: never at high alch or under, nor at or under what
+    // any of them pays back for one (no buying from one to sell to another)
+    const names = T.BOT_NAMES.slice(0, 200);
+    const unsafe = [];
+    let held = 0;
+    let asks = 0;
+    for (const item of T.vendorStock().filter(i => !i.rare)) {
+        const category = T.categoryOf(item.itemId, item.rare, item.market);
+        const obj = T.ObjType.get(item.itemId);
+        const noted = obj.certtemplate === -1 && obj.certlink >= 0;
+        const prices = names.map(n => T.sellPrice(item.itemId, n, category, item.priceEach));
+        const mostPaid = noted ? Math.max(...prices.map(p => T.buyPrice(item.itemId, p, category))) : 0;
+        const alch = Math.floor(T.itemValue(item.itemId) * 0.6);
+        for (const price of prices) {
+            const dropped = T.vendorDroppedPrice(item, price, T.PRICE_DROP[1]);
+            asks++;
+            if (dropped === T.lowestSellPrice(item.itemId, category, item.priceEach)) held++;
+            if (dropped <= alch || dropped <= mostPaid || dropped > price) unsafe.push(`${item.name} ${price} -> ${dropped} (high alch ${alch}, paid up to ${mostPaid})`);
+        }
+    }
+    check(`vendor price drops: never at high alch or under, nor at a vendor's buy-back (${asks} asks, ${held} held at the item's lowest ask)`, unsafe.length === 0 && held > 0, unsafe.slice(0, 5).join('; '));
 }
 
 if (MEMBERS) {
