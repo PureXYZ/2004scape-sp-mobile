@@ -79,10 +79,15 @@
     const COMPASS = 34;
     // The minimap's zoom slider: a groove along the ring from ZOOM_ARC.out (zoomed out, towards the bottom) to
     // ZOOM_ARC.in (zoomed in, by the left), in degrees clockwise from the right. Its outer end moves up the ring where
-    // the knob would come near the tab column or the panel (never shorter than ZOOM_ARC_MIN).
-    const ZOOM_ARC = { out: 120, in: 192 }; // (192: the knob's box clear of the compass's)
+    // the knob would come near the tab column or the panel, its inner end down where the knob or the + would come
+    // under the compass or the orbs (a minimap under 58 px: Display Zoom, Android's larger Display sizes); never
+    // shorter than ZOOM_ARC_MIN.
+    const ZOOM_ARC = { out: 120, in: 192 }; // (192: the knob's box clear of the compass's, from a 58 px minimap up)
     const ZOOM_ARC_MIN = 45;
     const KNOB = 22;
+    // the + and - at the groove's ends, their centres this far out of the ring (host.css .zoom-mark: the bold font's
+    // 16 px glyphs, 8 px wide, raised 55 %)
+    const ZOOM_MARK = { r: 7, w: 8, h: 16 };
     const MINIMAP_ZOOM = { min: 0.5, max: 2 }; // Client.ts MINIMAP_ZOOM_MIN..MAX (patch 0017); 1 = the 2004 zoom
     const ZOOM_RANGE = Math.log(MINIMAP_ZOOM.max / MINIMAP_ZOOM.min);
     const ZOOM_DETENT = 0.04; // of the groove around the 2004 zoom, which snaps to it
@@ -393,7 +398,7 @@
             [el['zoom-mark-in'], arc.in],
             [el['zoom-mark-out'], arc.out]
         ]) {
-            const [x, y] = point(a, r + 7);
+            const [x, y] = point(a, r + ZOOM_MARK.r);
             mark.style.left = `${Math.round(x)}px`;
             mark.style.top = `${Math.round(y)}px`;
         }
@@ -631,23 +636,43 @@
         const columnH = g.row * TAB_ROWS + (COL_PAD + COL_FRAME) * 2;
         g.column = { x: columnLeft, y: bottom - columnH, w: columnW, h: columnH };
 
-        // the zoom slider's groove on the ring, its knob clear of the column and of the panel where it opens beside it
-        const groove = r - RING / 2;
-        const knobClear = a => {
-            const x = g.map.cx + groove * Math.cos((a * Math.PI) / 180);
-            const y = g.map.cy + groove * Math.sin((a * Math.PI) / 180);
-            const k = KNOB / 2 + GAP;
-            const outside = (bx, by, br, bb) => x + k <= bx || x - k >= br || y + k <= by || y - k >= bb;
-            return outside(g.column.x, g.column.y, g.column.x + g.column.w, g.column.y + g.column.h) && outside(panelBox.x, panelBox.y, panelBox.r, bottom);
-        };
-        let zoomOut = ZOOM_ARC.out;
-        while (zoomOut < ZOOM_ARC.in - ZOOM_ARC_MIN && !knobClear(zoomOut)) {
-            zoomOut++;
-        }
-        g.zoomArc = { out: zoomOut, in: ZOOM_ARC.in, r: groove };
-
         // the orbs in a row left of the compass, at the top
         g.orbs = { right: Math.min(g.compass.x, g.map.cx - r) - GAP, y: top };
+
+        // the zoom slider's groove on the ring, its knob and marks clear of the column and of the panel where it opens
+        // beside it, and of the compass and the orbs
+        const groove = r - RING / 2;
+        const ringBox = (a, radius, w, h, raise = 0.5) => {
+            const x = g.map.cx + radius * Math.cos((a * Math.PI) / 180);
+            const y = g.map.cy + radius * Math.sin((a * Math.PI) / 180);
+            return { x: x - w / 2, y: y - h * raise, r: x + w / 2, b: y + h * (1 - raise) };
+        };
+        const knobBox = a => ringBox(a, groove, KNOB, KNOB);
+        const markBox = a => ringBox(a, r + ZOOM_MARK.r, ZOOM_MARK.w, ZOOM_MARK.h, 0.55);
+        const apart = (p, q, gap = 0) => p.r + gap <= q.x || p.x >= q.r + gap || p.b + gap <= q.y || p.y >= q.b + gap;
+        const below = [
+            { x: g.column.x, y: g.column.y, r: g.column.x + g.column.w, b: g.column.y + g.column.h },
+            { x: panelBox.x, y: panelBox.y, r: panelBox.r, b: bottom }
+        ];
+        const above = [
+            { x: g.compass.x, y: g.compass.y, r: g.compass.x + COMPASS, b: g.compass.y + COMPASS },
+            { x: -Infinity, y: g.orbs.y, r: g.orbs.right, b: g.orbs.y + ORB_H }
+        ];
+        let zoomOut = ZOOM_ARC.out;
+        while (zoomOut < ZOOM_ARC.in - ZOOM_ARC_MIN && !below.every(q => apart(knobBox(zoomOut), q, GAP) && apart(markBox(zoomOut), q))) {
+            zoomOut++;
+        }
+        let zoomIn = ZOOM_ARC.in;
+        while (zoomIn > zoomOut + ZOOM_ARC_MIN && !above.every(q => apart(knobBox(zoomIn), q) && apart(markBox(zoomIn), q))) {
+            zoomIn--;
+        }
+        g.zoomArc = { out: zoomOut, in: zoomIn, r: groove };
+        // what of the slider stands out of the ring: the knob anywhere along the groove (wherever the player left it)
+        // and the marks at its ends
+        g.zoomBoxes = [markBox(zoomOut), markBox(zoomIn)];
+        for (let a = zoomOut; a <= zoomIn; a++) {
+            g.zoomBoxes.push(knobBox(a));
+        }
 
         // the battery in the top left corner
         g.battery = { x: left, y: top, bottom: top + BATTERY_H };
@@ -827,7 +852,8 @@
 
         // typing: the chatbox above the keyboard, sliding up and back down with it. It scales down to fit beside what
         // shows at its height there: the tops of the panel and the tab column (the rest is under the keyboard), the
-        // minimap and its compass; and on a short screen (an SE with Display Zoom) to fit above the keyboard at all.
+        // minimap, its compass and its zoom slider; and on a short screen (an SE with Display Zoom) to fit above the
+        // keyboard at all.
         const slide = typing !== state.typing;
         state.typing = typing;
         const slideCurve = `${Math.round(keyboard.duration * 1000)}ms ${keyboard.curve}`;
@@ -851,6 +877,13 @@
                 const dy = Math.max(0, top - g.map.cy, g.map.cy - bottom); // from the minimap's centre to the chatbox's rows
                 if (dy < g.map.r) {
                     limit = Math.min(limit, g.map.cx - Math.sqrt(g.map.r * g.map.r - dy * dy));
+                }
+                // (the knob and the + stand out of the ring on its left: 1920x1080 at 420 dpi ran the chatbox under
+                // them)
+                for (const box of g.zoomBoxes) {
+                    if (box.y < bottom && box.b > top) {
+                        limit = Math.min(limit, box.x);
+                    }
                 }
             }
             const typingScale = Math.min(1, (limit - GAP - g.chat.x) / g.chat.w, (bottom - top) / g.chat.h);

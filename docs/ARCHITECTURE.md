@@ -389,10 +389,13 @@ modal (bank, shop, trade), and the panel then sits at the edge so a 512 px windo
 instruction box opens the chatbox but can be put away (the chat button glows until a new step,
 `hudState().tutorialKey`, shows it again). While the native keyboard covers the page (`LostCityHost.keyboard.frame`,
 §7) and types into the chatbox, the chatbox slides above it and the bar, lines and orbs hide; it scales down to fit
-beside what shows at its height there (the tops of the panel and the tab column, the minimap and its compass), and on a
-short screen above the keyboard at all. A geometry solver places everything for the view and the HUD state so that no
+beside what shows at its height there (the tops of the panel and the tab column, the minimap and its compass, and the
+zoom slider's knob anywhere along its groove and its + and - marks, which stand out of the ring), and on a short screen
+above the keyboard at all. The groove's ends move along the ring until the knob and the marks clear the tab column and
+the panel (its zoomed-out end) and the compass and the orbs (its zoomed-in end, on a small minimap). A geometry solver places everything for the view and the HUD state so that no
 control overlaps another or runs off the screen at any size (checked by `web/test/hud.mjs`, from the SE with Display
-Zoom to the 13-inch iPad).
+Zoom to the 13-inch iPad, and `--platform android` on the Android screens; the zoom knob at points all along its
+groove, wherever the player may leave it).
 
 Every pointer on a surface reaches the client as one virtual coordinate (the surface's CSS box mapped onto its rect,
 frozen per touch, with pointer capture), so all classic hit tests for the minimap, panel, chat, tabs and chat buttons

@@ -252,25 +252,35 @@ async function surfacePoint(selector, ax, ay) {
 }
 
 // HUD controls that must never overlap each other (the minimap as its circle; the chatbox as scaled, also lifted above
-// the keyboard). The compass, the zoom slider's knob and the World map button sit on the minimap's ring on purpose.
+// the keyboard). The compass, the zoom slider's knob and marks and the World map button sit on the minimap's ring on
+// purpose. The knob counts wherever the player may leave it: at points all along its groove too.
 async function hudOverlaps() {
     return evaluate(`(() => {
         const box = sel => { const n = document.querySelector(sel); if (!n || n.closest('[hidden]') || !n.getClientRects().length) return null; const r = n.getBoundingClientRect(); return { sel, l: r.left, t: r.top, r: r.right, b: r.bottom }; };
         const map = box('#hud-map');
-        const rects = ['#btn-compass', '#map-zoom', '#btn-worldmap', '#hud-tabs', '#hud-panel', '#hud-chat-bar', '#hud-chat-lines', '#hud-chat-box', '#hud-dialog', '#hud-camera', '#hud-battery', ...[...document.querySelectorAll('#hud-orbs > button')].map(b => '#' + b.id)].map(box).filter(Boolean);
+        const rects = ['#btn-compass', '#map-zoom', '#zoom-mark-in', '#zoom-mark-out', '#btn-worldmap', '#hud-tabs', '#hud-panel', '#hud-chat-bar', '#hud-chat-lines', '#hud-chat-box', '#hud-dialog', '#hud-camera', '#hud-battery', ...[...document.querySelectorAll('#hud-orbs > button')].map(b => '#' + b.id)].map(box).filter(Boolean);
+        const groove = document.querySelector('#map-zoom-track .groove'), knob = box('#map-zoom');
+        if (knob) {
+            const svg = groove.ownerSVGElement, frame = svg.getBoundingClientRect(), k = frame.width / svg.width.baseVal.value, half = (knob.r - knob.l) / 2, length = groove.getTotalLength();
+            for (let i = 0; i <= 36; i++) {
+                const p = groove.getPointAtLength((length * i) / 36), x = frame.left + p.x * k, y = frame.top + p.y * k;
+                rects.push({ sel: '#map-zoom (along its groove)', l: x - half, t: y - half, r: x + half, b: y + half });
+            }
+        }
+        const slider = sel => sel.startsWith('#map-zoom') || sel.startsWith('#zoom-mark');
         const hit = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;
-        const found = [];
-        for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) if (hit(rects[i], rects[j])) found.push(rects[i].sel + ' / ' + rects[j].sel);
+        const found = new Set();
+        for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) if (!(slider(rects[i].sel) && slider(rects[j].sel)) && hit(rects[i], rects[j])) found.add(rects[i].sel + ' / ' + rects[j].sel);
         if (map) {
             const cx = (map.l + map.r) / 2, cy = (map.t + map.b) / 2, rad = (map.r - map.l) / 2;
             for (const r of rects) {
-                if (r.sel === '#btn-compass' || r.sel === '#map-zoom' || r.sel === '#btn-worldmap') continue; // (on the ring)
+                if (r.sel === '#btn-compass' || r.sel === '#btn-worldmap' || slider(r.sel)) continue; // (on the ring)
                 const nx = Math.min(Math.max(cx, r.l), r.r), ny = Math.min(Math.max(cy, r.t), r.b);
-                if (Math.hypot(cx - nx, cy - ny) < rad - 0.5) found.push('#hud-map / ' + r.sel);
+                if (Math.hypot(cx - nx, cy - ny) < rad - 0.5) found.add('#hud-map / ' + r.sel);
             }
         }
-        const offscreen = rects.filter(r => r.l < 0 || r.t < 0 || r.r > innerWidth + 0.5 || r.b > innerHeight + 0.5).map(r => r.sel);
-        return { found, offscreen };
+        const offscreen = new Set(rects.filter(r => r.l < 0 || r.t < 0 || r.r > innerWidth + 0.5 || r.b > innerHeight + 0.5).map(r => r.sel));
+        return { found: [...found], offscreen: [...offscreen] };
     })()`);
 }
 

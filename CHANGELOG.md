@@ -5,6 +5,12 @@ with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
 ## [Unreleased]
 
+- **Fixed: the minimap's zoom slider ran under other controls on some screens.** On a 1920×1080 Android phone at 420
+  dpi the chatbox, lifted above the keyboard while typing, ran under the slider's magnifier and its + mark; it now stops
+  short of them, wherever the magnifier is. Where the minimap is at its smallest (an iPhone or SE with Display Zoom,
+  Android's Larger and Largest display sizes), the magnifier zoomed all the way in went half under the compass, and
+  the + mark under it, next to the Run orb: the groove now ends a little lower there, clear of them. On the other
+  iPhones and the iPads the slider is where it was; on the other Android screens it is too, or its end a pixel lower.
 - **Fixed: the inventory could show only its stone background.** After a while the side panel sometimes came back
   empty, its tab still selected, and opening the tab again did not help (another tab and back did). The phone had
   dropped the panel's picture and the game only sent what changed. Now the panel, the chatbox, the minimap, the world,
