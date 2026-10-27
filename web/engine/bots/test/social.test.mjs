@@ -356,9 +356,12 @@ const run = (ticks, each) => {
         Cliques.setCliquesForTest([[a.username, b.username]]);
         // (the variety work, round 2, the integrator's: what each was doing let go first and its scripts' moment waited out
         // before the pack is cleared: a bury clicked a tick before read its emptied slot, 274's bury_bone.rs2 "oc_param ...
-        // -1", at seed 5 once round 2 moved the dice; trade.test's force() does the same)
+        // -1", at seed 5 once round 2 moved the dice; trade.test's force() does the same) (the flaky tests, 2026-10-27: and
+        // until no script holds either: two ticks were one bury short when the bot's next task buried at once, the same
+        // error at the default seed once the walking fixes moved the dice)
         for (const p of [a, b]) sim.botPlayer(p)?.windDown();
         run(2);
+        for (let i = 0; i < 20 && [a, b].some(p => p.delayed || p.activeScript); i++) sim.tick();
         for (const p of [a, b]) {
             p.setLevel(lib.PlayerStat.WOODCUTTING, 15);
             // (a clean pack and full run energy: the world's dice handed the test a bot with a full pack of raw chicken,
@@ -483,6 +486,11 @@ const run = (ticks, each) => {
     if (pair) {
         const [a, b] = pair;
         Cliques.setCliquesForTest([[a.username, b.username]]);
+        // (both at the edge where they patrol, 6 tiles apart, with full run energy, as the deep PKers' check: at seed 1 one
+        // was walking up from Varrock, 200 tiles off, and the two met and patrolled far east along the ditch, out of the box)
+        a.teleJump(3093, 3540, 0);
+        b.teleJump(3099, 3540, 0);
+        for (const p of [a, b]) p.runenergy = 10000;
         const start = World.currentTick;
         run(900, tick => {
             if (sim.attackTarget(a) === b || sim.attackTarget(b) === a) fought = true;

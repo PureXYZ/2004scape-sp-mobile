@@ -348,6 +348,7 @@ const attacking = p => (p.target && p.target.username !== undefined && (p.target
     let raid = null;
     const seen = { met: false, inStrip: 0, patrolSamples: 0, maxOn: 0, piled: false, attackers: new Set(), allMulti: true, singlePiles: 0, outAt: -1 };
     let humanIn = -1;
+    let lastPhase = null;
     run(4000, tick => {
         raid ??= SetPieces.runningSetPieces().find(x => x.kind === 'pk_raid') ?? null;
         // (no two bots on one target in a single-combat zone, anywhere, all along)
@@ -358,7 +359,10 @@ const attacking = p => (p.target && p.target.username !== undefined && (p.target
         }
         for (const [t, list] of on) if (list.length >= 2 && !lib.isMultiCombat(t.x, t.z, t.level)) seen.singlePiles++;
         if (!raid) return false;
-        if (raid.phase === 'announce' && [...raid.roles.keys()].every(m => cheb(m, { x: PkTeam.EDGE_MEET[0], z: PkTeam.EDGE_MEET[1] }) <= 8)) seen.met = true;
+        // (and the tick it left the meeting: the raid goes on in the tick its last member comes within 8 of the spot, after
+        // the leader's call, before this look: at seed 6 the second came after the call, and the meeting was never seen)
+        if ((raid.phase === 'announce' || lastPhase === 'announce') && [...raid.roles.keys()].every(m => cheb(m, { x: PkTeam.EDGE_MEET[0], z: PkTeam.EDGE_MEET[1] }) <= 8)) seen.met = true;
+        lastPhase = raid.phase;
         if (raid.phase === 'peak') {
             seen.patrolSamples++;
             for (const m of raid.roles.keys()) if (m.x >= PkTeam.RAID_ZONE.x0 - 12 && m.x <= PkTeam.RAID_ZONE.x1 + 12 && m.z >= PkTeam.RAID_ZONE.z0 - 12 && m.z <= PkTeam.RAID_ZONE.z1 + 12) seen.inStrip++;

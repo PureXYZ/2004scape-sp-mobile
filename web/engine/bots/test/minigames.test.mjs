@@ -19,6 +19,8 @@
 //              from the tower's top floor climbs down first; a walk from the arena's platform and from its pit climbs out (the
 //              rope, the ladder), never across the map; a fight outing's junk drop keeps its own items and the tools; the
 //              planner's keep step hands back an outing under way
+//   arena      Cap'n Izzy paid, down the ladder, obstacles crossed, pillars tagged, out by the ladder; the floor the task
+//              routes by (its platforms, where each obstacle puts a player) joins every pillar to the ladder
 //   lines      every moment's lines exist (data/lines2004-members.json), said as 'setpiece'
 //   errors     none
 //
@@ -184,6 +186,7 @@ if (want('ranging')) {
     place(p, 2725, 3490);
     check('ranging: a ranger of 55 with a shortbow and coins may compete', lib.mayCompete(p) && lib.wieldsBow(p));
     const moves = watchMoves(p);
+    const causes0 = new Map([...lib.teleportStats.byCause].map(([k, [j]]) => [k, j]));
     const xp0 = p.stats[PlayerStat.RANGED];
     const ticket = lib.ObjType.getId('archery_ticket');
     const task = new lib.RangingGuildTask(2);
@@ -198,7 +201,8 @@ if (want('ranging')) {
     const quiver = p.getInventory(lib.InvType.WORN).get(13);
     check('ranging: the judge paid, ten shots a round, the rounds played, the tickets won, the Ranged XP from the targets', t > 0 && lib.rangingStats.rounds - r0 === 2 && lib.rangingStats.shots - shots0 >= 20 && tickets > 0 && p.stats[PlayerStat.RANGED] > xp0, { t, rounds: lib.rangingStats.rounds - r0, shots: lib.rangingStats.shots - shots0, tickets, xp: p.stats[PlayerStat.RANGED] - xp0, at: [p.x, p.z], state: task.state, ended: lib.rangingStats.ended });
     check('ranging: its own arrows back in the quiver, the coins paid (2 x 200)', quiver?.id === iron, { quiver: quiver ? [lib.ObjType.get(quiver.id).debugname, quiver.count] : null });
-    check('ranging: walked in and out, no unseen jump', moves.unseen().length === 0, moves.unseen().slice(0, 3));
+    const causes = [...lib.teleportStats.byCause].filter(([k, [j]]) => j > (causes0.get(k) ?? 0)).map(([k, [j]]) => `${k} ${j - (causes0.get(k) ?? 0)}`);
+    check('ranging: walked in and out, no unseen jump', moves.unseen().length === 0, { unseen: moves.unseen().slice(0, 3), causes });
     check('ranging: off the registry when done', Outings.outingOf(p) === null && Outings.outingLog.some(e => e.key === 'RangingGuild' && e.name === p.username && e.end > 0));
     hold(p);
     free.push(p);
@@ -386,12 +390,15 @@ if (want('exits')) {
         levels(p, { AGILITY: 45, HITPOINTS: 60, ATTACK: 40, STRENGTH: 40, DEFENCE: 40 });
         kit(p, [[Items.COINS, 100]]);
         place(p, 2805, 9587, 3);
-        const j0 = lib.teleportStats.jumps;
+        // (its own jumps: the walker's, by their cause; the count of all of them took a world bot's rescue in those ticks)
+        const walkJumps = () => [...lib.teleportStats.byCause].filter(([k]) => k.startsWith('Walk/')).reduce((n, [, [j]]) => n + j, 0);
+        const j0 = walkJumps();
         assign(p, walker(2809, 3200));
         const t = run(200, () => p.level === 0 && p.z < 6400);
-        check("exits: a walk from the arena's platform by its ladder: up the ladder (BotKnowledge DUNGEON_ENTRIES' agility_arena), by Cap'n Izzy, no jump", t > 0 && cheb(p.x, p.z, 2808, 3193) <= 12 && lib.teleportStats.jumps === j0, { t, at: [p.x, p.z, p.level], jumps: lib.teleportStats.jumps - j0 });
+        check("exits: a walk from the arena's platform by its ladder: up the ladder (BotKnowledge DUNGEON_ENTRIES' agility_arena), by Cap'n Izzy, no jump", t > 0 && cheb(p.x, p.z, 2808, 3193) <= 12 && walkJumps() === j0, { t, at: [p.x, p.z, p.level], jumps: walkJumps() - j0 });
         place(p, 2806, 9566, 0);
-        const j1 = lib.teleportStats.jumps;
+        const j1 = walkJumps();
+        const causes1 = new Map([...lib.teleportStats.byCause].map(([k, [j]]) => [k, j]));
         const marks0 = lib.teleportStats.marks.filter(m => m.name === p.username.toLowerCase()).length;
         assign(p, walker(2809, 3200));
         let climbed = -1;
@@ -402,7 +409,8 @@ if (want('exits')) {
         // (the pit's rope lands on a platform; the ladder up is a walk from it, or the dungeon's jump to its entrance above:
         // the arena's platforms are crossed by its obstacles, AgilityArenaTask's)
         const marked = lib.teleportStats.marks.filter(m => m.name === p.username.toLowerCase()).length - marks0;
-        check("exits: a walk from the arena's pit: up its climbing rope (clicked, marked as the game's move), then out of the arena by Cap'n Izzy (its ladder, or the arena's own entrance above), never across the map", marked > 0 && t2 > 0 && cheb(p.x, p.z, 2808, 3193) <= 12 && lib.teleportStats.jumps - j1 <= 1, { climbed, marked, t: t2, at: [p.x, p.z, p.level], jumps: lib.teleportStats.jumps - j1 });
+        const ownJumps = walkJumps() - j1;
+        check("exits: a walk from the arena's pit: up its climbing rope (clicked, marked as the game's move), then out of the arena by Cap'n Izzy (its ladder, or the arena's own entrance above), never across the map", marked > 0 && t2 > 0 && cheb(p.x, p.z, 2808, 3193) <= 12 && ownJumps <= 1, { climbed, marked, t: t2, at: [p.x, p.z, p.level], jumps: ownJumps, causes: [...lib.teleportStats.byCause].filter(([k, [j]]) => j > (causes1.get(k) ?? 0)).map(([k, [j]]) => `${k} ${j - (causes1.get(k) ?? 0)}`) });
         hold(p);
         free.push(p);
     }
@@ -576,11 +584,32 @@ if (want('arena')) {
     const coins0 = p.getInventory(lib.InvType.INV).getItemCount(Items.COINS);
     const task = new lib.AgilityArenaTask();
     check('arena: a bot of Agility 45 with the fee may run the arena', lib.mayRunArena(p));
+    {
+        // (the floor as the task routes it: the platforms and where each obstacle puts a player, by 274's scripts; from the
+        // ladder's platform every pillar's and back again)
+        const floor = lib.arenaFloorForTest();
+        const reach = from => {
+            const seen = new Set([from]);
+            for (const q = [from]; q.length; ) {
+                const at = q.shift();
+                for (const c of floor.crossings) if (c.from === at && !seen.has(c.to)) seen.add(c.to), q.push(c.to);
+            }
+            return seen;
+        };
+        const ladder = floor.platformAt(2805, 9589);
+        const pillars = Array.from({ length: 25 }, (_, i) => lib.pillarCoord(i)).map(([x, z]) => [x - 1, x + 1].map(px => floor.platformAt(px, z)).find(n => n >= 0) ?? floor.platformAt(x, z - 1));
+        const fromLadder = reach(ladder);
+        const lost = pillars.filter(n => n < 0 || !fromLadder.has(n) || !reach(n).has(ladder));
+        check("arena: the floor's platforms and crossings (where 274's scripts put a player): every pillar's platform reached from the ladder's, and the ladder from each", floor.crossings.length >= 50 && ladder >= 0 && lost.length === 0, { crossings: floor.crossings.length, ladder, lost });
+    }
     assign(p, task);
     let down = -1;
-    const t = run(3000, () => {
+    const t = run(3500, () => {
         moves.tick();
         if (down < 0 && lib.inArena(p) && p.level === 3) down = World.currentTick;
+        // (a visit of 20 minutes, the task's longest: 274 moves the arrow to another pillar every 98 ticks, and one 5-6
+        // obstacles off is out of reach before it moves on; in a 10-minute visit no arrow of seed 6's came within reach)
+        if (task.state === 'arena' && task.endsAt < down + 2000) task.endsAt = down + 2000;
         return task.isComplete(p);
     });
     const st = lib.arenaStats;

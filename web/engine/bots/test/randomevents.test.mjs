@@ -328,8 +328,11 @@ const done = b => {
 // answer to the event waited behind it)
 lib.setDirectorForTest({ first: 1e9 });
 lib.resetDirectorForTest();
+// (and none a script holds: 274 spawns an event by a protected script, which does not run while the bot is delayed; at
+// seed 6 the bot drawn was in the Gnome course's pipe, its obstacle's script held it after the jump here, and the genie
+// never came)
 const pick = () => {
-    const b = bots.find(x => x.slot !== -1 && BotManager.botFor(x) && !BotManager.botFor(x).hasSubTask() && lib.eventRoleOf(x) === null && !lib.eventStateOf(x)?.fail);
+    const b = bots.find(x => x.slot !== -1 && BotManager.botFor(x) && !BotManager.botFor(x).hasSubTask() && lib.eventRoleOf(x) === null && !lib.eventStateOf(x)?.fail && !x.delayed && !x.activeScript);
     bots.push(bots.splice(bots.indexOf(b), 1)[0]);
     idle(b);
     lib.resetRandomEventsForTest();

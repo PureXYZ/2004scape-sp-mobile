@@ -632,7 +632,11 @@ T.setEventRatesForTest?.({ odds: 0 });
     // (a "*word" line is a typo's correction, port/BotStyle's: no filter's star)
     const setpiece = says.filter(s => (s.kind === 'setpiece' || s.kind === 'mod') && !/^\*[a-z0-9]+$/i.test(s.text));
     check("the set piece's lines pass the 274 filter as written (no starred word)", setpiece.every(s => !s.text.includes('*')), setpiece.filter(s => s.text.includes('*')).map(s => s.text));
-    const stuck = sim.bots().filter(b => Duel.duelScreen(b) !== null || b.activeScript?.execution === T.ScriptState.COUNTDIALOG);
+    // (a challenge under way at the last tick has its screen open a few ticks more: waited out, 100 ticks at most; at seed 2
+    // two of the arena's bots were mid-challenge then, their screens shut 10 ticks on)
+    const open = b => Duel.duelScreen(b) !== null || b.activeScript?.execution === T.ScriptState.COUNTDIALOG;
+    waitUntil(() => !sim.bots().some(open), 100);
+    const stuck = sim.bots().filter(open);
     check('no bot left with a duel screen or a count dialog open', stuck.length === 0, stuck.map(b => `${b.username}:${b.modalMain}`));
     check('no bot errors', BotManager.stats().errors === 0 && consoleErrors.length === 0, consoleErrors.slice(0, 3));
 }

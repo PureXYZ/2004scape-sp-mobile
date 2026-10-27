@@ -31,7 +31,7 @@ export { findLocByName, interactLoc, interactNpcOp, botAnswerDialogue } from '#/
 export { TrawlerTask, trawlerStats, crewMembers, crewForming, crewExists, resetTrawlerForTest, mayTrawl, crewSize } from '#/engine/bot/tasks/TrawlerTask.js';
 export { TreasureTrailTask, trailStats, holdsEasyClue } from '#/engine/bot/tasks/TreasureTrailTask.js';
 export * as Clues from '#/engine/bot/port/BotClues.js';
-export { AgilityArenaTask, arenaStats, arenaPillarIndex, pillarCoord, inArena, mayRunArena } from '#/engine/bot/tasks/AgilityArenaTask.js';
+export { AgilityArenaTask, arenaStats, arenaPillarIndex, pillarCoord, inArena, mayRunArena, arenaFloorForTest } from '#/engine/bot/tasks/AgilityArenaTask.js';
 export * as Upstairs from '#/engine/bot/port/BotUpstairs.js';
 export { themeOf } from '#/engine/bot/port/BotFavourites.js';
 // (the variety work, round 2, the fixes) the ways out of Shilo and the watchtower (port/BotExits), the planner's keep step

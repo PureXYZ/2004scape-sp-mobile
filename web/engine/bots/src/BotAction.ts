@@ -2170,6 +2170,27 @@ const failedSweeps = new WeakMap<Player, { x: number; z: number; until: number }
 const FAILED_SWEEP_TICKS = 50;
 
 /**
+ * port (the flaky tests, 2026-10-27): a destination inside the rock, tree or water the bot stands beside (an empty route
+ * to it within the search's closest-approach window, port/BotPathFinder's ALT_RANGE, and every tile from the bot to it
+ * blocked) and no door on the way: the bot is as near it as a walk gets, and stays (its tile then, FAILED_SWEEP_TICKS at
+ * most). The sweeps below took that empty route for a way shut and walked the bot 50 tiles toward the destination's
+ * side: a fighter at Yanille's ogres patrolling to a rock beside it was walked 35 tiles off past the town, picked a far
+ * ogre it could not reach there and was rescue-jumped back (minigames.test, seed 4). A destination on open floor behind
+ * a wall or a fence (the Ranging Guild's yard, its door round the far side) still sweeps: a walk out finds the way round.
+ */
+const nearAsItGets = new WeakMap<Player, { x: number; z: number; at: number; until: number }>();
+const NEAR_WINDOW = 10;
+
+/** port: is every tile on the line from (x0, z0) (not counted) to (x1, z1) a blocked one? */
+function _blockedLine(level: number, x0: number, z0: number, x1: number, z1: number): boolean {
+    const n = Math.max(Math.abs(x1 - x0), Math.abs(z1 - z0));
+    for (let i = 1; i <= n; i++) {
+        if (!BotCollisionMap.isCsvBlocked(level, Math.round(x0 + ((x1 - x0) * i) / n), Math.round(z0 + ((z1 - z0) * i) / n))) return false;
+    }
+    return n > 0;
+}
+
+/**
  * port: the last search of each tick's budget is kept for a bot that has had none for this long. A bot that walks now
  * and then (a social bot's stroll at its hub, a PKer's step along the ditch) asks once and only again 20-60 ticks
  * later: when every ask fell on a tick whose budget was gone, it stood on one tile for 300+ ticks (the aged world).
@@ -2379,7 +2400,7 @@ const GRAPH_DETOUR_TILES = 60;
  * fence, the sheep pen's, or a gateway's approach with the nearest node across the river, is not). Null when not;
  * 'wait' when the tick's searches are spent.
  */
-function _graphPlan(player: Player, destX: number, destZ: number): { nodes: number[]; goal: number } | null | 'wait' {
+function _graphPlan(player: Player, destX: number, destZ: number, edge = false): { nodes: number[]; goal: number } | null | 'wait' {
     if (player.level !== 0) return null;
     const { allowed, key } = _graphAllowed();
     const goals = _graphGoals(destX, destZ, allowed);
@@ -2391,10 +2412,18 @@ function _graphPlan(player: Player, destX: number, destZ: number): { nodes: numb
     // than the bot (a node inside a fenced field for its gate's approach outside: Lumbridge's west cow field), the next
     // nearest of the bot's. (Not when the nearest is of the bot's own: a closed last leg there is a destination behind a
     // wall or a gate, walked as before; tried on every walk, the A/B runs had a third of the duels)
+    // port (the flaky tests, 2026-10-27): and for a gateway's approach (`edge`: a tile on its region's edge, the nodes
+    // nearest it often across that edge), the nearest of the bot's own with its last leg closed, the next nearest whose
+    // last leg is open. The node nearest the Catherby side's foot of White Wolf Mountain is in the valley the Taverley side
+    // climbs, across the ridge: a bot on the top bound for Catherby was walked down that valley and, out of the west
+    // side's region there, sent back up to the top's gateway, for good (minigames.test seed 11: a Treasure Trail's walk,
+    // rescue-jumped 225 tiles). Not for other walks: tried on every walk, a stroll by Lumbridge and a Party Room's guests
+    // went otherwise (groups and party tests)
     const elsewhere = componentOf(goals[0]) !== componentOf(start);
+    let nearestClosed = false;
     for (let g = 0; g < goals.length; g++) {
         const goal = goals[g];
-        if (g > 0 && (!elsewhere || componentOf(goal) !== componentOf(start))) continue;
+        if (g > 0 && (elsewhere ? componentOf(goal) !== componentOf(start) : !(edge && nearestClosed))) continue;
         let from = start;
         let nodes = graphRoute(start, goal, allowed, key);
         // port: the nearest reachable node may be across a gate the bot just came through: another reachable one, of the
@@ -2418,6 +2447,7 @@ function _graphPlan(player: Player, destX: number, destZ: number): { nodes: numb
         const open = _graphLegOpen(goal, destX, destZ);
         if (open === 'wait') return 'wait';
         if (open) return { nodes, goal };
+        if (g === 0) nearestClosed = true;
     }
     return null;
 }
@@ -2457,7 +2487,7 @@ function _graphLegOpen(goal: number, destX: number, destZ: number): boolean | 'w
 }
 
 /** port: a destination the graph does not join the bot to, and until when that answer holds (no plan every call) */
-const graphNo = new WeakMap<Player, { goal: number; x: number; z: number; until: number }>();
+const graphNo = new WeakMap<Player, { goal: number; x: number; z: number; until: number; edge: boolean }>();
 const GRAPH_NO_TICKS = 50;
 
 /**
@@ -2465,7 +2495,7 @@ const GRAPH_NO_TICKS = 50;
  * the route, else a new plan (_graphPlan). Null when the graph does not join them; 'wait' when the tick's searches are
  * spent.
  */
-function _graphWalk(player: Player, destX: number, destZ: number): GraphWalk | null | 'wait' {
+function _graphWalk(player: Player, destX: number, destZ: number, edge = false): GraphWalk | null | 'wait' {
     if (player.level !== 0) return null;
     const { allowed, key } = _graphAllowed();
     const goals = _graphGoals(destX, destZ, allowed);
@@ -2478,12 +2508,12 @@ function _graphWalk(player: Player, destX: number, destZ: number): GraphWalk | n
         if (Math.max(Math.abs(ax - player.x), Math.abs(az - player.z)) <= GRAPH_OFF_ROUTE) return walk;
     }
     const no = graphNo.get(player);
-    if (no && no.goal === goal && World.currentTick < no.until && Math.max(Math.abs(no.x - player.x), Math.abs(no.z - player.z)) <= GRAPH_START_MOVE) return null;
-    const plan = _graphPlan(player, destX, destZ);
+    if (no && no.goal === goal && no.edge === edge && World.currentTick < no.until && Math.max(Math.abs(no.x - player.x), Math.abs(no.z - player.z)) <= GRAPH_START_MOVE) return null;
+    const plan = _graphPlan(player, destX, destZ, edge);
     if (plan === 'wait') return 'wait';
     if (!plan || plan.nodes.length < 2) {
         graphWalks.delete(player);
-        graphNo.set(player, { goal, x: player.x, z: player.z, until: World.currentTick + GRAPH_NO_TICKS });
+        graphNo.set(player, { goal, x: player.x, z: player.z, until: World.currentTick + GRAPH_NO_TICKS, edge });
         return null;
     }
     const fresh: GraphWalk = { goal: plan.goal, key, nodes: plan.nodes, at: 0 };
@@ -2504,9 +2534,9 @@ function _graphJoins(player: Player, destX: number, destZ: number): 'yes' | 'no'
  * when the graph does not join the bot and the destination (a gateway lies between: walkTo crosses it first, and its
  * approach is in the bot's region). A free world's route keeps to free areas.
  */
-function _graphTarget(player: Player, destX: number, destZ: number): [number, number] | null {
+function _graphTarget(player: Player, destX: number, destZ: number, edge = false): [number, number] | null {
     if (player.level !== 0 || Math.max(Math.abs(destX - player.x), Math.abs(destZ - player.z)) < GRAPH_MIN) return null;
-    const walk = _graphWalk(player, destX, destZ);
+    const walk = _graphWalk(player, destX, destZ, edge);
     if (!walk || walk === 'wait') return null;
     // port (the realism work, phase 5a): a wrong turn under way (out to the wrong node, a look round, back to the route)
     const detour = _wrongTurnTarget(player, walk);
@@ -2774,10 +2804,10 @@ function _queuedRouteLeft(player: Player): number {
     return left;
 }
 
-function _pathTowards(player: Player, destX: number, destZ: number): void {
+function _pathTowards(player: Player, destX: number, destZ: number, edge = false): void {
     // port: a long walk follows the walking graph: its next node instead of a point on the straight line, which a
     // wall or a fence across the way left the bot pressed against (port/BotWalkGraph)
-    const via = _graphTarget(player, destX, destZ);
+    const via = _graphTarget(player, destX, destZ, edge);
     {
         const walk = via ? graphWalks.get(player) : undefined;
         let left = Math.max(Math.abs(destX - player.x), Math.abs(destZ - player.z));
@@ -2793,6 +2823,8 @@ function _pathTowards(player: Player, destX: number, destZ: number): void {
     const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist < 1) return;
 
+    const near = nearAsItGets.get(player);
+    if (near && near.x === destX && near.z === destZ && near.at === ((player.x << 14) | player.z) && World.currentTick < near.until) return;
     const failed = failedSweeps.get(player);
     if (failed && World.currentTick < failed.until && Math.abs(failed.x - destX) <= 3 && Math.abs(failed.z - destZ) <= 3) {
         _naiveStep(player, dx, dz);
@@ -2820,6 +2852,13 @@ function _pathTowards(player: Player, destX: number, destZ: number): void {
             // nearest
             if (_openDoorToward(player, destX, destZ) !== 'none') {
                 pathProgress.delete(player);
+                return;
+            }
+            // (the direct search came first and found no route, the destination within its closest-approach window and
+            // inside what the bot stands beside: as near it as a walk gets)
+            if (Math.max(Math.abs(destX - player.x), Math.abs(destZ - player.z)) <= NEAR_WINDOW && _blockedLine(player.level, player.x, player.z, destX, destZ)) {
+                pathProgress.delete(player);
+                nearAsItGets.set(player, { x: destX, z: destZ, at: (player.x << 14) | player.z, until: World.currentTick + FAILED_SWEEP_TICKS });
                 return;
             }
             continue;
@@ -3471,7 +3510,7 @@ export function walkTo(player: Player, destX: number, destZ: number, level = 0):
                 const c = chain[i];
                 if (c.next[2] !== 0 || _sideComp(c.next[0], c.next[1], 0, c.gwExit) !== cb) continue;
                 // (and no long detour: the graph's walk, as _graphPlan plans it)
-                const plan = _graphPlan(player, Math.round(c.next[0]), Math.round(c.next[1]));
+                const plan = _graphPlan(player, Math.round(c.next[0]), Math.round(c.next[1]), true);
                 if (plan === 'wait') {
                     _waitedForBudget(player);
                     return;
@@ -3502,7 +3541,7 @@ export function walkTo(player: Player, destX: number, destZ: number, level = 0):
                 next[0] = alt.x;
                 next[1] = alt.z;
             }
-            _pathTowards(player, next[0], next[1]);
+            _pathTowards(player, next[0], next[1], true);
 
             try {
                 const botName = _debugBotName(player);
@@ -3816,7 +3855,9 @@ function closestBetween(area: number[][], a: number[], b: number[], csvLevel?: n
         for (let x = xMin; x <= xMax; x++) {
             for (let z = zMin; z <= zMax; z++) {
                 // If set, make sure we get in the area on a walkable tile.
-                if (csvLevel && BotCollisionMap.isCsvBlocked(csvLevel, x, z)) continue;
+                // port (the flaky tests, 2026-10-27): on level 0 too (`csvLevel &&` skipped it there: the 'Lumbridge'
+                // gateway's exit north of the castle was a blocked tile, 3214,3238, and a bot walked at it for good)
+                if (csvLevel !== undefined && BotCollisionMap.isCsvBlocked(csvLevel, x, z)) continue;
                 const dxa = x - a[0];
                 const dza = z - a[1];
                 const dxb = x - b[0];

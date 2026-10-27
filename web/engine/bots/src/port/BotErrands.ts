@@ -244,7 +244,10 @@ function runeMysteries(): ErrandPlan {
             line('rune-start'),
             talk('duke_of_lumbridge', QUEST_PLACES.duke, { optional: true, answers: [shieldHeld(p) ? 1 : 2] }),
             line('rune-tower', 0.4),
-            walk([3106, 3163, 0], 2, 2500, 'to the tower'),
+            // (the flaky tests, 2026-10-27) to the tower's door: its ground floor, behind two doors, is no destination the
+            // walking graph takes (its last leg shut), and the straight-line walk's sweeps left a bot in the swamp by the
+            // Zanaris shed; the climb's walk goes in, its doors opened
+            walk([3109, 3168, 0], 2, 2500, 'to the tower'),
             climb(['wizards_tower_laddertop'], 'climb-down', QUEST_PLACES.wizardsTowerLadder, 0, q => q.z > 6400),
             act('below', q => (q.z > 6400 ? 'done' : 'fail')),
             talk('head_wizard', QUEST_PLACES.sedridor, { optional: true, answers: [1] }),

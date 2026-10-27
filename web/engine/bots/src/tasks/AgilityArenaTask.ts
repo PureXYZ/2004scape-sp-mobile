@@ -3,16 +3,17 @@
 // clicks:
 //   - Cap'n Izzy's fee (his Pay, op 3: 274's apnpc3 takes the 200 coins), the ladder down (the arena on level 3);
 //   - the flashing pillar (274's shared %agilityarena_pillar_index, what the hint arrow shows a player; it moves on about
-//     every minute): walked to and tagged (its Tag) when a walk reaches it; else an obstacle on the bot's own platform
-//     that leads toward it is taken (the planks, logs, ropes, ledges, hand holds, monkey bars, pillars to jump, low walls,
-//     rope swings: their op 1), and the next one from where it lands; the floor's traps (darts, spikes, blades, pressure
-//     pads) walked over as they come, their hits taken;
+//     every minute): walked to and tagged (its Tag) when a walk reaches it; else the first obstacle of the shortest way
+//     across the platforms to it is taken (the planks, logs, ropes, ledges, hand holds, monkey bars, pillars to jump, low
+//     walls, rope swings: their op 1), and the next one from where it lands; the floor's traps (darts, spikes, blades,
+//     pressure pads) walked over as they come, their hits taken;
 //   - a fall into the pit below (274's teleport to level 0): its climbing rope back up;
 //   - a ticket for each pillar tagged in a row after the first (274's own rule), Agility XP from every obstacle;
 //   - out by the ladder after 10-20 minutes, or when hurt (under 45 % of its Hitpoints) or lost too long.
-// The arena is a grid of platforms; a bot finds its way by what is in front of it, as a player looking at the screen
-// does, and remembers the obstacles that took it nowhere for a while. Lines: setting out, a ticket, a trap's hit, done
-// (port/BotOutings sayMembers, kind 'setpiece').
+// The arena is a grid of platforms walled off from each other, the obstacles the ways between; a bot knows where each one
+// puts a player (274's scripts' moves, as a player who has watched it knows), goes round an obstacle that dropped it
+// (a broken plank's piece, a slip), and passes over one that took it nowhere for a while. Lines: setting
+// out, a ticket, a trap's hit, done (port/BotOutings sayMembers, kind 'setpiece').
 import {
     BotTask,
     Player,
@@ -39,6 +40,8 @@ import ObjType from '#/cache/config/ObjType.js';
 import VarSharedType from '#/cache/config/VarSharedType.js';
 import { botAnswerDialogue, botScript, getBaseLevel, noteMove, PlayerStat, tilesInSquare } from '#/engine/bot/BotAction.js';
 import { botPathToLoc, botReachedLoc, botWalkPath } from '#/engine/bot/port/BotPathing.js';
+import { BotCollisionMap } from '#/engine/bot/BotCollisionMap.js';
+import { canTravel, CollisionType } from '#/engine/routefinder/index.js';
 import { moveItems } from '#/engine/bot/port/BotInventoryCompat.js';
 import { MembersPlaces } from '#/engine/bot/BotKnowledge.js';
 import { countMinigame, noteOutingEnd, noteOutingStart, sayMembers } from '#/engine/bot/port/BotOutings.js';
@@ -61,11 +64,180 @@ const LOST_LOOKS = 12;
 /** ticks off the arena's floor before the visit ends ('stray') */
 const STRAY_TICKS = 100;
 
+/** a crossing's own time in a route (ticks, about: 274's obstacles take 7-18) */
+const CROSS_COST = 12;
+/** and for each time it dropped this bot into the pit this visit (the climb back, the hit taken: it goes round) */
+const FALL_COST = 30;
+
 /**
- * Where each obstacle took a bot (its tile -> the tile it landed on), learned as bots cross: the arena's guide, as 2004's
- * players learned it (the next bot weighs an obstacle by where it really leads)
+ * (the flaky tests, 2026-10-27) the arena's floor as a player comes to know it: its platforms (level 3's walk regions in
+ * the arena's square; the dark round them, open floor out to the square's edge, is none) and the crossings between them.
+ * The bot took the obstacle whose far side looked nearest the arrow, and a platform walled off from the pillar's side
+ * (most of them: the walkways end at walls, the way on is an obstacle back or round) gave it none: "lost" in a few
+ * looks, tagging only the pillars next to it (no tag in a 10-20 minute visit at seeds 2 and 4). It now takes the first
+ * obstacle of the shortest way across the platforms.
  */
-const landings = new Map<number, [number, number]>();
+interface Crossing {
+    /** the obstacle (its op 1) */
+    readonly loc: Loc;
+    /** the platform it is taken from, and the tile there a click's walk ends on (x << 14 | z) */
+    readonly from: number;
+    readonly at: number;
+    /** the platform and tile 274's script puts a player on */
+    readonly to: number;
+    readonly land: number;
+    /** the loc's tile and the platform it is taken from */
+    readonly id: number;
+}
+const FLOOR = 64;
+let floorRegions: Int16Array | null = null;
+let floorCrossings: Crossing[] = [];
+/**
+ * Where a crossing really took a bot when that was not where the script's moves put it (another platform): learned as
+ * bots cross, the next bot's route by it: the arena's guide, as 2004's players learned it. (Not the planks that dropped
+ * one: 274's broken piece is under the tile two steps on, so a plank drops a player or not by the tile its walk ended
+ * beside; kept as broken for good, every plank to the ladder's platform was in a while and a bot there had no way out:
+ * minigames.test seed 1. A plank's fall is any obstacle's, gone round for the visit.)
+ */
+const learned = new Map<number, number>();
+
+/** the platform on (x, z) of the arena's floor, or -1 (a wall, the dark, off the square) */
+function platformAt(x: number, z: number): number {
+    const dx = x - ARENA_X0;
+    const dz = z - ARENA_Z0;
+    if (dx < 0 || dz < 0 || dx >= FLOOR || dz >= FLOOR) return -1;
+    return arenaFloor()[dx * FLOOR + dz];
+}
+
+function locAt(x: number, z: number, name: string): boolean {
+    const zone = World.gameMap.getZone(x, z, 3);
+    if (!zone) return false;
+    for (const loc of zone.getAllLocsSafe()) if (loc.x === x && loc.z === z && LocType.get(loc.type).debugname === name) return true;
+    return false;
+}
+
+/** a rope swing's start tile and the way it swings (274's aploc1 agilityarena_ropeswing: by the loc's angle) */
+function swingOf(loc: Loc): [number, number, number, number] {
+    switch (loc.angle) {
+        case 0:
+            return [loc.x, loc.z + 2, 0, -1];
+        case 1:
+            return [loc.x + 2, loc.z, -1, 0];
+        case 2:
+            return [loc.x, loc.z - 2, 0, 1];
+        default:
+            return [loc.x - 2, loc.z, 1, 0];
+    }
+}
+
+/** where 274's script for an obstacle (game_agilityarena's) puts a player who uses it from (sx, sz), or null */
+function landingOf(name: string, loc: Loc, sx: number, sz: number): number | null {
+    const ux = Math.sign(loc.x - sx);
+    const uz = Math.sign(loc.z - sz);
+    const tile = (x: number, z: number) => (x << 14) | z;
+    switch (name) {
+        case 'agilityarena_ropebalance':
+            return tile(loc.x, loc.z + (loc.angle === 2 ? -7 : 7));
+        case 'agilityarena_ropeswing': {
+            const [x, z, dx, dz] = swingOf(loc);
+            return tile(x + 5 * dx, z + 5 * dz);
+        }
+        case 'agilityarena_pillar_top':
+            return Math.abs(loc.x - sx) + Math.abs(loc.z - sz) === 1 ? tile(loc.x + 6 * ux, loc.z + 6 * uz) : null;
+        case 'agilityarena_lowwall':
+            return (ux === 0) !== (uz === 0) ? tile(sx + 3 * ux, sz + 3 * uz) : null;
+        case 'agilityarena_monkeybars_end': {
+            const [x, z, dx, dz] = loc.angle === 0 ? [loc.x + 1, loc.z, 0, -1] : loc.angle === 2 ? [loc.x + 1, loc.z, 0, 1] : loc.angle === 1 ? [loc.x, loc.z + 1, -1, 0] : [loc.x, loc.z + 1, 1, 0];
+            return tile(x + 8 * dx, z + 8 * dz);
+        }
+        case 'agilityarena_ledgebalance':
+        case 'agilityarena_ledgebalance2':
+        case 'agilityarena_plank':
+        case 'agilityarena_plank2':
+        case 'agilityarena_plank3':
+            return tile(sx + (sx < loc.x ? 7 : -7), sz);
+        case 'agilityarena_logbalance1':
+        case 'agilityarena_logbalance2':
+        case 'agilityarena_logbalance3':
+            return uz !== 0 ? tile(sx, sz + 7 * uz) : ux !== 0 ? tile(sx + 7 * ux, sz) : null;
+        case 'agilityarena_handholds':
+            // (the way the middle hand holds go from where it stands)
+            for (const [dx, dz] of [[0, 1], [0, -1], [-1, 0], [1, 0]]) if (locAt(sx + dx, sz + dz, 'agilityarena_handholds_middle')) return tile(loc.x + 7 * dx, loc.z + 7 * dz);
+            return null;
+    }
+    return null;
+}
+
+/** the arena's platforms (built the first time a bot looks: the floor and its obstacles are the map's, fixed) */
+function arenaFloor(): Int16Array {
+    if (floorRegions) return floorRegions;
+    const region = new Int16Array(FLOOR * FLOOR).fill(-1);
+    floorRegions = region;
+    let n = 0;
+    for (let i = 0; i < FLOOR * FLOOR; i++) {
+        const x = ARENA_X0 + Math.floor(i / FLOOR);
+        const z = ARENA_Z0 + (i % FLOOR);
+        if (region[i] !== -1 || BotCollisionMap.isCsvBlocked(3, x, z)) continue;
+        const queue = [i];
+        region[i] = n;
+        let dark = false;
+        for (let q = 0; q < queue.length; q++) {
+            const cx = ARENA_X0 + Math.floor(queue[q] / FLOOR);
+            const cz = ARENA_Z0 + (queue[q] % FLOOR);
+            if (cx === ARENA_X0 || cz === ARENA_Z0 || cx === ARENA_X0 + FLOOR - 1 || cz === ARENA_Z0 + FLOOR - 1) dark = true;
+            for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                const ox = cx + dx - ARENA_X0;
+                const oz = cz + dz - ARENA_Z0;
+                if (ox < 0 || oz < 0 || ox >= FLOOR || oz >= FLOOR) continue;
+                const j = ox * FLOOR + oz;
+                if (region[j] !== -1 || BotCollisionMap.isCsvBlocked(3, cx + dx, cz + dz) || !canTravel(3, cx, cz, dx, dz, 1, 0, CollisionType.NORMAL)) continue;
+                region[j] = n;
+                queue.push(j);
+            }
+        }
+        // (open floor out to the square's edge: the dark round the platforms)
+        if (dark) for (const j of queue) region[j] = -2;
+        else n++;
+    }
+    for (let i = 0; i < region.length; i++) if (region[i] === -2) region[i] = -1;
+    // each obstacle from each platform beside it: from a tile 274's reach test passes on (a rope swing: its start tile)
+    const crossings: Crossing[] = [];
+    for (let zx = ARENA_X0; zx < ARENA_X0 + FLOOR; zx += 8) {
+        for (let zz = ARENA_Z0; zz < ARENA_Z0 + FLOOR; zz += 8) {
+            const zone = World.gameMap.getZone(zx, zz, 3);
+            if (!zone) continue;
+            for (const loc of zone.getAllLocsSafe()) {
+                const type = LocType.get(loc.type);
+                if (!CROSSINGS.has(String(type.op?.[0] ?? '').toLowerCase())) continue;
+                const swing = type.debugname === 'agilityarena_ropeswing' ? swingOf(loc) : null;
+                const done = new Set<number>();
+                for (let dx = -2; dx < loc.width + 2; dx++) {
+                    for (let dz = -2; dz < loc.length + 2; dz++) {
+                        const sx = loc.x + dx;
+                        const sz = loc.z + dz;
+                        const from = platformAt(sx, sz);
+                        if (from < 0 || done.has(from)) continue;
+                        if (swing ? sx !== swing[0] || sz !== swing[1] : !botReachedLoc(3, sx, sz, loc.x, loc.z, loc.width, loc.length, loc.angle, loc.shape, type.forceapproach)) continue;
+                        const land = landingOf(type.debugname ?? '', loc, sx, sz);
+                        if (land === null) continue;
+                        const to = platformAt(land >> 14, land & 0x3fff);
+                        if (to < 0 || to === from) continue;
+                        done.add(from);
+                        crossings.push({ loc, from, at: (sx << 14) | sz, to, land, id: ((loc.x << 14) | loc.z) * 64 + from });
+                    }
+                }
+            }
+        }
+    }
+    floorCrossings = crossings;
+    return region;
+}
+
+/** (tests) the arena's platforms and crossings, and what bots learned of them */
+export function arenaFloorForTest(): { platformAt: (x: number, z: number) => number; crossings: readonly Crossing[]; learned: ReadonlyMap<number, number> } {
+    arenaFloor();
+    return { platformAt, crossings: floorCrossings, learned };
+}
 
 /** (tests, the runner) visits, fees paid, tags, tickets, crossings, falls, the ends */
 export const arenaStats = { visits: 0, paid: 0, tags: 0, tickets: 0, crossings: 0, falls: 0, ended: {} as Record<string, number> };
@@ -140,10 +312,12 @@ export class AgilityArenaTask extends BotTask {
     private tickets0 = 0;
     private tagged = -1;
     private lastPillar = -1;
-    /** obstacles that went nowhere lately: their tile and when */
+    /** crossings that went nowhere lately (their id), targets a click did not reach (their tile): when */
     private readonly avoid = new Map<number, number>();
-    /** the obstacle it last took and where it stood then */
-    private crossing: { key: number; x: number; z: number; at: number } | null = null;
+    /** crossings that dropped it into the pit this visit: how often */
+    private readonly fellFrom = new Map<number, number>();
+    /** the crossing it last took, where it stood then */
+    private crossing: { id: number; from: number; to: number; x: number; z: number; at: number } | null = null;
     /** (the variety work, round 2, the fixes) the target it last clicked (a pillar, the ladder up) and when */
     private clicked: { key: number; at: number } | null = null;
     private lost = 0;
@@ -221,9 +395,11 @@ export class AgilityArenaTask extends BotTask {
             this.busy = false;
             this.nextClick = Math.max(this.nextClick, now + humanDelay(player, 'retarget') + randInt(0, 4));
         }
-        // (the pit below the arena: a fall from an obstacle)
-        if (this.state === 'arena' && player.level === 0 && player.z > 9000) {
+        // (the pit below the arena: a fall from an obstacle, a slip or a plank's broken piece)
+        if ((this.state === 'arena' || this.state === 'out') && player.level === 0 && player.z > 9000) {
             arenaStats.falls++;
+            if (this.crossing) this.fellFrom.set(this.crossing.id, (this.fellFrom.get(this.crossing.id) ?? 0) + 1);
+            this.crossing = null;
             this._set('pit');
         }
 
@@ -341,7 +517,7 @@ export class AgilityArenaTask extends BotTask {
                         }
                         if (Math.random() < 0.5) sayMembers(player, 'arena-done');
                         this._end(player, this.outcome);
-                    } else if (player.level === 0 && player.z > 9000) this._set('pit');
+                    }
                     return;
                 }
                 if (now - this.stateAt > 1500) {
@@ -418,11 +594,14 @@ export class AgilityArenaTask extends BotTask {
         // (the variety work, round 2, the fixes: and one whose own script never ran: the engine's walk to it stopped short,
         // "I can't reach that!" (a balancing rope over the pit, its route through tiles 274 does not step on); it was taken
         // for a crossing, its "landing" learned where the walk stopped, and clicked again and again: 6-25 times a run)
+        // (and one that left it on the platform it was taken from: a low wall's stumble back, a walk to it and no crossing;
+        // learned as where it leads, both ways off a platform led back onto it, and a bot there had no way anywhere)
         if (this.crossing && now - this.crossing.at > 6) {
-            if (this.lastBusyAt < this.crossing.at || Math.max(Math.abs(player.x - this.crossing.x), Math.abs(player.z - this.crossing.z)) <= 2) this.avoid.set(this.crossing.key, now);
+            const on = player.level === 3 ? platformAt(player.x, player.z) : -1;
+            if (this.lastBusyAt < this.crossing.at || on === this.crossing.from || Math.max(Math.abs(player.x - this.crossing.x), Math.abs(player.z - this.crossing.z)) <= 2) this.avoid.set(this.crossing.id, now);
             else {
                 arenaStats.crossings++;
-                if (player.level === 3) landings.set(this.crossing.key, [player.x, player.z]);
+                if (on >= 0 && on !== this.crossing.to) learned.set(this.crossing.id, on);
             }
             this.crossing = null;
         }
@@ -439,48 +618,91 @@ export class AgilityArenaTask extends BotTask {
             interactLoc(player, target);
             return 'clicked';
         }
-        // (an obstacle a walk reaches, whose far side is nearest the target)
-        let best: Loc | null = null;
-        let bestScore = Infinity;
-        for (let zx = (player.x - 14) & ~7; zx <= player.x + 14; zx += 8) {
-            for (let zz = (player.z - 14) & ~7; zz <= player.z + 14; zz += 8) {
-                const zone = World.gameMap.getZone(zx, zz, 3);
-                if (!zone) continue;
-                for (const loc of zone.getAllLocsSafe()) {
-                    const type = LocType.get(loc.type);
-                    const op = String(type.op?.[0] ?? '').toLowerCase();
-                    if (!CROSSINGS.has(op)) continue;
-                    const key = (loc.x << 14) | loc.z;
-                    if (now - (this.avoid.get(key) ?? -AVOID_TICKS) < AVOID_TICKS) continue;
-                    const near = Math.max(Math.abs(loc.x - player.x), Math.abs(loc.z - player.z));
-                    if (near > 14) continue;
-                    // (where it leads: learned, else its far side, past it away from the bot)
-                    const known = landings.get(key);
-                    const fx = known ? known[0] : loc.x + Math.sign(loc.x - player.x) * 4;
-                    const fz = known ? known[1] : loc.z + Math.sign(loc.z - player.z) * 4;
-                    const score = Math.hypot(fx - target.x, fz - target.z) + near * 0.3 + (known ? 0 : 2);
-                    if (score >= Math.hypot(player.x - target.x, player.z - target.z) + 2) continue;
-                    if (score >= bestScore) continue;
-                    if (!walkReaches(player, loc)) continue;
-                    best = loc;
-                    bestScore = score;
-                }
-            }
-        }
-        if (!best) {
+        // (the first obstacle of the shortest way there)
+        const step = this._route(player, now, target);
+        if (!step) {
             this.lost++;
-            // (nothing leads nearer: a few steps about its platform, and a look again)
+            // (no way it knows: a few steps about its platform, and a look again)
             if (now - this.lastClick >= 10) {
                 this.lastClick = now;
                 stepAbout(player, 3);
             }
             return 'lost';
         }
+        // (a click whose walk reaches it from here; else a walk to the tile it is taken from first, a rope swing's start:
+        // its aploc1 swings only from there)
+        const sx = step.at >> 14;
+        const sz = step.at & 0x3fff;
+        const swing = LocType.get(step.loc.type).debugname === 'agilityarena_ropeswing';
+        if (swing ? player.x !== sx || player.z !== sz : !walkReaches(player, step.loc)) {
+            const path = player.x === sx && player.z === sz ? null : botWalkPath(3, player.x, player.z, sx, sz);
+            if (path && path.length > 0) player.queueWaypoints(path);
+            else this.avoid.set(step.id, now);
+            this.nextClick = now + randInt(1, 3);
+            return 'waiting';
+        }
         this.lastClick = now;
         this.nextClick = now + randInt(2, 7);
-        this.crossing = { key: (best.x << 14) | best.z, x: player.x, z: player.z, at: now };
-        interactLoc(player, best);
+        this.crossing = { id: step.id, from: step.from, to: step.to, x: player.x, z: player.z, at: now };
+        interactLoc(player, step.loc);
         return 'crossing';
+    }
+
+    /**
+     * The first crossing of the shortest way (the tiles walked and the crossings' time) from its platform to one the target
+     * is used from; null when it stands on one, or knows no way (the avoided obstacles left out)
+     */
+    private _route(player: Player, now: number, target: Loc): Crossing | null {
+        const here = player.level === 3 ? platformAt(player.x, player.z) : -1;
+        if (here < 0) return null;
+        const type = LocType.get(target.type);
+        const goal = new Set<number>();
+        for (let dx = -1; dx <= target.width; dx++) {
+            for (let dz = -1; dz <= target.length; dz++) {
+                const x = target.x + dx;
+                const z = target.z + dz;
+                const on = platformAt(x, z);
+                if (on >= 0 && botReachedLoc(3, x, z, target.x, target.z, target.width, target.length, target.angle, target.shape, type.forceapproach)) goal.add(on);
+            }
+        }
+        if (goal.size === 0 || goal.has(here)) return null;
+        const ways = floorCrossings.filter(c => now - (this.avoid.get(c.id) ?? -AVOID_TICKS) >= AVOID_TICKS);
+        const dist = (a: number, x: number, z: number) => Math.max(Math.abs((a >> 14) - x), Math.abs((a & 0x3fff) - z));
+        const cost = new Array<number>(ways.length).fill(Infinity);
+        const first = new Array<number>(ways.length).fill(-1);
+        const done = new Array<boolean>(ways.length).fill(false);
+        for (let i = 0; i < ways.length; i++) {
+            if (ways[i].from !== here) continue;
+            cost[i] = dist(ways[i].at, player.x, player.z) + CROSS_COST + FALL_COST * (this.fellFrom.get(ways[i].id) ?? 0);
+            first[i] = i;
+        }
+        let best = -1;
+        let bestCost = Infinity;
+        for (;;) {
+            let i = -1;
+            for (let j = 0; j < ways.length; j++) if (!done[j] && cost[j] < Infinity && (i === -1 || cost[j] < cost[i])) i = j;
+            if (i === -1 || cost[i] >= bestCost) break;
+            done[i] = true;
+            const c = ways[i];
+            const to = learned.get(c.id) ?? c.to;
+            if (goal.has(to)) {
+                const total = cost[i] + dist(c.land, target.x, target.z);
+                if (total < bestCost) {
+                    bestCost = total;
+                    best = first[i];
+                }
+                continue;
+            }
+            for (let j = 0; j < ways.length; j++) {
+                if (done[j] || ways[j].from !== to) continue;
+                const next = cost[i] + dist(ways[j].at, c.land >> 14, c.land & 0x3fff) + CROSS_COST + FALL_COST * (this.fellFrom.get(ways[j].id) ?? 0);
+                if (next < cost[j]) {
+                    cost[j] = next;
+                    first[j] = first[i];
+                }
+            }
+        }
+        return best === -1 ? null : ways[best];
     }
 
     private _set(state: AgilityArenaTask['state']): void {
