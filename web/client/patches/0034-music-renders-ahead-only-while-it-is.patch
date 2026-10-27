@@ -1,0 +1,116 @@
+ios: music renders ahead only while it is needed
+
+A song was rendered whole as soon as it started (about 19 times real time) and all of it queued as AudioBuffers: 176 KB
+a second of music, 33 MB for a median song and 50+ MB for the long ones, alive in the page for minutes (with a song
+change, the old song's and the new one's together: peaks of 70-170 MB in the music harness). Now, while a song plays,
+its render stops once 20 s are queued and goes on when 10 s are left: the same chunks in the same order, rendered in
+bursts at the same speed, so the buffers are of the same few seconds as before; at most about 25 s of music (4.4 MB)
+is held.
+
+A new song starts on a fresh synth (the soundfont loaded again from the copy setSoundfont made, about 2 ms):
+tsf_reset only ends quickly the voices that are sounding, so a song began with whatever the previous one's render had
+reached, which with the render held would be the previous song's middle. Upstream reached the previous song's end
+(rendered whole within seconds) unless the song changed sooner; there a new song began with the old one's notes still
+sounding, from a few milliseconds to minutes. A loop (replay) keeps tsf_reset: its render has reached the song's end.
+
+Proof (a script outside the repository, a deterministic clock and the real wasm and soundfont, by the
+audible samples, cut at every stop): with the fresh synth in both, the render-ahead limit is sample-exact (7 scripted
+and seeded sessions, 2.6 h of music); held music 12-49 MB on average -> 1.4-3.1, peaks 71-167 -> 6.6-9.3 MB.
+
+diff --git a/src/3rdparty/tinymidipcm.js b/src/3rdparty/tinymidipcm.js
+index 5f61ebf..fb5d2ea 100644
+--- a/src/3rdparty/tinymidipcm.js
++++ b/src/3rdparty/tinymidipcm.js
+@@ -23,6 +23,8 @@ class TinyMidiPCM {
+ 
+         this.onPCMData = options.onPCMData || (() => {});
+         this.onRenderEnd = options.onRenderEnd || (() => {});
++        // custom (ios): true holds the next chunk for a renderInterval (see renderAhead)
++        this.shouldWait = options.shouldWait || (() => false);
+ 
+         this.renderTimer = undefined;
+ 
+@@ -61,6 +63,7 @@ class TinyMidiPCM {
+         this.wasmModule.HEAPU8.set(buffer, this.soundfontBufferPtr);
+ 
+         this.soundfontPtr = _tsf_load_memory(this.soundfontBufferPtr, buffer.length);
++        this.soundfontLength = buffer.length; // custom (ios): see render
+ 
+         _tsf_set_output(this.soundfontPtr, this.channels === 2 ? 0 : 2, this.sampleRate, this.gain);
+     }
+@@ -102,6 +105,16 @@ class TinyMidiPCM {
+             throw new Error('no soundfont buffer set. call .setSoundfont');
+         }
+ 
++        // custom (ios): a new song starts on a fresh synth (the soundfont loaded again from the copy setSoundfont made,
++        // about 2 ms). tsf_reset only ends the voices sounding at that moment quickly, so a song began with whatever
++        // the previous one's render had reached: its end, as a song was rendered whole within seconds, unless the song
++        // changed sooner. With the render held to renderAheadHigh (see the controller), that would be the middle of the
++        // previous song. A loop (replay) keeps tsf_reset: its render has reached the song's end.
++        const { _tsf_close, _tsf_load_memory, _tsf_set_output } = this.wasmModule;
++        _tsf_close(this.soundfontPtr);
++        this.soundfontPtr = _tsf_load_memory(this.soundfontBufferPtr, this.soundfontLength);
++        _tsf_set_output(this.soundfontPtr, this.channels === 2 ? 0 : 2, this.sampleRate, this.gain);
++
+         // custom (ios): parsed once here, and rendered from its first message by replay() as often as it loops
+         this.firstMidiMessagePtr = this.getMIDIMessagePtr(midiBuffer);
+         this.replay();
+@@ -122,6 +135,12 @@ class TinyMidiPCM {
+         let midiMessagePtr = this.firstMidiMessagePtr; // custom (ios)
+ 
+         const boundRender = function () {
++            // custom (ios): the same chunks in the same order, only later (see renderAhead)
++            if (this.shouldWait()) {
++                this.renderTimer = setTimeout(boundRender, this.renderInterval);
++                return;
++            }
++
+             midiMessagePtr = this.renderMIDIMessage(midiMessagePtr);
+ 
+             const pcm = this.getPCMView(); // custom (ios)
+@@ -168,6 +187,15 @@ class TinyMidiPCM {
+     // MIDI_SONG of the song it has), unless the music tab's Loop (off at every login) sent it again.
+     const loopLeadTime = 2;
+     let loop = false;
++    // custom (ios): a song was rendered whole as soon as it started (about 19 times real time) and all of it queued as
++    // AudioBuffers: 176 KB a second of music, 33 MB for a median song and 50+ MB for the long ones, alive in the page
++    // for minutes. Now, while it plays, the render stops once renderAheadHigh seconds are queued and goes on when only
++    // renderAheadLow are left: the same chunks in the same order, rendered in bursts at the same speed, so the buffers
++    // are of the same few seconds as before and at most about 25 s of music is held. (A stopped song renders on to its
++    // end as before; nothing of it is kept.)
++    const renderAheadLow = 10;
++    const renderAheadHigh = 20;
++    let renderHeld = false;
+     let rendered = false; // since the last start(): the render has reached the song's end
+     // custom (ios): the samples rendered since the last flush are the first samplesLength of samples, a buffer kept
+     // from chunk to chunk and grown only when a chunk does not fit. Every chunk was concatenated into a new, longer
+@@ -209,6 +237,21 @@ class TinyMidiPCM {
+             // renderEndSeconds = Math.floor(startTime + Math.floor(ms / 1000));
+             rendered = true; // custom (ios): see loop
+         },
++        // custom (ios): see renderAheadLow
++        shouldWait: () => {
++            if (!playing) {
++                return false;
++            }
++
++            const ahead = lastTime + samplesLength / channels / sampleRate - window.audioContext.currentTime;
++            if (ahead >= renderAheadHigh) {
++                renderHeld = true;
++            } else if (ahead <= renderAheadLow) {
++                renderHeld = false;
++            }
++
++            return renderHeld;
++        },
+         bufferSize: 1024 * 100,
+         sampleRate
+     });
+@@ -326,6 +369,7 @@ class TinyMidiPCM {
+         playing = true; // custom (ios)
+         loop = loopSong; // custom (ios)
+         rendered = false; // custom (ios)
++        renderHeld = false; // custom (ios)
+         tinyMidiPCM.render(midiBuffer);
+     }
+ 

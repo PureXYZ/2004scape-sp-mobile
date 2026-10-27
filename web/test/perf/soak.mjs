@@ -5,8 +5,9 @@
 //   node web/test/perf/soak.mjs            # the soaks there are, with what each measures
 //
 // A soak: {name?, description, bots, startup?: {launches, trace?, traceSec?}, phases: [...]}; a phase: {name, sec,
-// where?: 'title' | 'ingame', settleSec?, tele?, waitFill?, vars?, audioOff?, walk?, walkEveryMs?, lm?: {everySec,
-// think}, background?, traces?: [{set, at, sec}]} (autotest.js's soak section says what each does).
+// where?: 'title' | 'ingame', settleSec?, tele?, waitFill?, vars?, webkitLowMemory? (org.WebKit.lowMemory before the
+// window), pageGcEverySec? (the app's page collections every n s, 0 = none), audioOff?, walk?, walkEveryMs?,
+// lm?: {everySec, think}, background?, traces?: [{set, at, sec}]} (autotest.js's soak section says what each does).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 export const SOAK_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(SOAK_DIR, '..', '..', '..');
 const TRACE_SETS = ['am', 'tp', 'gpu', 'disk', 'full', 'tpo'];
-const PHASE_KEYS = new Set(['name', 'description', 'sec', 'where', 'settleSec', 'tele', 'waitFill', 'vars', 'audioOff', 'walk', 'walkEveryMs', 'lm', 'background', 'traces']);
+const PHASE_KEYS = new Set(['name', 'description', 'sec', 'where', 'settleSec', 'tele', 'waitFill', 'vars', 'webkitLowMemory', 'pageGcEverySec', 'audioOff', 'walk', 'walkEveryMs', 'lm', 'background', 'traces']);
 
 /** A soak by name (web/test/perf/<name>.json) or path, checked; `bots` (app-test --bots) takes the soak's place. */
 export function loadSoak(nameOrPath, { bots } = {}) {

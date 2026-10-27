@@ -319,6 +319,11 @@ final class Harness {
             chat.phonePressure = { pressure }
             var rests: [String?] = []
             chat.onStatus = { status in rests.append((status["local"] as? [String: Any])?["rest"] as? String) }
+            // (the app's hooks: PageMemory collects the page's heap on a warning and before a load)
+            var warnings: [String] = []
+            var willLoads: [Bool] = [] // the model in memory at each call
+            chat.onMemoryWarning = { why in warnings.append(why) }
+            chat.onWillLoad = { willLoads.append(chat.local.isLoaded) }
             var answers: [Int: [String: Any]] = [:]
             chat.onReply = { reply in
                 if let id = reply["id"] as? Int { answers[id] = reply }
@@ -339,12 +344,14 @@ final class Harness {
             chat.memoryWarning()
             let until = chat.restingUntil.map { $0.timeIntervalSince(clock) } ?? -1
             check("a memory warning: the model rests 10 min (status local.rest 'memory', sent at once)", restOf() == "memory" && abs(until - 600) < 0.01 && rests.last == "memory", "until +\(Int(until)) s, statuses \(rests)")
+            check("a memory warning: the app is told (onMemoryWarning, with why)", warnings == ["memory warning"], "\(warnings)")
             let started = Date()
             var reply = await restAsk()
             check("resting: a request is answered 'unavailable' at once, nothing loaded", reply["error"] as? String == "unavailable" && reply["text"] is NSNull && Date().timeIntervalSince(started) < 0.5 && !chat.local.isLoaded, describe(reply))
             chat.warm()
             try? await Task.sleep(for: .milliseconds(500))
             check("resting: a warm-up loads nothing", !chat.local.isLoaded)
+            check("resting: no load is announced (onWillLoad) for the refused request or the warm-up", willLoads.isEmpty, "\(willLoads)")
             clock += 599
             chat.endRestIfRoom()
             let early = restOf()
@@ -357,9 +364,11 @@ final class Harness {
             check("the rest: still on at 9:59, and past 10 min while the phone's pressure is 'warning'; over once it is normal (status without rest)", early == "memory" && underPressure == "memory" && restOf() == nil && chat.restingUntil == nil && rests.last == .some(nil), "9:59 \(early ?? "-"), pressure \(underPressure ?? "-"), normal \(restOf() ?? "-"), statuses \(rests)")
             reply = await restAsk()
             check("after the rest a request loads the model and answers", reply["source"] as? String == "local" && chat.local.isLoaded, describe(reply))
+            check("that load is announced once, before it (onWillLoad with the model not in memory)", willLoads == [false], "\(willLoads)")
             pressure = 2
             reply = await restAsk()
             check("loaded, the phone under pressure: the model still answers (only a load is refused; iOS's announcement frees it)", reply["source"] as? String == "local" && restOf() == nil, describe(reply))
+            check("a request with the model in memory announces no load", willLoads == [false], "\(willLoads)")
             chat.local.unload(reason: "harness: rest")
             while chat.local.isLoaded {
                 try? await Task.sleep(for: .milliseconds(10))
@@ -371,6 +380,7 @@ final class Harness {
             chat.memoryWarning()
             let again = chat.restingUntil.map { $0.timeIntervalSince(clock) } ?? -1
             check("a warning during a rest starts it again (10 min from this one)", abs(again - 600) < 0.01 && restOf() == "memory", "until +\(Int(again)) s")
+            check("no load announced for the request the pressure refused; the second warning told too", willLoads == [false] && warnings == ["memory warning", "memory warning"], "loads \(willLoads), warnings \(warnings)")
         }
 
         // more than 3 at once: busy

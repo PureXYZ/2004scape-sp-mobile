@@ -1,5 +1,6 @@
 import UIKit
 import WebKit
+import notify
 
 /// Hosts the game: a full-screen WKWebView running the web client (page) and the engine (a module
 /// Web Worker in the same page), all loaded from the app bundle through `AssetSchemeHandler`,
@@ -24,6 +25,8 @@ final class GameViewController: UIViewController {
     private lazy var haptics = Haptics(view: view)
     private let overlay = LoadingOverlay()
     private lazy var botChat = makeBotChat()
+    /// The page's JavaScript heap, collected by the app (made with the web view).
+    private lazy var pageMemory = PageMemory(webView: webView)
     /// The Claude key's secure box while it is up (Settings › Bot chat › Set key…).
     private var keyAlert: UIAlertController?
     /// The Add / Edit server box while it is up (the title's World picker).
@@ -241,6 +244,7 @@ final class GameViewController: UIViewController {
             $0.keyboard.releaseHeldKeys()
             $0.lifecycle.handle(.pause)
             $0.botChat.pause()  // (no GPU work while inactive; the model stays loaded for a moment's interruption)
+            $0.pageMemory.setRunning(false)
         }
         on(UIApplication.didEnterBackgroundNotification) {
             $0.lifecycle.handle(.background)
@@ -253,6 +257,7 @@ final class GameViewController: UIViewController {
         on(UIApplication.didBecomeActiveNotification) {
             $0.lifecycle.handle(.resume)
             $0.botChat.resume()
+            $0.pageMemory.setRunning($0.inGame)
             $0.reloadIfNeeded()
             $0.keyboard.activate()
             $0.reportBattery()
@@ -374,6 +379,7 @@ final class GameViewController: UIViewController {
         Log.info("host", "status \(phase)\(detailText)")
         uncover()
         inGame = phase == "ingame"
+        pageMemory.setRunning(inGame && UIApplication.shared.applicationState == .active)
         if inGame {
             lastUserActivity = .now
             haptics.prepare()
@@ -402,6 +408,7 @@ final class GameViewController: UIViewController {
         Log.info("host", "FATAL (the page shows it): \(message)")
         playHaptic("error")
         inGame = false
+        pageMemory.setRunning(false)
         setKeepAwake(false)
         keyboard.hide(userInitiated: false)
         if overlay.isShowing, !overlay.isShowingError {
@@ -415,6 +422,12 @@ final class GameViewController: UIViewController {
     private func makeBotChat() -> BotChatModel {
         let model = BotChatModel()
         model.watchMemoryPressure()
+        model.onMemoryWarning = { [weak self] why in
+            self?.pageMemory.collect(why)
+        }
+        model.onWillLoad = { [weak self] in
+            self?.pageMemory.collect("the chat model loads")
+        }
         model.onReply = { [weak self] reply in
             self?.page.call("bots.lmReply", [reply])
         }
@@ -684,6 +697,17 @@ final class GameViewController: UIViewController {
             }
         case "memory-warning":
             NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: UIApplication.shared)
+        case "webkit-low-memory":
+            // WebKit's own low-memory handler in its processes, as `notifyutil -p org.WebKit.lowMemory` on a Mac: a full
+            // GC, JIT code and caches dropped, free memory given back (memory attribution, app-test --soak)
+            reply = ["status": Int(notify_post("org.WebKit.lowMemory"))]
+        case "page-gc":
+            // the page's heap collected now (PageMemory)
+            reply = ["available": pageMemory.collect("debug")]
+        case "page-gc-every":
+            // a test run's A/B: the page's heap collected every `sec` seconds in the world (0 = no timer)
+            pageMemory.period = (message["sec"] as? NSNumber)?.doubleValue ?? 0
+            reply = ["sec": pageMemory.period, "available": pageMemory.available]
         case "lifecycle":
             if let event = (message["event"] as? String).flatMap(LifecycleCoordinator.Event.init(rawValue:)) {
                 lifecycle.handle(event)

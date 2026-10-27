@@ -1098,6 +1098,15 @@
             }
             out(`INFO soak: ${active} bots active after ${Math.round((performance.now() - started) / 1000)} s (want ${want})`);
         }
+        if (typeof spec.pageGcEverySec === 'number') {
+            // (the app's collections of the page's heap, PageMemory: every n s from now on, 0 = none; an A/B)
+            out(`INFO soak: page GC every ${spec.pageGcEverySec} s: ${JSON.stringify(await debug('page-gc-every', { sec: spec.pageGcEverySec }))}`);
+        }
+        if (spec.webkitLowMemory) {
+            // (WebKit's own low-memory handler: what its processes give back, memory attribution)
+            out(`INFO soak: org.WebKit.lowMemory posted: ${JSON.stringify(await debug('webkit-low-memory'))}`);
+            await sleep(5000);
+        }
         if (spec.audioOff) {
             try {
                 await window.audioContext?.suspend();

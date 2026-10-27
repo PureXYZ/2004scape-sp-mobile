@@ -1,0 +1,9 @@
+{
+    "description": "1000 bots at Lumbridge with the bots' chat model loaded and replying every 10 s (Think first) for 30 minutes, with the app's page collections (PageMemory, every 30 s) and the music's render-ahead limit (client patch 0034). Activity Monitor samples (3 s) now and then; the phone's Web Inspector can record alongside. Run with --bots 1000. 2026-10-27 (iPhone 13 mini): no kill, 181 replies; WebContent 838 MB at 15 min, 950 at 28 (the page's heap flat at about 190; the rest climbs about 3.6 MB a minute).",
+    "bots": 1000,
+    "xctrace": true,
+    "phases": [
+        { "name": "title", "where": "title", "settleSec": 10, "sec": 20, "traces": [{ "set": "am", "at": 2, "sec": 3, "tag": "-a" }] },
+        { "name": "chat-30min", "tele": "0,50,50,22,18", "waitFill": 300, "lm": { "everySec": 10, "think": true }, "settleSec": 30, "sec": 1800, "traces": [{ "set": "am", "at": 120, "sec": 3, "tag": "-a" }, { "set": "am", "at": 900, "sec": 3, "tag": "-b" }, { "set": "am", "at": 1700, "sec": 3, "tag": "-c" }] }
+    ]
+}

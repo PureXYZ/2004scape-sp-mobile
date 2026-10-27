@@ -38,6 +38,11 @@ final class BotChatModel {
     var onReply: (([String: Any]) -> Void)?
     /// The status changed (`LostCityHost.bots.lmStatus`).
     var onStatus: (([String: Any]) -> Void)?
+    /// The phone is short of memory (`memoryWarning`, with why): the app gives back what else it can (PageMemory).
+    var onMemoryWarning: ((String) -> Void)?
+    /// The on-device model is about to load (a warm-up or a request while it is not in memory): the app makes room
+    /// first (PageMemory).
+    var onWillLoad: (() -> Void)?
 
     private var inFlight = 0
     /// bumped when the page goes away (pageReset): a reply asked by an older page is dropped
@@ -147,12 +152,16 @@ final class BotChatModel {
     /// prepares its shaders, about 15 s on an iPhone 13 mini). The idle unload still applies.
     func warm() {
         guard local.available, !tooHot, memoryRefusal() == nil else { return }
+        if !local.isLoaded {
+            onWillLoad?()
+        }
         local.warmUp()
     }
 
     /// The phone is short of memory (UIKit's memory warning, or iOS announcing memory pressure): the reply being written
-    /// stops, the model is freed at once, and it rests (`memoryRest`).
+    /// stops, the model is freed at once, and it rests (`memoryRest`); the app is told (`onMemoryWarning`).
     func memoryWarning(_ why: String = "memory warning") {
+        onMemoryWarning?(why)
         local.release(reason: why)
         rest(why)
     }
@@ -319,6 +328,9 @@ final class BotChatModel {
                 Log.info("lm", "#\(id) the phone is short of memory (\(refusal)): no on-device reply")
                 reply(nil, source: nil, error: onlineError ?? "unavailable")
                 return
+            }
+            if !self.local.isLoaded {
+                self.onWillLoad?()
             }
             self.local.generate(system: localPrompt["system"] as? String ?? "", user: localPrompt["user"] as? String ?? "", think: think, deadline: deadline) { result in
                 self.inFlight -= 1

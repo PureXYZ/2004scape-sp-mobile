@@ -1,0 +1,13 @@
+{
+    "description": "The app's collections of the page's heap (PageMemory, ARCHITECTURE.md §7.7) as an A/B: none, every 30 s, every 10 s, none again, at Lumbridge with the bots in, then every 30 s with the chat model loaded and replying every 10 s. Activity Monitor samples (3 s) twice a window; the phone's Web Inspector (Memory categories: 'javascript' is the page's heap; e.g. through pymobiledevice3) can record each window alongside. Run with --bots 1000. Measured 2026-10-27 (iPhone 13 mini): WebContent's median 776 / 742 / 739 / 804 MB, the page's heap 274 / 222 / 206 / 260.",
+    "bots": 1000,
+    "xctrace": true,
+    "phases": [
+        { "name": "title", "where": "title", "settleSec": 10, "sec": 20, "traces": [{ "set": "am", "at": 2, "sec": 3, "tag": "-a" }] },
+        { "name": "gc-off", "tele": "0,50,50,22,18", "waitFill": 300, "pageGcEverySec": 0, "settleSec": 30, "sec": 240, "traces": [{ "set": "am", "at": 100, "sec": 3, "tag": "-a" }, { "set": "am", "at": 220, "sec": 3, "tag": "-b" }] },
+        { "name": "gc-30", "pageGcEverySec": 30, "settleSec": 10, "sec": 240, "traces": [{ "set": "am", "at": 100, "sec": 3, "tag": "-a" }, { "set": "am", "at": 220, "sec": 3, "tag": "-b" }] },
+        { "name": "gc-10", "pageGcEverySec": 10, "settleSec": 10, "sec": 240, "traces": [{ "set": "am", "at": 100, "sec": 3, "tag": "-a" }, { "set": "am", "at": 220, "sec": 3, "tag": "-b" }] },
+        { "name": "gc-off-2", "pageGcEverySec": 0, "settleSec": 10, "sec": 240, "traces": [{ "set": "am", "at": 100, "sec": 3, "tag": "-a" }, { "set": "am", "at": 220, "sec": 3, "tag": "-b" }] },
+        { "name": "lm-gc-30", "pageGcEverySec": 30, "lm": { "everySec": 10, "think": true }, "settleSec": 5, "sec": 300, "traces": [{ "set": "am", "at": 100, "sec": 3, "tag": "-a" }, { "set": "am", "at": 250, "sec": 3, "tag": "-b" }] }
+    ]
+}

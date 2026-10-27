@@ -407,6 +407,13 @@ async function main() {
         env.heap = () => mb(heap());
         const row = await runBotsMeasure(env, env.measure);
         print('[jsc] MEASURE ' + JSON.stringify({ js: `JavaScriptCore${typeof WebAssembly === 'object' ? '' : ' without JIT and WASM'} (heap = gcHeapSize)`, ...row }));
+        // --snap=<file>: a heap snapshot after the run (generateHeapSnapshot(), the Web Inspector's format; memory attribution)
+        const snap = (args.find(a => a.startsWith('--snap=')) ?? '').slice(7);
+        if (snap) {
+            fullGC();
+            writeFile(snap, JSON.stringify(globalThis.generateHeapSnapshot()));
+            print(`[jsc] snapshot ${snap} (heap ${mb(gcHeapSize())} MB)`);
+        }
         quit(0);
     }
     if (BOTS_BOOT) {

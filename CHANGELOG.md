@@ -5,6 +5,13 @@ with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
 ## [Unreleased]
 
+- **The game uses less memory, so a crowded world with the bots' chat model is less likely to be cut short.** On an
+  iPhone, the app now has WebKit tidy the game page's memory every 30 seconds while you play, and at once when the
+  phone runs short or the chat model is about to load. With 1000 bots on an iPhone 13 mini that is about 35-60 MB less
+  most of the time, and up to about 180 MB freed when it counts. And on both phones the music no longer renders a
+  whole song the moment it starts: it stays about 20 s ahead of what is playing, which keeps 10-45 MB less in memory
+  on average (up to about 160 MB less around a song change). The music sounds the same, except right after a quick
+  song change: a new song now always starts clean, where before a few notes of the old one could carry over.
 - **Fixed: the screen could flash black, or the game restart, while chatting with the bots.** With many bots online
   (1000 on an iPhone 13 mini) and the on-device chat model loaded, the phone ran short of memory: iOS ended WebKit's
   drawing process (the whole screen black for a moment) or the game's own (the game reloaded). The chat model let go

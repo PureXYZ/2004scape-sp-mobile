@@ -616,7 +616,8 @@ iOS announced). Meanwhile its requests answer `'unavailable'` at once, the warm-
 player in the chat (`bots-lm-notice`). A warning during a rest starts it again. Measured on an iPhone 13 mini with 1000
 bots (2026-10-27): with the model loaded again 12 s after a memory warning, the next warning came 26 s later and iOS
 ended the game's WebContent process 0.2 s after it (the page reloaded); before that iOS had ended WebKit's GPU process
-twice (the whole screen black for a moment). Claude online is not affected. At most 3 requests run at a time (the model
+twice (the whole screen black for a moment). The app also collects the page's heap on a warning and before a load
+(§7.7). Claude online is not affected. At most 3 requests run at a time (the model
 generates one at a time on its own queue; the others wait); a fourth is answered `'busy'` at once. Each request has the
 page's `timeoutMs` (9 s) in all.
 
@@ -909,6 +910,21 @@ where nothing listens and, with `ENGINE_URL`, a local Engine-TS), with the debug
 web/test/online/serverurl-vectors.json, the page's own test file) and `purge-passwords` (the launch's sweep), and the
 built app's `NSAllowsArbitraryLoads` and `NSLocalNetworkUsageDescription` (drive.mjs reads its Info.plist: the test
 servers are IP literals, which ATS does not cover) (ios/LostCity/README.md).
+
+### 7.7 The page's JavaScript heap (iOS: `PageMemory`)
+
+WebKit lets a JavaScript heap grow to about twice what is alive in it before it collects it in full, and the page's
+heap (the client's; the engine worker has its own) holds garbage that outlives WebKit's quick young collections. On an
+iPhone 13 mini at Lumbridge with 1000 bots (2026-10-27, read through the phone's Web Inspector) 180 MB of it was alive
+and it reached up to 390 MB; one full collection gave back 182 MB of the game's WebContent process at once (a full
+collection of the engine worker's heap gave back only 10-20 MB). So the app collects the page's heap itself: every 30 s
+while the player is in the world and the app is active (WebContent's median 776 -> 742 MB, the page's heap 274 -> 222;
+frames over 25 ms 7 -> 9 in 4 minutes), and at once on a memory warning or memory pressure (`BotChatModel.onMemoryWarning`,
+with the chat model's own rest, §7.1) and just before the bots' chat model loads (`onWillLoad`: a warm-up, or a request
+while it is not in memory). WebKit has no public call for it: `PageMemory` uses WKProcessPool's
+`_garbageCollectJavaScriptObjectsForTesting` (each web process's main-thread VM), looked up at run time; a WebKit without
+it is left alone (logged once). Not on Android (WebView has no such call; V8 sizes its heap differently). Debug hooks:
+`page-gc` (one collection), `page-gc-every` (`{sec}`: the timer's period, 0 = off; the soak option `pageGcEverySec`).
 
 ## 8. World configuration (engine `data/config/world.json` in the VFS)
 
