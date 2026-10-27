@@ -58,6 +58,13 @@ class KeyboardBridgeTest {
             calls += "cancellable:$cancellable"
         }
 
+        /** The Remember box as the bar shows it (null: none). */
+        var shownRemember: Boolean? = null
+
+        override fun setRemember(on: Boolean?) {
+            shownRemember = on
+        }
+
         override fun flashRejected() {
             flashes += 1
         }
@@ -779,5 +786,51 @@ class KeyboardBridgeTest {
         assertEquals(JsonPrimitive("system keyboard"), state["inputView"])
         assertTrue((state["requested"] as JsonPrimitive).content.toBoolean())
         assertEquals(JsonObject::class, state::class)
+    }
+
+    // ------------------------------------------------------------------------------------------------ Remember (online)
+
+    private fun keyboard(action: String, kind: String? = null, remember: Boolean? = null, text: String? = null) {
+        bridge.handle(buildJsonObject {
+            put("type", JsonPrimitive("keyboard"))
+            put("action", JsonPrimitive(action))
+            kind?.let { put("kind", JsonPrimitive(it)) }
+            text?.let { put("text", JsonPrimitive(it)) }
+            remember?.let { put("remember", JsonPrimitive(it)) }
+        })
+    }
+
+    @Test
+    fun rememberBoxForAServersPasswordOnly() {
+        inFront()
+        keyboard("show", kind = "login-pass", remember = false)
+        assertEquals(false, surface.shownRemember)
+        assertEquals(false, bridge.remember)
+        // a tap: the bar flips it at once, the page hears it
+        bridge.rememberTapped(true)
+        assertEquals(true, bridge.remember)
+        assertEquals(listOf("remember(true)"), calls().filter { it.startsWith("remember") })
+        // an update without remember leaves it; the page's next remember wins
+        keyboard("update", text = "abc")
+        assertEquals(true, bridge.remember)
+        keyboard("update", remember = false)
+        assertEquals(false, surface.shownRemember)
+        // no box for the username, nor for a password without remember (offline)
+        keyboard("show", kind = "login-user", remember = true)
+        assertNull(surface.shownRemember)
+        assertNull(bridge.remember)
+        bridge.rememberTapped(true)
+        assertTrue("no box: a tap does nothing", calls().none { it.startsWith("remember") })
+        keyboard("show", kind = "login-pass")
+        assertNull(surface.shownRemember)
+        keyboard("show", kind = "login-pass", remember = true)
+        assertEquals(true, surface.shownRemember)
+        assertEquals(JsonPrimitive(true), bridge.debugState()["remember"])
+        // hidden with the keyboard, and gone after a page reset
+        keyboard("hide")
+        assertNull(bridge.remember)
+        keyboard("show", kind = "login-pass", remember = true)
+        bridge.reset()
+        assertNull(bridge.remember)
     }
 }

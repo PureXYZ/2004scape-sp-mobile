@@ -24,6 +24,8 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -42,6 +44,9 @@ class GameActivity : ComponentActivity() {
     var presentedDialog: String? = null
         private set
 
+    /** The system's permission prompt (registered before the activity starts, as the API wants); who waits for it is the session's. */
+    private lateinit var permissionPrompt: ActivityResultLauncher<String>
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -57,6 +62,11 @@ class GameActivity : ComponentActivity() {
             addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> applyGestureExclusion() }
         }
         setContentView(root)
+        permissionPrompt = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val result = session.permissionResult
+            session.permissionResult = null
+            result?.invoke(granted)
+        }
 
         applyIntent(intent)
         session.attach(this, root)
@@ -146,6 +156,19 @@ class GameActivity : ComponentActivity() {
     /** Remembers a dialog this activity shows, for the debug hooks (the bot chat track's key dialog). */
     fun presenting(dialog: Dialog?) {
         presentedDialog = dialog?.javaClass?.simpleName
+    }
+
+    /**
+     * Asks the system for a runtime permission (online mode: Android 17's local network, OnlineComponent); `result` gets
+     * the answer. One prompt at a time; a second ask while one is up is answered false.
+     */
+    fun requestPermission(permission: String, result: (Boolean) -> Unit) {
+        if (session.permissionResult != null) {
+            result(false)
+            return
+        }
+        session.permissionResult = result
+        permissionPrompt.launch(permission)
     }
 
     /** In the world: both side edges belong to the game, not the back gesture. */

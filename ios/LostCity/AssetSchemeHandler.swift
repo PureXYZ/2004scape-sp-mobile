@@ -12,7 +12,8 @@ import WebKit
 /// | GET             | `/save-index`      | JSON `[{path, size, modified}]` of everything under Documents     |
 /// | POST/PUT        | `/log`             | body = UTF-8 line(s) → native log (for workers) → 204             |
 ///
-/// Every response carries `Cache-Control: no-store`. Invalid save paths get 400.
+/// Every response carries `Cache-Control: no-store`. Invalid save paths get 400. While the page load plays on a server,
+/// `/crc`, the archives and `/ondemand/…` are that server's (`OnlineProxy`, which also answers `/server-probe`).
 ///
 /// Threading: WebKit calls `start`/`stop` on the main thread. All file IO runs off the main thread
 /// and the response is handed back to the task on the main thread. The main thread must never
@@ -36,12 +37,14 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
     nonisolated static let indexURL = URL(string: "\(scheme)://\(host)/index.html")!
 
     private let router: Router
+    private let online: OnlineProxy
     private var tasks: [UInt64: any WKURLSchemeTask] = [:]
     private var tokens: [ObjectIdentifier: UInt64] = [:]
     private var nextToken: UInt64 = 0
 
-    init(bundleRoot: URL, saveStore: SaveStore) {
+    init(bundleRoot: URL, saveStore: SaveStore, online: OnlineProxy) {
         router = Router(bundleRoot: bundleRoot, saves: saveStore)
+        self.online = online
     }
 
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
@@ -52,9 +55,10 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
 
         let request = Request(urlSchemeTask.request)
         let router = self.router
+        let online = self.online
         Task.detached(priority: .userInitiated) {
             let started = ContinuousClock.now
-            let reply = router.handle(request)
+            let reply = await online.handle(request) ?? router.handle(request)
             let delivered = await self.deliver(reply, token: token, request: request)
             if Log.verbose || reply.status >= 400 {
                 let elapsed = (ContinuousClock.now - started).milliseconds

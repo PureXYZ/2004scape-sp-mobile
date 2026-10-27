@@ -167,6 +167,8 @@ node android/test/keyboard.mjs --serial emulator-5554          # Gboard and hard
 node android/test/shell.mjs --serial emulator-5554             # haptics, audio focus (the ringer ignored), the launch cover vs the page, Files, the icon
 node android/test/lm.mjs --serial emulator-5554                # the chat model in the app: replies, the key's box, Claude against a mock, thermal, unloads; R8 release; no model
 node android/test/crisp.mjs --serial emulator-5554             # the pixel snap on the screen itself: sprites, fonts and borders on whole device pixels
+node android/test/online.mjs --engine <dir> --node-bin <dir>   # online mode in the real app, against a local Engine-TS through adb reverse
+ENGINE_URL=http://127.0.0.1:47640 node android/test/drive.mjs --online   # the native layer's online checks (the stub, the engine)
 node android/test/native/lm-harness.mjs                        # the bot chat code on the Mac's JVM with the real model and a mock of Claude's API
 node web/test/e2e.mjs --platform android                       # the page as the Android app runs it, in desktop Chrome
 node web/test/hud.mjs --platform android                       # the HUD on Android screens at their real pixel ratios
@@ -193,4 +195,4 @@ A Pixel 10 (2424×1080 at 420 dpi: a device pixel ratio of 2.625, its camera hol
 crisp pixel snap: every HUD pixel and game pixel 3×3 device pixels, about 808×360 of world, the HUD clear of the camera
 hole. On a real phone, check what the emulator cannot show: Gboard's height in landscape (and other keyboards, voice
 typing), the key box's layout, the haptics' strength, the chat model's speed, memory and the thermal threshold, and
-`node android/test/crisp.mjs --serial <serial>` on the phone's own screen ([docs/ANDROID.md](../docs/ANDROID.md#8-not-yet-verified-on-a-phone)).
+`node android/test/crisp.mjs --serial <serial>` on the phone's own screen ([docs/ANDROID.md](../docs/ANDROID.md#9-not-yet-verified-on-a-phone)).

@@ -18,6 +18,15 @@ export interface LcHostKeyboard {
     isShown(): boolean;
 }
 
+// Online (docs/ONLINE.md): the game server the page plays on; null offline.
+export interface LcHostServer {
+    id?: string;
+    url?: string;
+    nodeId?: number;
+    members?: boolean;
+    rsa?: { n: string; e: string } | null; // its login key, decimal; null: the build-time key
+}
+
 export interface LcHost {
     keyboard?: LcHostKeyboard;
     haptic?(style: HapticStyle): void;
@@ -25,6 +34,8 @@ export interface LcHost {
     settings?: LcHostSettings;
     onClientEvent?(name: string, detail?: unknown): void;
     platform?: string;
+    server?: LcHostServer | null;
+    openSocket?(purpose: string): WebSocket | null;
 }
 
 export function lcHost(): LcHost | null {
@@ -88,6 +99,42 @@ export function lcKeyboard(): LcHostKeyboard | null {
         const kb = lcHost()?.keyboard;
         return kb && typeof kb.show === 'function' && typeof kb.hide === 'function' ? kb : null;
     } catch {
+        return null;
+    }
+}
+
+// Online: the game server the page plays on (LocalOnDemand fetches from it what the bundled cache does not hold);
+// null offline, and without a host.
+export function lcServer(): LcHostServer | null {
+    try {
+        const server = lcHost()?.server;
+        return server && typeof server === 'object' ? server : null;
+    } catch {
+        return null;
+    }
+}
+
+// Online: the server's login key as BigInts (patch 30), from lcHost.server.rsa; null offline and for a server with
+// no key of its own, when the client uses the build-time key.
+export function lcLoginKey(): { n: bigint; e: bigint } | null {
+    try {
+        const rsa = lcServer()?.rsa;
+        if (rsa && typeof rsa.n === 'string' && typeof rsa.e === 'string' && /^\d+$/.test(rsa.n) && /^\d+$/.test(rsa.e)) {
+            return { n: BigInt(rsa.n), e: BigInt(rsa.e) };
+        }
+    } catch (e) {
+        console.error(e);
+    }
+    return null;
+}
+
+// Online: a socket to the game server through the host (its socket bridge, for LocalOnDemand's remote files); null
+// offline. It opens like a WebSocket: 'open', then 'message's, or 'error' and 'close'.
+export function lcOpenSocket(purpose: string): WebSocket | null {
+    try {
+        return lcHost()?.openSocket?.(purpose) ?? null;
+    } catch (e) {
+        console.error(e);
         return null;
     }
 }

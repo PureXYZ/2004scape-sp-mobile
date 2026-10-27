@@ -67,10 +67,44 @@ function spyClicks(client) {
     });
 }
 
+// od=fallback (online=1): one animation file is taken out of the bundled cache (its idx entry zeroed) and handed to
+// the stub OnDemand server instead (stub-host.js), so LocalOnDemand's remote fallback must fetch it before the title.
+// The file: the first animation (archive 1, idx2) from ODFILE on with more than 1,000 bytes (several 500-byte parts on
+// the wire). Its raw bytes (gzip data and the 2-byte version trailer) are read like LocalOnDemand.readFile: 6-byte idx
+// entries, 520-byte sectors.
+const ODFILE = 5;
+function takeOutAnimation(cache) {
+    const idx = cache.idx[2];
+    const dat = cache.dat;
+    for (let file = ODFILE; file < idx.length / 6; file++) {
+        const p = file * 6;
+        const size = (idx[p] << 16) | (idx[p + 1] << 8) | idx[p + 2];
+        let sector = (idx[p + 3] << 16) | (idx[p + 4] << 8) | idx[p + 5];
+        if (size <= 1000 || sector <= 0) {
+            continue;
+        }
+        const out = new Uint8Array(size);
+        for (let pos = 0; pos < size; ) {
+            const s = sector * 520;
+            const n = Math.min(512, size - pos);
+            out.set(dat.subarray(s + 8, s + 8 + n), pos);
+            pos += n;
+            sector = (dat[s + 4] << 16) | (dat[s + 5] << 8) | dat[s + 6];
+        }
+        idx.fill(0, p, p + 6);
+        T.odServerFiles.set(`1.${file}`, out);
+        T.rec('od-taken-out', { archive: 1, file, size });
+        return;
+    }
+}
+
 if ((params.get('mode') ?? 'engine') === 'engine') {
     bootEngine();
 }
 await loadCache();
+if (params.get('od') === 'fallback') {
+    takeOutAnimation(globalThis.__LC_CACHE__);
+}
 const { Client } = await import('../client/client.js');
 T.rec('client-imported', { ms: ms() });
 const client = new Client(10, 0, true);

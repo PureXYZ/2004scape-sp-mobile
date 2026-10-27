@@ -241,6 +241,30 @@ node web/test/perf/perf.test.mjs          # the soak tooling below (configs, sum
 Screenshots and logs go to `build/tmp/`. The bots' own test tools (the world simulator, the humanlike report) are
 described in [BOTS.md](BOTS.md#7-tests).
 
+### Online mode
+
+The online tests ([ONLINE.md](ONLINE.md)) run against a Lost City server on this computer, never an official one.
+`web/test/online/engine.mjs` keeps its own copy of the upstream engine and content (APFS clones, made the first time)
+and starts each variant from a `data/config/world.json` of its own; the engine's worker threads need an up-to-date Node
+24 (24.3 cannot load them: logins never answer), given with `--engine-node <folder with node>`. One engine at a time: it
+takes about 0.5 GB.
+
+```sh
+node web/test/serve.mjs --check                        # also the desktop double of native: proxy routes, probe, bridge (stub servers)
+node web/test/serve.mjs --server http://127.0.0.1:80   # play online in a desktop browser through the double (--platform android)
+node web/test/e2e.mjs --engine build/tmp/online-server --engine-node <dir>   # end to end against the engine and its variants:
+#   stock, down, login (passwords), key (its own login key), full, origin (a refused upgrade), silent (a server that
+#   never answers the login: web/test/online/silent.mjs), production, drift (other game data, a repacked copy:
+#   web/test/online/drift.mjs); --only <groups>, --platform android, --server <url> (a server already running: stock
+#   and down only)
+node web/client/test/run.mjs --quick                   # its last section: the login key, a failed socket, the OnDemand fallback
+node web/test/gallery/gallery.mjs --only title-world,title-online,title-online-accounts,worlds,worlds-probe,worlds-same-server,accounts,unreachable,settings-world-online,chat-report,chat-report-panel
+```
+
+The online e2e writes to `build/tmp/e2e-online/` (`-android`): screenshots, the double's log (`app.log`: sockets with
+their hosts and codes, proxy fetches, never contents), what the page posted to native (`posted.json`, passwords
+blanked) and the engine's log.
+
 ### In the iPhone app
 
 ```sh
@@ -250,6 +274,13 @@ node web/test/app-test.mjs --device                # the connected iPhone
 node web/test/app-test.mjs --device --bots 25      # with 25 bots, measured
 node web/test/app-test.mjs --device --lm-bench     # the on-device model under load with 500 bots (about 45 min; --lm-think: with the note)
 node web/test/native/drive.mjs                     # the native layer on the simulator, with a test page (ios/LostCity/README.md)
+node web/test/native/drive.mjs --online            # its online phases: the proxy, the socket bridge, the probe, the Keychain, the boxes
+node web/test/app-test.mjs --server http://127.0.0.1:47620 --engine build/tmp/online-server --engine-node <dir>
+#   online mode in the app against a local engine it starts and stops itself (Online mode above): the server added
+#   through the box and its probe, a password login with Remember, a walk, a Banker and the bank, the background 5, 25,
+#   45 and 70 s around the server's limits, WebContent killed, "Continue as" from the Keychain, to the phone's world and
+#   back, the server stopped (the unreachable box, Play offline), a content-drift server (its files cached, the next
+#   launch from the cache); --server alone: a server already running (no stop or drift)
 ```
 
 The in-app test builds a self-playing variant and plays through boot, the native keyboard's login, a walk, saves,
@@ -324,10 +355,21 @@ disconnects about a second in), `--no-summary`, `--sim "<name>"` (a simulator of
 (cd android && ./gradlew :app:lintDebug)
 node android/test/all.mjs --serial emulator-5554                 # every device test from one build (--quick: build, JVM, smoke)
 node android/test/app-test.mjs --serial emulator-5554 --soak render   # a soak (above), sampled on the device itself
+# online mode (an emulator; the server on this computer through adb reverse, never an official one):
+node android/test/online.mjs --engine build/tmp/online-server --node-bin <dir>   # the real app: Add server, a password
+#   login with Remember, play, the background around the server's limits, a renderer crash and Continue as, back
+#   offline, Android 17's local network permission (--server <url>: an engine already running)
+ENGINE_URL=http://127.0.0.1:47640 node android/test/drive.mjs --online   # the native layer's online checks (iOS's drive --online)
+node android/test/app-test.mjs --server http://127.0.0.1:47620 --engine build/tmp/online-server --engine-node <dir>
+#   the iPhone's app-test --server run in the Android app (In the iPhone app above), the engine's ports through adb
+#   reverse; the renderer is crashed through its DEBUG hook where the simulator's WebContent is killed
+node android/test/shell.mjs --only cover                          # the cover against the page, the online caption too
 ```
 
 The individual device tests (`smoke.mjs`, `keyboard.mjs`, `shell.mjs`, `lm.mjs`, `crisp.mjs`, `drive.mjs`,
-`app-test.mjs`) and the instrumented tests are listed in [ANDROID.md](ANDROID.md#7-tests).
+`app-test.mjs`, `online.mjs`) and the instrumented tests are listed in [ANDROID.md](ANDROID.md#8-tests). `drive.mjs` and
+`app-test.mjs --build-only` build their test APKs without a device, and `all.mjs --prebuilt` then runs with no Gradle
+beside the emulator.
 
 ## 5. Upstream sources and the client patches
 

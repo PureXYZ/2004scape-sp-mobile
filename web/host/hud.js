@@ -11,7 +11,7 @@
 //     that tab's panel out beside the column, a tap on the open tab closes it. A side modal (bank, shop, trade...) opens the panel
 //     by itself at the right edge, and the minimap, orbs and column give way to it;
 //   - bottom left: the newest chat lines over the world above the tap-to-drop, keyboard and chat buttons; the full
-//     chatbox (and the 2004 chat filter buttons under it) opens on a tap, and by itself for a dialogue, the tutorial's
+//     chatbox (and the 2004 chat filter buttons under it, online Report abuse too) opens on a tap, and by itself for a dialogue, the tutorial's
 //     instructions, an amount/name prompt or typed chat. Tap-to-drop is OSRS mobile's: while it is on (the button red),
 //     the inventory panel's frame is red and a tap on an item there drops it; in the bank the inventory beside it is
 //     framed red too, and a tap there deposits all of the item.
@@ -44,7 +44,8 @@
     const STATS_TAB = 1;
     const INVENTORY_TAB = 3;
     const PRAYER_TAB = 5;
-    const CHAT_MODE_CENTRE = [[56, 483], [185, 483], [323, 483]]; // public, private, trade (not Report abuse: offline)
+    // public, private, trade and Report abuse (its button shows online only: in a world of one there is nobody to report)
+    const CHAT_MODE_CENTRE = [[56, 483], [185, 483], [323, 483], [462, 483]];
     const CHAT_MODE_VALUES = [
         ['On', 'Friends', 'Off', 'Hide'],
         ['On', 'Friends', 'Off'],
@@ -136,6 +137,7 @@
         el.rose = el['btn-compass'].querySelector('.compass-rose');
         el.tabs = [...el['hud-tabs'].querySelectorAll('.tab[data-tab]')];
         el.chatModes = [...el['hud-chat-modes'].querySelectorAll('.chat-mode')];
+        document.getElementById('btn-report').hidden = api.online !== true;
 
         for (const tab of el.tabs) {
             const index = Number(tab.dataset.tab);

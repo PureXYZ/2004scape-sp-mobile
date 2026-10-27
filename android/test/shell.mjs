@@ -12,8 +12,9 @@
 //             a stored soundMode 'ambient' and the ringer on silent or vibrate (cmd audio set-ringer-mode) change nothing;
 //             a call (emulator: adb emu gsm call) takes the focus and mutes, and its end brings both back
 //   cover     the native loader against the page's own, pixel by pixel (a copy of #loading under DEBUG overlay
-//             `loading`), then a cold launch filmed by screencaps: the launch screen black with no icon, the last frame
-//             of the cover against the first of the page; the error screen and a notice
+//             `loading`), also with online mode's caption ("… · online", as a page load on a server has it), then a cold
+//             launch filmed by screencaps: the launch screen black with no icon, the last frame of the cover against
+//             the first of the page; the error screen and a notice
 //   provider  the DocumentsProvider over adb `content` (an outside caller: root, listing, read, write → .bak, unchanged
 //             writes skipped, hidden files) and DEBUG `documents` (create, rename, copy, move, delete as the Files app)
 //   files     the system Files app (DocumentsUI) at the 2004Scape root: players/main/<name>.sav listed; a save written
@@ -327,6 +328,33 @@ try {
         check('cover: the logo matches but for its nearest-neighbour phase (under 2 % of its box)', diffs.logo.differing / diffs.logo.pixels < 0.02, `${diffs.logo.differing}/${diffs.logo.pixels}`);
         check('cover: nothing differs outside the loader', diffs.screen.differing === diffs.loader.differing, `${diffs.screen.differing} on screen, ${diffs.loader.differing} in the loader`);
 
+        // 1b. online mode's caption: the page's "· online" (its inline script sets it for a page load on a server) against
+        //     the cover's for such a load (DEBUG overlay `online`, as GameSession.loadGame sets it from the settings)
+        await page.eval(`(() => { document.getElementById('lc-loader-copy')?.remove();
+            const l = document.getElementById('loading').cloneNode(true); l.id = 'lc-loader-copy'; l.hidden = false; l.classList.remove('fade');
+            l.style.background = '#000'; l.style.transition = 'none'; l.querySelectorAll('[id]').forEach(e => e.removeAttribute('id'));
+            document.body.appendChild(l);
+            const f = l.querySelector('.loading-fill'); f.style.transition = 'none'; f.style.width = '6%';
+            l.querySelector('.loading-text').textContent = 'Loading - please wait.';
+            l.querySelector('.loading-sub').textContent = '2004Scape · November 2004 · online'; })()`);
+        await sleep(700);
+        const pageOnline = screencap(d);
+        await debug('overlay', { mode: 'loading', online: true });
+        await sleep(700);
+        const coverOnline = screencap(d);
+        const uiOnline = await debug('ui-state');
+        await debug('overlay', { mode: 'hide', online: false });
+        await page.eval(`document.getElementById('lc-loader-copy')?.remove()`);
+        const online = {};
+        for (const name of ['loader', 'bar', 'caption']) online[name] = compare(pageOnline, coverOnline, regions[name]);
+        results.measures.coverOnlineDiff = online;
+        writePng(path.join(OUT, 'cover-online-page.png'), crop(pageOnline, regions.loader));
+        writePng(path.join(OUT, 'cover-online-native.png'), crop(coverOnline, regions.loader));
+        writePng(path.join(OUT, 'cover-online-diff.png'), diffImage(pageOnline, coverOnline, regions.loader));
+        check('cover online: the caption says "2004Scape · November 2004 · online" and matches the page\'s (at most 1/255 off); the bar still pixel for pixel',
+            uiOnline?.overlayLayout?.captionText === '2004Scape · November 2004 · online' && online.caption.maxDelta <= 1 && online.bar.differing === 0,
+            `${uiOnline?.overlayLayout?.captionText}; caption ${online.caption.differing} px max ${online.caption.maxDelta}, bar ${online.bar.differing}/${online.bar.pixels}`);
+
         // 2. a cold launch, filmed: the launch screen (black, no icon) until the cover
         const film = await filmLaunch();
         results.measures.launchFilm = film.summary;
@@ -582,10 +610,14 @@ function logTime(lines, pattern) {
 async function filmHandover(regions) {
     d.clearLog();
     const camera = startCamera();
-    await sleep(200);
-    await debug('reload');
-    await sleep(6500);
-    await camera.stop();
+    try {
+        await sleep(200);
+        // (the reply can lose the race with the reload it starts: "Inspected target navigated or closed")
+        await debug('reload').catch(() => null);
+        await sleep(6500);
+    } finally {
+        await camera.stop();
+    }
     const lines = d.log();
     const covered = logTime(lines, /the cover stays \d+ ms \(cover-hold\)/);
     const uncovered = logTime(lines, /the page's loader is drawn: uncovering/);

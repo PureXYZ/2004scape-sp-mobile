@@ -19,6 +19,12 @@
 //   LCTEST INFO lm-bench {...}          (app-test --lm-bench) a sample of the on-device chat model's bench, every 10 s
 //   LCTEST INFO lm-bench-summary {...}  its summary per phase, before the gate's PASS/FAIL lines
 //   LCTEST DONE pass=<n> fail=<m>
+// With app-test --server (autotest.json {online: …}: below, "online mode") the run plays on a game server instead:
+//   LCTEST ACTION kill-webcontent       driver kills the app's WebContent process (the simulator; on Android the page
+//                                       crashes its renderer itself through the DEBUG hook renderer-crash)
+//   LCTEST ACTION server stop           (app-test --engine) driver stops the local engine
+//   LCTEST ACTION server start drift    (app-test --engine) driver starts the content-drift copy
+//   LCTEST ACTION relaunch              driver launches the app again (the next step comes from localStorage)
 // With app-test --soak (a soak of web/test/perf/, sent at launch: below, "soak") the run measures phases instead of the
 // checks after the login:
 //   LCTEST INFO soak-startup {...}      this launch's start-up marks
@@ -1593,9 +1599,568 @@
         await sleep(300);
     }
 
+    // ---- online mode (app-test --server, docs/ONLINE.md: autotest.json {online: {url, drift, control, passwords,
+    // driftFiles}}). The run adds the server through the Add server box and its probe and plays there, through the same
+    // native keyboard as offline; it goes on across reloads, a WebContent kill and (the drift server) a second launch, its
+    // step in localStorage (sessionStorage does not outlive a launch). With control (app-test --engine) the driver also
+    // stops the server (ACTION server stop) and starts the content-drift copy (ACTION server start drift).
+    const ONLINE_KEY = 'lctest.online';
+    const CAPTION = mode => `2004Scape · November 2004 · ${mode}`;
+    const LOGOUT_TAB = [649, 484]; // (host.js logOutCleanly: the Logout tab, then its button, classic coordinates)
+    const LOGOUT_BUTTON = [553 + 94, 205 + 170];
+    // (the platform's words: the iOS run kills WebContent and native keeps passwords in the Keychain; the Android run
+    // crashes the WebView's renderer, and the Keystore keeps them)
+    const ANDROID_RUN = window.LostCityNative?.platform === 'android';
+    const WEB_PROCESS = ANDROID_RUN ? 'the renderer' : 'WebContent';
+    const KEPT_IN = ANDROID_RUN ? 'the Keystore' : 'the Keychain';
+    // what the page asked native for (sockets by purpose) and what LocalOnDemand stored, since this page loaded
+    const onlineSeen = { sockets: [], stored: [] };
+
+    function onlineState() {
+        try {
+            return JSON.parse(localStorage.getItem(ONLINE_KEY) ?? 'null');
+        } catch {
+            return null;
+        }
+    }
+
+    function nextOnlineStep(step, extra = {}) {
+        localStorage.setItem(ONLINE_KEY, JSON.stringify({ ...onlineState(), ...extra, step, pass, fail }));
+    }
+
+    // The sockets the page opens (lcHost.openSocket: LocalOnDemand's) and its OnDemand PUTs, seen from the page.
+    function watchOnline() {
+        const host = window.lcHost;
+        if (host && typeof host.openSocket === 'function' && !host.__lctestWrapped) {
+            const open = host.openSocket;
+            host.openSocket = purpose => {
+                onlineSeen.sockets.push(purpose);
+                return open(purpose);
+            };
+            host.__lctestWrapped = true;
+        }
+        const pageFetch = window.fetch;
+        window.fetch = (input, init) => {
+            const url = String(input?.url ?? input);
+            if (init?.method === 'PUT' && /(^|\/)ondemand\/\d\/\d+$/.test(url)) {
+                onlineSeen.stored.push(url.replace(/^.*ondemand\//, ''));
+            }
+            return pageFetch(input, init);
+        };
+    }
+
+    const titleUp = mode => c()?.lastProgressPercent === 100 && !!c()?.titleFlames && !c().ingame && document.getElementById('loading')?.hidden === true && window.LostCityHost?.engineState === (mode === 'online' ? 'remote' : 'ready');
+    const shown = id => document.getElementById(id)?.hidden === false;
+    const text = id => document.getElementById(id)?.textContent ?? null;
+    const inWorld = () => c()?.ingame === true && !c().reconnecting && position() !== null && c().sceneState === 2;
+    const loginWords = () => `${c()?.loginMes1 ?? ''} / ${c()?.loginMes2 ?? ''}`;
+
+    async function onlineTitle(mode, timeoutMs = 90000) {
+        const up = await waitFor(() => titleUp(mode), timeoutMs);
+        const native = await debug('online-state');
+        out(`INFO online: the title (${mode}) ${Math.round(performance.now())} ms after navigation`);
+        return { ok: up.ok, ms: Math.round(performance.now()), native, caption: text('loading-sub'), world: text('world-name') };
+    }
+
+    // The worlds sheet's Add server: native's box (filled and OK'd through its DEBUG hook, as the player would type), then
+    // the page's probe of that address. True when the probe says Ready (Use on).
+    async function addServer(url, name) {
+        tapElement(document.getElementById('btn-world'));
+        await waitFor(() => shown('worlds'), 3000);
+        document.querySelector('#worlds-list .add-server')?.click();
+        await sleep(1200);
+        await shot(`online-add-server-${name.toLowerCase()}`);
+        let box = null;
+        for (let i = 0; i < 10 && !box?.shown; i++) {
+            box = await debug('server-alert', { address: url.replace(/^http:\/\//, ''), name, button: 'ok' });
+            if (!box?.shown) {
+                await sleep(500);
+            }
+        }
+        check(`Add server (${name}): native's box asks for the address and a name (its title, empty fields, the placeholders)`, box?.shown === true && box.title === 'Add a server' && box.address === '' && box.name === '' && box.placeholders?.[0] === '192.168.1.20 or my-mac.local:8888' && box.placeholders?.[1] === 'Optional', JSON.stringify(box));
+        const address = url.replace(/^http:\/\//, '');
+        const probed = await waitFor(() => shown('worlds-probe') && text('probe-address') === address && text('probe-status') !== 'Checking…', 20000);
+        const use = !document.getElementById('probe-use').disabled;
+        check(`...the page probes it through native (/server-probe): "${text('probe-status')}", Use on`, probed.ok && /^Ready/.test(text('probe-status')) && use, JSON.stringify({ address: text('probe-address'), notes: text('probe-notes') }));
+        await shot(`online-probe-${name.toLowerCase()}`);
+        return probed.ok && use;
+    }
+
+    // A login on the title through the native keyboard: New User or Existing User, the name, the "Log in" key (online: on to
+    // the password field), the Remember box tapped to `remember` (null: as it comes), the password, "Log in". Resolves with
+    // what the keyboard showed, once in the world or once the form says why not.
+    async function onlineLogin(name, password, { newUser = false, remember = null } = {}) {
+        clickGame(newUser ? 302 : 462, 291);
+        const form = await waitFor(() => c().loginscreen === 2 && window.lcHost.keyboard.isShown(), 5000);
+        await sleep(600);
+        const hint = [c().loginMes1, c().loginMes2];
+        const userKb = await keyboardState();
+        await debug('type', { text: name });
+        await waitFor(() => c().loginUser === name, 3000);
+        await debug('bar', { button: 'submit' });
+        const toPassword = await waitFor(() => c().loginSelect === 1 && window.lcHost.keyboard.context?.kind === 'login-pass', 4000);
+        await sleep(500);
+        const passKb = await keyboardState();
+        let tapped = null;
+        if (remember !== null && passKb.remember !== remember) {
+            tapped = await debug('remember-tap');
+            await sleep(400);
+        }
+        const rememberKb = await keyboardState();
+        await shot(`online-password-${newUser ? 'new' : 'existing'}`);
+        await debug('type', { text: password });
+        await waitFor(() => c().loginPass === password, 3000);
+        await debug('bar', { button: 'submit' });
+        const outcome = await waitFor(() => inWorld() || (c().loginscreen === 2 && !!c().loginMes2 && !/Connecting to server/.test(loginWords()) && c().loginMes1 !== hint[0]), 30000);
+        return { form: form.ok, hint, userKb, passKb, tapped, rememberKb, toPassword: toPassword.ok, outcome: outcome.ok, ingame: inWorld(), words: loginWords() };
+    }
+
+    // "Continue as" on the title (native gives the kept password: account login), into the world; a login the server still
+    // refuses as "already logged in" (its 60 s after a dropped session) is tried again every 5 s as a player would.
+    async function continueAs(timeoutMs = 30000) {
+        tapElement(document.getElementById('btn-continue'));
+        const started = performance.now();
+        let tries = 1;
+        for (;;) {
+            const done = await waitFor(() => inWorld() || /already logged in/i.test(loginWords()), Math.max(1000, timeoutMs - (performance.now() - started)), 250);
+            if (!done.ok || inWorld() || performance.now() - started > timeoutMs) {
+                break;
+            }
+            await sleep(5000);
+            tries++;
+            window.LostCityHost.keyboard.submit(); // (the form keeps the name and the password native gave: "Log in" again)
+            await waitFor(() => !/already logged in/i.test(loginWords()), 3000, 100);
+        }
+        return { ingame: inWorld(), tries, ms: Math.round(performance.now() - started), words: loginWords() };
+    }
+
+    async function logOut() {
+        const out = () => c().ingame === false && !c().reconnecting;
+        let pressed = -Infinity;
+        const started = performance.now();
+        while (performance.now() - started < 8000 && !out()) {
+            if (c().hudState().activeTab !== 10) {
+                c().tapAt(...LOGOUT_TAB, 1);
+            } else if (performance.now() - pressed >= 1000) {
+                pressed = performance.now();
+                c().tapAt(...LOGOUT_BUTTON, 1);
+            }
+            await sleep(150);
+        }
+        return (await waitFor(() => out() && document.getElementById('hud')?.hidden === true, 10000)).ok;
+    }
+
+    const command = async line => {
+        window.LostCityHost.keyboard.insertText(`${line}\n`); // (as the native keyboard types a chat line)
+        await sleep(1500);
+    };
+
+    // A Banker at Draynor: tapped (his top option, Talk-to), his dialogue continued to "I'd like to access my bank
+    // account, please.", which opens the bank. Bankers stand behind the booths, so a tap on one walks to the booth.
+    async function talkToBanker() {
+        const bankers = () => {
+            const list = [];
+            for (let i = 0; i < c().npcCount; i++) {
+                const npc = c().npc[c().npcIds[i]];
+                if (npc?.type?.name === 'Banker') {
+                    list.push(npc);
+                }
+            }
+            return list;
+        };
+        let talked = { ok: false };
+        const tried = [];
+        for (let attempt = 0; attempt < 6 && !talked.ok; attempt++) {
+            for (const npc of bankers()) {
+                c().getOverlayPos(npc.x, npc.z, ((npc.height || 100) / 2) | 0);
+                if (c().projectX < 0) {
+                    continue;
+                }
+                const x = c().viewportX + c().projectX;
+                const y = c().viewportY + c().projectY;
+                c().tapAt(x, y, 1);
+                await sleep(200);
+                tried.push(`${x},${y}: ${c().menuOption?.[c().menuNumEntries - 1] ?? '?'}`);
+                talked = await waitFor(() => c().hudState().chatContinue, 8000);
+                if (talked.ok) {
+                    break;
+                }
+            }
+            if (!talked.ok) {
+                await sleep(1500);
+            }
+        }
+        const greeting = talked.ok;
+        await shot('online-banker');
+        let chosen = false;
+        if (greeting) {
+            c().hudContinue();
+            const asked = await waitFor(() => c().hudDialog()?.options.find(o => /access my bank account/.test(o.text)), 5000);
+            if (asked.ok) {
+                const o = asked.value;
+                c().tapAt(o.x + o.w / 2, o.y + o.h / 2, 1);
+                chosen = true;
+                const said = await waitFor(() => c().hudState().chatContinue, 5000);
+                if (said.ok) {
+                    c().hudContinue();
+                }
+            }
+        }
+        const bank = await waitFor(() => c().mainModalId !== -1 && c().chatModalId === -1, 8000);
+        check('online: a tap on a Banker talks to him (Talk-to over the bridge), his dialogue answered, the bank opens', greeting && chosen && bank.ok, JSON.stringify({ greeting, chosen, bank: bank.ok, modal: c().mainModalId, tried: tried.slice(0, 6) }));
+        await shot('online-bank');
+        c().closeModal();
+        await sleep(800);
+        return bank.ok;
+    }
+
+    // The app to the background (the driver opens Settings) for `seconds`, back, and what became of the session: kept (the
+    // same socket), the client's reconnect (opcode 18, a new socket), or the server's logout (the title).
+    async function backgroundOnline(seconds) {
+        const stream = c().stream;
+        const pos = position();
+        const before = lifecycleEvents.length;
+        out(`ACTION background ${seconds}`);
+        const back = await waitFor(() => lifecycleEvents.slice(before).some(e => e.event === 'foreground' || e.event === 'resume'), (seconds + 60) * 1000, 250);
+        await sleep(8000); // (a socket that died while suspended is noticed by the client's next read or write)
+        await waitFor(() => inWorld() || (c().ingame === false && !c().reconnecting), 40000, 250);
+        await sleep(2000);
+        const outcome = inWorld() ? (c().stream === stream ? 'kept' : 'reconnected') : 'logged out';
+        out(`INFO online: background ${seconds} s: ${outcome} (${JSON.stringify({ events: lifecycleEvents.slice(before).map(e => e.event), pos: position(), was: pos, words: loginWords() })})`);
+        return { back: back.ok, outcome, was: pos };
+    }
+
+    // The game socket's bytes over `seconds` (the messages both ways as the page hands them to native and gets them back:
+    // the WebSocket, TCP and IP framing come on top), standing or walking to and fro on the minimap every 4.5 s.
+    async function gameTraffic(seconds, walk) {
+        const counts = { sent: 0, received: 0, messagesOut: 0, messagesIn: 0 };
+        const proto = window.WebSocket.prototype;
+        const { send, _event: event } = proto;
+        proto.send = function (data) {
+            if (this.purpose === 'game' && this.readyState === 1) {
+                counts.sent += data?.byteLength ?? 0;
+                counts.messagesOut++;
+            }
+            return send.call(this, data);
+        };
+        proto._event = function (e) {
+            if (this.purpose === 'game' && e?.event === 'message' && typeof e.data === 'string') {
+                counts.received += (e.data.length * 3) / 4 - (e.data.endsWith('==') ? 2 : e.data.endsWith('=') ? 1 : 0);
+                counts.messagesIn++;
+            }
+            return event.call(this, e);
+        };
+        const started = performance.now();
+        let leg = 0;
+        try {
+            while (performance.now() - started < seconds * 1000) {
+                if (walk) {
+                    leg++;
+                    clickGame(627 + (leg % 2 ? -18 : 18), 85 + (leg % 2 ? -8 : 8)); // (back and forth: the first walk's way)
+                }
+                await sleep(walk ? 4500 : 1000);
+            }
+        } finally {
+            proto.send = send;
+            proto._event = event;
+        }
+        const minutes = (performance.now() - started) / 60000;
+        return { ...counts, seconds: Math.round(minutes * 60), perMinute: { sent: Math.round(counts.sent / minutes), received: Math.round(counts.received / minutes) }, walks: leg };
+    }
+
+    async function onlineRun(config) {
+        recordLifecycle();
+        const state = onlineState();
+        if (state) {
+            pass = state.pass;
+            fail = state.fail;
+        }
+        const step = state?.step ?? 'add';
+        out(`INFO online: step ${step} (${config.url}${config.control ? `, the run controls the engine; drift ${config.drift}` : ''})`);
+        const steps = { add: onlineAdd, play: onlinePlay, crashed: onlineCrashed, offline: onlineOffline, back: onlineBack, down: onlineDown, 'down-offline': onlineDownOffline, drift: onlineDrift, 'drift-again': onlineDriftAgain };
+        await (steps[step] ?? onlineAdd)(config, state ?? {});
+    }
+
+    // 1. A new app: this phone's world on the title; the server added (the box, the probe) and Use: the page reloads there.
+    async function onlineAdd(config) {
+        const title = await onlineTitle('offline', 120000);
+        check('online: a new app starts on this phone (the title offline, World "This phone", the cover offline)', title.ok && title.world === 'This phone' && title.caption === CAPTION('offline') && title.native?.server === null, JSON.stringify(title));
+        if (!title.ok || !(await addServer(config.url, 'Mac'))) {
+            return finish();
+        }
+        nextOnlineStep('play');
+        document.getElementById('probe-use').click(); // (this phone's world saved first, as Restart; then native reloads)
+        await sleep(30000);
+        check('online: Use plays on the server (the page reloads)', false, 'no reload 30 s after Use');
+        finish();
+    }
+
+    // 2. On the server: the title with no engine; a new character with a password and Remember; play (walk, a Banker, the
+    // bank); the background around the server's limits; the logout and "Continue as" (the Keychain); WebContent killed.
+    async function onlinePlay(config) {
+        const title = await onlineTitle('online');
+        const server = window.LostCityHost?.settings?.server;
+        check('online: the page on the server: the title with no engine on the page (no worker, engineState remote)', title.ok && engine.worker === null && server !== 'offline', JSON.stringify({ ms: title.ms, server, worker: !!engine.worker }));
+        check('online: native plays this page load on the server (online-state: its id and URL) and its cover said "online", as the page', title.native?.server === server && title.native?.url === config.url && title.native?.caption === CAPTION('online') && title.caption === CAPTION('online') && title.world === 'Mac', JSON.stringify(title));
+        await shot('online-title');
+        if (!title.ok) {
+            return finish();
+        }
+        const name = `${ANDROID_RUN ? 'and' : 'ios'}${String(Date.now()).slice(-7)}`;
+        const login = await onlineLogin(name, config.passwords[0], { newUser: true, remember: true });
+        check('New User online: the form says "Type a name and a password. / Your server may ask you to register first."', login.form && login.hint[0] === 'Type a name and a password.' && login.hint[1] === 'Your server may ask you to register first.', JSON.stringify(login.hint));
+        check('the username\'s "Log in" key goes on to the password field; its bar has the Remember box (off the first time), no box for the name', login.toPassword && login.userKb.remember === null && login.passKb.kind === 'login-pass' && login.passKb.secure === true && login.passKb.remember === false, JSON.stringify({ user: login.userKb.remember, pass: [login.passKb.kind, login.passKb.secure, login.passKb.remember] }));
+        check('a tap on the Remember box ticks it (and the page\'s next update keeps it)', login.tapped === true && login.rememberKb.remember === true, JSON.stringify({ tapped: login.tapped, now: login.rememberKb.remember }));
+        check('a password login through the native keyboard and the socket bridge reaches the game', login.ingame, login.words);
+        if (!login.ingame) {
+            return finish();
+        }
+        await sleep(1500);
+        await enterWorld();
+        // (off Tutorial Island: the stock engine's characters are staff, debug on; the tutorial's interfaces go with a
+        // new login, which is also the logout and "Continue as" below)
+        await command('::setvar tutorial 1000');
+
+        const out1 = await logOut();
+        await sleep(800);
+        const titled = { continueAs: shown('btn-continue') && text('continue-name'), accounts: shown('btn-accounts') };
+        tapElement(document.getElementById('btn-accounts'));
+        await waitFor(() => shown('accounts'), 3000);
+        const rows = [...document.querySelectorAll('#accounts-list .data-row')].map(r => ({ name: r.querySelector('.data-name')?.textContent, key: !!r.querySelector('.key-mark') }));
+        await shot('online-accounts');
+        document.getElementById('accounts-close').click();
+        await sleep(300);
+        check(`the Logout tab logs out; the title offers "Continue as" the name, and Accounts marks it with a key (Remember: the password in ${KEPT_IN})`, out1 && titled.continueAs === name && titled.accounts && rows.length === 1 && rows[0].name === name && rows[0].key, JSON.stringify({ out: out1, titled, rows }));
+        const again = await continueAs();
+        const kb = await keyboardState();
+        check(`"Continue as": native gives the password from ${KEPT_IN} (account login) and the page logs in, no keyboard`, again.ingame && again.tries === 1 && kb.requested === false, JSON.stringify({ again, kb: kb.requested }));
+        if (!again.ingame) {
+            return finish();
+        }
+        await sleep(1500);
+        await command('::tele 0,48,50,20,43'); // (Draynor's bank, east of the booths)
+        await stablePosition();
+        await shot('online-ingame');
+        out('ACTION measure online-ingame');
+
+        const start = position();
+        clickGame(627 + 18, 85 + 8); // (the minimap, a few tiles east and south)
+        const moved = await waitFor(() => !same(position(), start), 8000);
+        const end = await stablePosition();
+        check('online: the player walks (a minimap tap, the server moves him)', moved.ok, `${JSON.stringify(start)} → ${JSON.stringify(end)}`);
+        await talkToBanker();
+        const fps = await fpsOver(5000);
+        out(`INFO online: the client's frame rate in Draynor's bank: ${fps} fps`);
+        // (the game socket's traffic, a minute standing and a minute walking: docs/ONLINE.md's note on mobile data)
+        for (const walk of [false, true]) {
+            out(`INFO online: traffic ${walk ? 'walking' : 'standing'} ${JSON.stringify(await gameTraffic(60, walk))}`);
+        }
+        await stablePosition();
+        out('ACTION measure online-after-play');
+
+        for (const seconds of [5, 25, 45, 70]) {
+            const bg = await backgroundOnline(seconds);
+            if (seconds < 60) {
+                // (Engine-TS keeps a session 60 s without a packet; with debug on, as here, it never asks an idle logout)
+                check(`online: background ${seconds} s (under the server's 60 s): still in the world, in the same place (${bg.outcome})`, bg.back && bg.outcome !== 'logged out' && same(position(), bg.was), JSON.stringify({ ...bg, now: position() }));
+            } else {
+                // (over 60 s the server may have logged the character out: the client's reconnect logs in afresh, or the title)
+                const back = bg.outcome === 'logged out' ? await continueAs(90000) : { ingame: true };
+                await stablePosition();
+                check(`online: background ${seconds} s (over the server's 60 s): back in the world where he was (${bg.outcome}${bg.outcome === 'logged out' ? ', then "Continue as"' : ''})`, bg.back && back.ingame && same(position(), bg.was), JSON.stringify({ ...bg, back, now: position() }));
+            }
+            if (!inWorld()) {
+                return finish();
+            }
+        }
+        await shot('online-after-background');
+        await sleep(2000);
+        nextOnlineStep('crashed', { name, pos: position() });
+        if (ANDROID_RUN) {
+            // (the emulator has no root to kill the isolated renderer: native crashes it, a real onRenderProcessGone)
+            await debug('renderer-crash');
+        } else {
+            out('ACTION kill-webcontent');
+        }
+        await sleep(30000);
+        check(`online: ${WEB_PROCESS} killed`, false, 'the page still runs 30 s after the request');
+        finish();
+    }
+
+    // 3. After WebContent died in game: native's restart notice says to log in again; "Continue as" (the server may still
+    // hold the dropped session up to 60 s: "already logged in" until then); then to this phone's world from the game.
+    async function onlineCrashed(config, state) {
+        const title = await onlineTitle('online');
+        const notice = await debug('last-notice');
+        check(`online: after ${WEB_PROCESS} died the page comes back on the server (cover online), and native says "You will need to log in again."`, title.ok && title.caption === CAPTION('online') && /You will need to log in again\.$/.test(String(notice ?? '')), JSON.stringify({ title, notice }));
+        const again = await continueAs(100000);
+        await stablePosition();
+        check('...and "Continue as" logs in again (after the server let the dropped session go), where he was', again.ingame && same(position(), state.pos), JSON.stringify({ again, pos: position(), was: state.pos }));
+        await shot('online-relogin');
+        if (!again.ingame) {
+            return finish();
+        }
+        await sleep(1500);
+        // Settings › World › Change, This phone: the page logs out through the game, then native reloads offline
+        tapElement(document.getElementById('btn-settings'));
+        await waitFor(() => shown('settings'), 3000);
+        document.getElementById('nav-world').click();
+        await sleep(300);
+        const playOn = text('world-playon-name');
+        await shot('online-settings-world');
+        document.getElementById('world-change').click();
+        await waitFor(() => shown('worlds'), 3000);
+        const rows = [...document.querySelectorAll('#worlds-list .world-row')].map(r => `${r.querySelector('.character-name').textContent} | ${r.querySelector('.character-when').textContent}`);
+        check('online: Settings › World "Play on Mac (127.0.0.1:…)", Change: the worlds, This phone first, Mac "Playing now"', /^Mac \(127\.0\.0\.1:\d+\)$/.test(playOn ?? '') && rows[0]?.startsWith('This phone') && /^Mac \| Playing now/.test(rows[1] ?? ''), JSON.stringify({ playOn, rows }));
+        nextOnlineStep('offline');
+        document.querySelector('#worlds-list .world-row:nth-child(1) .title-btn').click();
+        await sleep(30000);
+        check('online -> offline in game: the page logs out and reloads on this phone', false, `still here 30 s after This phone (${c().ingame ? 'in game' : 'logged out'})`);
+        finish();
+    }
+
+    // 4. This phone's world again (the engine on the page); then back to the server from the title.
+    async function onlineOffline() {
+        const title = await onlineTitle('offline', 120000);
+        check('online -> offline in game: logged out, the page on this phone again (the engine, the cover offline, World "This phone")', title.ok && engine.worker !== null && title.caption === CAPTION('offline') && title.native?.server === null && title.world === 'This phone', JSON.stringify(title));
+        tapElement(document.getElementById('btn-world'));
+        await waitFor(() => shown('worlds'), 3000);
+        nextOnlineStep('back');
+        document.querySelector('#worlds-list .world-row:nth-child(2) .title-btn').click();
+        await sleep(30000);
+        check('offline -> online from the title: the page reloads on the server', false, 'still here 30 s after the server\'s row');
+        finish();
+    }
+
+    // 5. On the server again: the first "Continue as" logs in at once (the logout when leaving was clean); then, with the
+    // engine under the run's control, the server stopped.
+    async function onlineBack(config, state) {
+        const title = await onlineTitle('online');
+        const again = title.ok ? await continueAs(15000) : { ingame: false };
+        check('offline -> online from the title: on the server again, and "Continue as" logs in at the first try (the earlier logout was clean)', title.ok && title.caption === CAPTION('online') && again.ingame && again.tries === 1, JSON.stringify({ title, again }));
+        if (again.ingame) {
+            await logOut();
+        }
+        if (!config.control) {
+            out('INFO online: the server stopped and the drift server need app-test --engine (skipped)');
+            return finish();
+        }
+        out('ACTION server stop');
+        const down = await probeUntil(config.url, false, 60000);
+        nextOnlineStep('down');
+        out(`INFO online: the server is down (${down ? 'its probe fails' : 'its probe still answers'}): reloading`);
+        location.reload();
+    }
+
+    // The probe (native /server-probe) until its ok is `ok`, or the time is up.
+    async function probeUntil(url, ok, timeoutMs) {
+        const started = performance.now();
+        while (performance.now() - started < timeoutMs) {
+            const probe = await fetch(`server-probe?url=${encodeURIComponent(url)}`, { cache: 'no-store' })
+                .then(r => r.json())
+                .catch(() => null);
+            if (probe && probe.ok === ok) {
+                return true;
+            }
+            await sleep(1000);
+        }
+        return false;
+    }
+
+    // 6. The server down: the unreachable box within seconds, Play offline.
+    async function onlineDown() {
+        const box = await waitFor(() => shown('unreachable'), 20000, 100);
+        const said = { ms: Math.round(performance.now()), title: text('unreachable-title'), text: text('unreachable-text') };
+        await shot('online-unreachable');
+        check('online, the server down: within seconds the box "Could not connect to Mac", it cannot be reached (Try again, Play offline, Choose world)', box.ok && said.ms < 10000 && said.title === 'Could not connect to Mac' && /cannot be reached/.test(said.text ?? ''), JSON.stringify(said));
+        nextOnlineStep('down-offline');
+        document.getElementById('unreachable-offline').click();
+        await sleep(30000);
+        check('online, the server down: Play offline reloads on this phone', false, 'no reload 30 s after Play offline');
+        finish();
+    }
+
+    // 7. Play offline worked; then a server whose game data moved on (the drift copy) is added and used.
+    async function onlineDownOffline(config) {
+        const title = await onlineTitle('offline', 120000);
+        check('online, the server down: Play offline: this phone\'s world (the engine, the cover offline)', title.ok && engine.worker !== null && title.caption === CAPTION('offline') && window.LostCityHost?.settings?.server === 'offline', JSON.stringify(title));
+        if (!config.drift) {
+            return finish();
+        }
+        out('ACTION server start drift');
+        const up = await probeUntil(config.drift, true, 240000);
+        if (!up || !(await addServer(config.drift, 'Drift'))) {
+            check('online: the drift server starts', up);
+            return finish();
+        }
+        nextOnlineStep('drift');
+        document.getElementById('probe-use').click();
+        await sleep(30000);
+        check('online: Use plays on the drift server (the page reloads)', false, 'no reload 30 s after Use');
+        finish();
+    }
+
+    async function onlineCache() {
+        const files = await debug('online-cache');
+        return Array.isArray(files) ? files : [];
+    }
+
+    // 8. The drift server: its versionlist (another CRC) downloaded, the moved animations fetched over the OnDemand socket
+    // and kept in the app's cache, at the title; in game a new character's models and the map of 48_48 too.
+    async function onlineDrift(config) {
+        const title = await onlineTitle('online', 120000);
+        const id = window.LostCityHost?.settings?.server;
+        const files = await onlineCache();
+        const mine = files.filter(f => f.startsWith(`${id}/`)).map(f => f.slice(id.length + 1));
+        const anims = config.driftFiles.anims.filter(f => mine.includes(`od/1/${f}`));
+        check('drift: at the title, the server\'s versionlist (its own CRC) downloaded and cached, its 3 moved animations fetched over the OnDemand socket and cached', title.ok && title.world === 'Drift' && mine.some(f => /^versionlist-?\d+$/.test(f)) && onlineSeen.sockets.includes('ondemand') && anims.length === 3, JSON.stringify({ title: title.ok, sockets: onlineSeen.sockets, stored: onlineSeen.stored.slice(0, 8), cached: mine.slice(0, 12) }));
+        if (!title.ok) {
+            return finish();
+        }
+        const name = `dr${String(Date.now()).slice(-7)}`;
+        const login = await onlineLogin(name, config.passwords[1], { newUser: true });
+        const scene = login.ingame ? await waitFor(() => c().sceneState === 2, 30000) : { ok: false };
+        await sleep(2000);
+        await shot('online-drift-ingame');
+        const after = (await onlineCache()).filter(f => f.startsWith(`${id}/`)).map(f => f.slice(id.length + 1));
+        const map = after.includes(`od/3/${config.driftFiles.map}`);
+        const models = after.filter(f => f.startsWith('od/0/')).length;
+        check('drift: in game, the new character\'s models and the land of 48_48 (other versions) came from the server and went to the cache; the scene built', login.ingame && scene.ok && map && models > 0, JSON.stringify({ words: login.words, scene: scene.ok, map, models }));
+        if (login.ingame) {
+            await logOut();
+        }
+        nextOnlineStep('drift-again', { driftName: name, driftCache: after.length });
+        if (ANDROID_RUN) {
+            // (Chromium commits localStorage to disk up to 5 s after a write, and the driver's relaunch stops the app's
+            // process: the next launch would start this step again)
+            await sleep(8000);
+        }
+        out('ACTION relaunch');
+        await sleep(60000);
+        check('drift: the app launched again', false, 'no relaunch 60 s after the request');
+        finish();
+    }
+
+    // 9. The next launch: everything from the app's cache, no OnDemand socket, at the title and in game.
+    async function onlineDriftAgain(config, state) {
+        const title = await onlineTitle('online', 120000);
+        check('drift, the next launch: the title takes the moved files from the app\'s cache (no OnDemand socket)', title.ok && !onlineSeen.sockets.includes('ondemand') && onlineSeen.stored.length === 0, JSON.stringify({ title: title.ok, sockets: onlineSeen.sockets, stored: onlineSeen.stored }));
+        const login = title.ok ? await onlineLogin(state.driftName, config.passwords[1]) : { ingame: false };
+        const scene = login.ingame ? await waitFor(() => c().sceneState === 2, 30000) : { ok: false };
+        await sleep(1500);
+        await shot('online-drift-again');
+        const cached = (await onlineCache()).filter(f => f.startsWith(`${window.LostCityHost?.settings?.server}/`)).length;
+        check('drift, the next launch: in game the models and the map from the cache too (no OnDemand socket, nothing new stored)', login.ingame && scene.ok && !onlineSeen.sockets.includes('ondemand') && onlineSeen.stored.length === 0 && cached === state.driftCache, JSON.stringify({ words: login.words, scene: scene.ok, sockets: onlineSeen.sockets, cached, before: state.driftCache }));
+        if (login.ingame) {
+            await logOut();
+        }
+        finish();
+    }
+
     async function finish() {
         try {
             sessionStorage.removeItem(STATE_KEY);
+            localStorage.removeItem(ONLINE_KEY);
         } catch {
             // ignore
         }
@@ -1625,7 +2190,9 @@
         } catch {
             state = null;
         }
-        const run = state?.phase === 'B' ? phaseB(state) : wantedBots().then(applyBots).then(go => (go ? phaseA() : undefined));
+        watchOnline(); // (it only counts; the offline run never opens a socket or stores an OnDemand file)
+        // (app-test --server: the online run instead of the checks below)
+        const run = readConfig().then(config => (config?.online ? onlineRun(config.online) : state?.phase === 'B' ? phaseB(state) : wantedBots().then(applyBots).then(go => (go ? phaseA() : undefined))));
         run.catch(error => {
             check('autotest script', false, String(error?.stack ?? error));
             finish();

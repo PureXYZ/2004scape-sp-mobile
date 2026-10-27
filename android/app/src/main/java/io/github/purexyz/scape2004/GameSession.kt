@@ -2,7 +2,9 @@
 //
 // It owns the WebView (on a MutableContextWrapper), the router, saves, settings, the page bridge, the lifecycle
 // coordinator, keep-awake and the cover, and the native side of the page contract (ARCHITECTURE.md §7): the page's
-// messages, status, fatal errors, settings, memory warnings, recovery from a renderer crash, and the debug hooks.
+// messages, status, fatal errors, settings, memory warnings, recovery from a renderer crash, and the debug hooks. Online
+// mode (§7.2-7.5) adds the server of each page load (OnlineProxy, in the router), remembered passwords
+// (ServerPasswordStore) and, as a component, the sockets, accounts and the server box (OnlineComponent).
 // GameActivity only binds a window to it: a recreated activity re-attaches the same WebView and the game is never
 // reloaded (D5).
 //
@@ -29,6 +31,8 @@ import android.widget.FrameLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewFeature
+import java.io.File
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -39,7 +43,26 @@ class GameSession(private val app: LostCityApp) {
     private val scheduler: Scheduler = MainScheduler
     val saveStore: SaveStore = app.saveStore
     val settings = NativeSettings(NativeSettings.Prefs(app))
-    private val router = AssetRouter(ApkAssets(app.assets), saveStore)
+
+    /** Android 17's local network permission, as the proxy and the sockets meet it (Network.kt). */
+    val localNetwork = AndroidLocalNetwork(app) { host -> onlineComponent?.localNetworkRefused(host) }
+
+    /** The server of each page load and its routes (`/crc`, the archives, `/ondemand`, `/server-probe`). */
+    val online = OnlineProxy(ApkAssets(app.assets), File(app.cacheDir, "online"), { settings.values }, localNetwork = localNetwork)
+
+    /** The phone has a network that reaches the internet (the socket bridge's words for an unknown host). */
+    fun hasNetwork(): Boolean = Network.hasNetwork(app)
+
+    /**
+     * Who waits for the system's permission prompt (GameActivity.requestPermission): here, not in the activity, so an
+     * activity recreated while the prompt is up (Don't keep activities) delivers the answer to the same wait.
+     */
+    var permissionResult: ((Boolean) -> Unit)? = null
+
+    /** Passwords the player asked a server's login to remember. */
+    val passwords = ServerPasswordStore(File(app.noBackupFilesDir, ServerPasswordStore.FOLDER))
+    private val router = AssetRouter(ApkAssets(app.assets), saveStore, online)
+    private var onlineComponent: OnlineComponent? = null
     val page = PageBridge(scheduler) {
         webView?.let { web -> PageBridge.JsEvaluator { script, result -> web.evaluateJavascript(script) { result(it) } } }
     }
@@ -135,6 +158,7 @@ class GameSession(private val app: LostCityApp) {
         Shell.install(this, app) // haptics, sound and the loading cover (Shell.kt)
         LmComponent.install(this, app) // the bots' chat model (LmComponent.kt)
         KeyboardBridge.install(this) // the keyboard and its bar (docs/ANDROID.md §4.1)
+        onlineComponent = OnlineComponent.install(this) // sockets, accounts, the server box (docs/ANDROID.md §7)
         lifecycle.onFlushFinished = {
             val waiters = flushWaiters.toList()
             flushWaiters.clear()
@@ -479,15 +503,25 @@ class GameSession(private val app: LostCityApp) {
 
     // ------------------------------------------------------------------------------------------------ loading
 
+    /** Runs before a page load with its server (or null): OnlineComponent asks for the local network first if it needs it. */
+    var beforeLoad: ((OnlineServer?, () -> Unit) -> Unit)? = null
+
     fun loadGame(reason: String) {
         val web = webView ?: return
         Log.info("host", "loading ${AssetRouter.INDEX_URL} ($reason)")
         resetPageState()
+        val server = OnlineServer.current(settings.values)
+        cover.online = server != null
         cover.show()
         overlayFallback?.cancel()
         overlayFallback = null
         gameLoadPending = true
-        web.loadUrl(AssetRouter.INDEX_URL)
+        val serial = pageSerial
+        val load = {
+            // (the same load, unless another one started meanwhile)
+            if (serial == pageSerial && web === webView) web.loadUrl(AssetRouter.INDEX_URL)
+        }
+        beforeLoad?.invoke(server, load) ?: load()
     }
 
     /** Native state that belongs to the page that is going away. */
@@ -587,7 +621,7 @@ class GameSession(private val app: LostCityApp) {
             reloadWhenActive = true
             return
         }
-        cover.notice("The game stopped unexpectedly (probably out of memory) and is restarting.")
+        cover.notice("The game stopped unexpectedly (probably out of memory) and is restarting.$loginAgain")
         loadGame("web content process terminated")
     }
 
@@ -624,8 +658,17 @@ class GameSession(private val app: LostCityApp) {
             return
         }
         reloadWhenActive = false
-        cover.notice("2004Scape was closed by Android while in the background and is restarting.")
+        cover.notice("2004Scape was closed by Android while in the background and is restarting.$loginAgain")
         loadGame("web content ended while in the background")
+    }
+
+    /** What the restart notices add when the page that went away played on a server: its session there is gone. */
+    private val loginAgain: String get() = if (online.server == null) "" else " You will need to log in again."
+
+    /** The names with a remembered password, per server id (only the servers in the settings): `savedPasswords`. */
+    fun savedPasswordsJson(): JsonObject {
+        val ids = OnlineServer.ids(settings.values)
+        return JsonObject(passwords.saved().filterKeys { it in ids }.mapValues { (_, names) -> JsonArray(names.map(::JsonPrimitive)) })
     }
 
     /** The cover's margins: Settings › Display's, as the page lays out its own. */
@@ -639,7 +682,7 @@ class GameSession(private val app: LostCityApp) {
     fun refreshInfo() {
         val scripts = scripts ?: return
         val json = try {
-            JsonText.canonical(AppInfo.pageInfo(app, settings.values, lmStatus))
+            JsonText.canonical(AppInfo.pageInfo(app, settings.values, lmStatus, savedPasswordsJson()))
         } catch (error: Exception) {
             Log.info("host", "LostCityNative could not be encoded: $error")
             "{\"platform\":\"android\",\"settings\":{}}"
@@ -761,6 +804,8 @@ class GameSession(private val app: LostCityApp) {
                 put("presented", JsonPrimitive(activity?.presentedDialog ?: ""))
             })
             "overlay" -> {
+                // (`online`: the loader's caption says "online" or "offline" from now on, as a page load would set it)
+                message.bool("online")?.let { cover.online = it }
                 when (message.string("mode")) {
                     "loading" -> cover.show()
                     "error" -> cover.showError(message.string("message") ?: "The game could not be loaded.") { loadGame("debug retry") }

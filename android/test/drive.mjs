@@ -9,7 +9,17 @@
 // the background and in front, the crash loop's error screen, and real hardware keys (adb input keyevent).
 // android/test/PARITY.md maps each iOS check to this run or to the other Android tests.
 //
-//   node android/test/drive.mjs [--serial emulator-5554] [--no-build] [--start-phase P]
+//   node android/test/drive.mjs [--serial emulator-5554] [--no-build] [--build-only] [--start-phase P]
+//                               (--build-only: build the test APK and stop, so a --no-build run needs no Gradle beside
+//                               the emulator)
+//   node android/test/drive.mjs --online   # the online phases instead (game-test/online.js, as iOS's drive.mjs --online):
+//                                          # the proxy routes, the socket bridge, the probe, the Keystore, the Add server
+//                                          # box and the Remember box, against web/test/native/online-stub.mjs (this
+//                                          # Mac's port ONLINE_STUB_PORT or 47643, the same port on the device through
+//                                          # `adb reverse`), an address where nothing listens (the device's own port
+//                                          # ONLINE_DOWN_PORT or 47644, not reversed: it refuses as nothing does) and,
+//                                          # with ENGINE_URL=http://127.0.0.1:<port> (and ENGINE_NODE_ID / ENGINE_MEMBERS
+//                                          # as it was started with), a local Engine-TS, reversed to the same port
 //
 // It builds a debug APK whose web bundle is the test page (lib/testbuild.mjs: the normal bundle and APK are put back
 // before the run), without the chat model (-Plc.model=none: like the simulator, which runs none; the on-device model is
@@ -39,6 +49,7 @@ import path from 'node:path';
 import { ACTIVITY, ADB, PKG, device, sleep } from './lib/adb.mjs';
 import { ANDROID, REPO, WEB_GAME, apkFile, buildTestApk, gradle, isTestBundle, normalApk } from './lib/testbuild.mjs';
 import { mockBehindReverse } from './lib/mock.mjs';
+import { startOnlineStub } from '../../web/test/native/online-stub.mjs';
 
 const argv = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -48,13 +59,20 @@ const option = (name, fallback) => {
 const SERIAL = option('--serial', process.env.ANDROID_SERIAL ?? 'emulator-5554');
 const START_PHASE = option('--start-phase', process.env.START_PHASE ?? null);
 const MOCK_PORT = Number(process.env.LM_MOCK_PORT ?? 47591);
+const ONLINE = argv.includes('--online');
+const STUB_PORT = Number(process.env.ONLINE_STUB_PORT ?? 47643);
+const DOWN_PORT = Number(process.env.ONLINE_DOWN_PORT ?? 47644);
+const ENGINE_URL = process.env.ENGINE_URL ?? null;
+// (an online run starts at the phase 'online', as iOS's)
+const PHASE = START_PHASE ?? (ONLINE ? 'online' : null);
 if (!SERIAL.startsWith('emulator-')) {
     console.error(`drive.mjs clears the app's data: it runs on an emulator only (as iOS's on the simulator), not ${SERIAL}`);
     process.exit(1);
 }
 const GAME_TEST = path.join(REPO, 'web', 'test', 'native', 'game-test');
 const BUILD_DIR = path.join(ANDROID, 'build', 'drive');
-const TEST_APK = path.join(BUILD_DIR, 'app-drive.apk');
+// (the online run's own, so both can be built before an emulator session)
+const TEST_APK = path.join(BUILD_DIR, argv.includes('--online') ? 'app-drive-online.apk' : 'app-drive.apk');
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const OUT = path.join(BUILD_DIR, `run-${stamp}`);
 fs.mkdirSync(OUT, { recursive: true });
@@ -77,6 +95,14 @@ function check(name, ok, detail = '') {
 // ------------------------------------------------------------------------------------------------ 1. the test build
 
 const MOCK_URL = `http://127.0.0.1:${MOCK_PORT}/v1/messages`;
+// --online: the stand-in server (on this Mac; the device reaches it through adb reverse), and where everything is for
+// game-test/online.js
+const stub = ONLINE ? await startOnlineStub({ port: STUB_PORT }) : null;
+const ONLINE_JSON = ONLINE ? JSON.stringify({
+    stub: stub.url, stubCrcs: stub.crcs, down: `http://127.0.0.1:${DOWN_PORT}`,
+    engine: ENGINE_URL, engineNodeId: Number(process.env.ENGINE_NODE_ID ?? 10), engineMembers: process.env.ENGINE_MEMBERS !== 'false',
+    normalize: JSON.parse(fs.readFileSync(path.join(REPO, 'web', 'test', 'online', 'serverurl-vectors.json'), 'utf8')).normalize,
+}) : null;
 if (!argv.includes('--no-build')) {
     // the normal bundle's ui/ (the fonts and sprites the native cover draws with), so it has to exist
     if (!fs.existsSync(path.join(WEB_GAME, 'index.html')) || isTestBundle(WEB_GAME)) gradle(':app:buildWeb');
@@ -91,18 +117,28 @@ if (!argv.includes('--no-build')) {
             for (let i = 0; i < big.length; i++) big[i] = (i * 31 + (i >> 11)) & 255;
             fs.writeFileSync(path.join(game, 't', 'big.bin'), big);
             fs.writeFileSync(path.join(game, 'lm-mock.txt'), MOCK_URL);
-            if (START_PHASE) fs.writeFileSync(path.join(game, 'start-phase.txt'), START_PHASE);
+            if (PHASE) fs.writeFileSync(path.join(game, 'start-phase.txt'), PHASE);
+            if (ONLINE_JSON) fs.writeFileSync(path.join(game, 'online.json'), ONLINE_JSON);
         }
     });
     note(`built ${path.relative(REPO, TEST_APK)} (the test page, no chat model); the normal web bundle and debug APK are back`);
+}
+if (argv.includes('--build-only')) {
+    console.log(`--build-only: ${path.relative(REPO, TEST_APK)} is built; run again with --no-build`);
+    void stub?.close();
+    process.exit(0);
 }
 if (!fs.existsSync(TEST_APK) || !apkFile(TEST_APK, 'assets/Game/test.js')) {
     console.error(`${TEST_APK} is missing; build without --no-build first`);
     process.exit(1);
 }
 const builtPhase = apkFile(TEST_APK, 'assets/Game/start-phase.txt')?.toString().trim() ?? null;
-if (builtPhase !== (START_PHASE ?? null)) {
-    console.error(`${TEST_APK} was built ${builtPhase ? `to start at ${builtPhase}` : 'to start at the beginning'}; build it again (without --no-build) for ${START_PHASE ? `--start-phase ${START_PHASE}` : 'a full run'}`);
+if (builtPhase !== (PHASE ?? null)) {
+    console.error(`${TEST_APK} was built ${builtPhase ? `to start at ${builtPhase}` : 'to start at the beginning'}; build it again (without --no-build) for ${PHASE ? `--start-phase ${PHASE}` : 'a full run'}`);
+    process.exit(1);
+}
+if (ONLINE && apkFile(TEST_APK, 'assets/Game/online.json')?.toString() !== ONLINE_JSON) {
+    console.error(`${TEST_APK} has another online.json; build it again (without --no-build) for this run's stub and engine`);
     process.exit(1);
 }
 const builtMock = apkFile(TEST_APK, 'assets/Game/lm-mock.txt')?.toString().trim();
@@ -115,6 +151,15 @@ if (builtMock !== MOCK_URL) {
 
 const mock = await mockBehindReverse(d, { devicePort: MOCK_PORT, slowMs: 6000 });
 note(`mock Messages API on this Mac's port ${mock.hostPort}, the device's ${MOCK_PORT}`);
+const reversed = [];
+if (ONLINE) {
+    for (const port of [STUB_PORT, ...(ENGINE_URL ? [Number(new URL(ENGINE_URL).port)] : [])]) {
+        d.adb('reverse', `tcp:${port}`, `tcp:${port}`);
+        reversed.push(port);
+    }
+    d.adbQuiet('reverse', '--remove', `tcp:${DOWN_PORT}`);
+    note(`online: the stub on ${stub.url}${ENGINE_URL ? `, the engine on ${ENGINE_URL}` : ''} (adb reverse), nothing on the device's port ${DOWN_PORT}`);
+}
 // Gboard shows beside the AVD's hardware keyboard only with this on (keyboard.mjs does the same); put back at the end
 const imeWithHardKeyboard = d.adbQuiet('shell', 'settings', 'get', 'secure', 'show_ime_with_hard_keyboard').trim();
 d.adbQuiet('shell', 'settings', 'put', 'secure', 'show_ime_with_hard_keyboard', '1');
@@ -270,7 +315,7 @@ function onLine(line) {
         void pump();
     }
     if (line.startsWith('[console:')) return;
-    if (/\b(FAIL|PASS|INFO|LIFECYCLE) /.test(line) || /\[(life|host|kbd)\]/.test(line)) process.stdout.write(`${line.length > 1500 ? `${line.slice(0, 1500)} …` : line}\n`);
+    if (/\b(FAIL|PASS|INFO|LIFECYCLE) /.test(line) || /\[(life|host|kbd|socket|online|accounts)\]/.test(line)) process.stdout.write(`${line.length > 1500 ? `${line.slice(0, 1500)} …` : line}\n`);
 }
 function waitLog(pattern, ms) {
     return new Promise(resolve => {
@@ -329,12 +374,21 @@ function finish(pageTotal) {
     const wrong = mock.requests.filter(r => r.problems.length);
     note(`mock API: ${mock.requests.length} requests${wrong.length ? `, ${wrong.length} malformed: ${wrong.map(r => r.problems.join('; ')).join(' | ')}` : ', all as the API takes them'}`);
     void mock.close();
+    void stub?.close();
+    for (const port of reversed) d.adbQuiet('reverse', '--remove', `tcp:${port}`);
     d.adbQuiet('shell', 'am', 'force-stop', PKG);
     d.adbQuiet('shell', 'am', 'force-stop', 'com.android.settings');
     setTimeout(() => {
         logcat.kill('SIGTERM');
         const logs = d.adbQuiet('shell', 'cat', `/sdcard/Android/data/${PKG}/files/Logs/lostcity.log`);
         fs.writeFileSync(`${OUT}/app-log.txt`, logs);
+        let leaked = [];
+        if (ONLINE) {
+            // the logs never carry a password or what a socket sent (online.js's PASSWORD and PAYLOAD_MARK, plain or base64)
+            const secrets = ['Pw4OnlineT3st', 'LCPAYLOADMARK', Buffer.from('LCPAYLOADMARK').toString('base64').slice(0, 16)];
+            leaked = [logPath, `${OUT}/app-log.txt`].flatMap(file => secrets.filter(secret => fs.readFileSync(file, 'latin1').includes(secret)).map(secret => `${path.basename(file)}: ${secret}`));
+            check('online: the logs carry no password and no socket contents', leaked.length === 0, leaked.join(', ') || 'logcat and the app\'s log file');
+        }
         note(`Documents tree:\n${d.adbQuiet('shell', 'run-as', PKG, 'find', 'files/Documents').trim()}`);
         note(`console log: ${logPath}`);
         // put the device back: the IME setting, the reverse port, the app's data (the test page's) and the normal build

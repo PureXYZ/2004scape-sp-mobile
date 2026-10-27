@@ -510,6 +510,17 @@ try {
     const hint = await evaluate(`!document.getElementById('title-actions').hidden && !document.getElementById('title-hint').hidden && document.getElementById('btn-continue').hidden`);
     check('title: the larger classic canvas, HUD hidden, only Settings (top right)', titleUi.hud && !titleUi.canvasBehind && same(titleUi.rail, ['btn-settings']) && titleFit.scale > 0.85 && titleFit.settings[1] < 20, JSON.stringify({ ...titleUi, ...titleFit }));
     check('title: with no character yet, the hint that any name makes one', hint);
+    // the World button beside the hint (docs/ONLINE.md): the row on the screen, the button whole; a tap opens the worlds,
+    // this phone's first; Escape closes them
+    const worldRow = await evaluate(`(() => { const a = document.getElementById('title-actions').getBoundingClientRect(), w = document.getElementById('btn-world');
+        return { row: [a.left, a.right, a.bottom].map(Math.round), view: [innerWidth, innerHeight], name: document.getElementById('world-name').textContent, whole: !w.hidden && w.scrollWidth <= w.clientWidth + 1 }; })()`);
+    await tapElement('#btn-world');
+    await sleep(300);
+    const worlds = await evaluate(`({ open: !document.getElementById('worlds').hidden, first: document.querySelector('#worlds-list .world-row .character-name')?.textContent ?? null, detail: document.querySelector('#worlds-list .world-row .character-when')?.textContent ?? null })`);
+    await screenshot('title-worlds');
+    await pressKey('Escape');
+    await sleep(200);
+    check('title: the World button ("This phone") beside the hint, the row on the screen; a tap opens the worlds, this phone first ("This phone (offline)", "Playing now"); Escape closes them', worldRow.name === 'This phone' && worldRow.whole && worldRow.row[0] >= 0 && worldRow.row[1] <= worldRow.view[0] && worldRow.row[2] <= worldRow.view[1] && worlds.open && worlds.first === 'This phone (offline)' && worlds.detail === 'Playing now' && !(await visible('#worlds')), JSON.stringify({ ...worldRow, ...worlds }));
     const titleFrames = await framesShown();
     check("title: the classic canvas holds exactly the title screen's frames (read back)", titleFrames.reads >= 12 * 9 && titleFrames.differing.length === 0, JSON.stringify(titleFrames));
 
@@ -1823,7 +1834,7 @@ try {
             fits: s.scrollWidth <= s.clientWidth + 1, version: document.getElementById('about-version').textContent, built: document.getElementById('about').textContent,
             disclaimer: document.getElementById('about-disclaimer').textContent, credits: document.getElementById('about-credits').textContent }; })()`);
     await screenshot('about');
-    const DISCLAIMER = '2004Scape is an unofficial fan project. It is not affiliated with, endorsed by or connected to Jagex Ltd or the Lost City project. RuneScape is a registered trademark of Jagex Ltd. The game data the app is built from is the intellectual property of Jagex Ltd. This project is free: no ads, no payments, no accounts.';
+    const DISCLAIMER = '2004Scape is an unofficial fan project. It is not affiliated with, endorsed by or connected to Jagex Ltd or the Lost City project. RuneScape is a registered trademark of Jagex Ltd. The game data the app is built from is the intellectual property of Jagex Ltd. This project is free: no ads, no payments, no accounts. Online mode connects only to servers you add.';
     check(`Settings › About: "2004Scape ${version} · Lost City 274", the commits, the disclaimer and the credits (Lost City, 2004SP Progressive, llama.cpp, Qwen, Claude), in the safe area`,
         aboutPage.shown && aboutPage.others === 1 && inSafeArea(aboutPage.panel) && aboutPage.fits && aboutPage.version === `2004Scape ${version} · Lost City 274` && /^Offline\. Built from Engine-TS [0-9a-f]+, Content [0-9a-f]+, Client-TS [0-9a-f]+( \(debug\))?\.$/.test(aboutPage.built)
         && aboutPage.disclaimer === DISCLAIMER && ['Lost City', '2004SP Progressive', 'llama.cpp', 'Qwen', 'Claude'].every(name => aboutPage.credits.includes(name)), JSON.stringify(aboutPage));

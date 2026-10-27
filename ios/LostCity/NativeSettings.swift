@@ -12,12 +12,17 @@ final class NativeSettings {
 
     private let defaults: UserDefaults
     private(set) var values: [String: Any] = [:]
+    /// The stored settings were read, or there were none (a first launch): `values` is what the page last kept.
+    let readable: Bool
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: Self.key),
-           let stored = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            values = stored
+        if let data = defaults.data(forKey: Self.key) {
+            let stored = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            values = stored ?? [:]
+            readable = stored != nil
+        } else {
+            readable = true
         }
     }
 
@@ -47,6 +52,13 @@ enum AppInfo {
 
     static var build: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+    }
+
+    /// `2004Scape/<version> (iOS <version>)`: what the app's requests to a game server say they are.
+    nonisolated static var userAgent: String {
+        let app = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        return "2004Scape/\(app) (iOS \(os.majorVersion).\(os.minorVersion)\(os.patchVersion > 0 ? ".\(os.patchVersion)" : ""))"
     }
 
     static var isSimulator: Bool {
@@ -79,7 +91,9 @@ enum AppInfo {
 
     /// The object injected as `window.LostCityNative` (must stay JSON-serializable). `lm`: the bots' chat model status
     /// (BotChatModel.status: the on-device model, the Claude key), as `LostCityHost.bots.lmStatus` later sends it.
-    static func pageInfo(settings: [String: Any], lm: [String: Any]) -> [String: Any] {
+    /// `savedPasswords`: the names with a remembered password per server id, as `LostCityHost.accounts.saved` later
+    /// sends them.
+    static func pageInfo(settings: [String: Any], lm: [String: Any], savedPasswords: [String: [String]]) -> [String: Any] {
         [
             "platform": "ios",
             "appVersion": version,
@@ -90,6 +104,7 @@ enum AppInfo {
             "debug": isDebug,
             "settings": settings,
             "lm": lm,
+            "savedPasswords": savedPasswords,
         ]
     }
 }

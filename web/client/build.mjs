@@ -54,7 +54,9 @@ const HOST_FIELDS = [
     // the world map (patch 0018)
     'hudPlayerTile',
     // tap-to-drop (patch 0019): the method and its hudState() key
-    'setTapToDrop', 'tapToDrop'
+    'setTapToDrop', 'tapToDrop',
+    // online (docs/ONLINE.md): the loading screen's line (the client's own retry screen: the host's unreachable box)
+    'lastProgressMessage'
 ];
 
 function modPow(b, e, m) {

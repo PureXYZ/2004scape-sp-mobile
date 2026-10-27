@@ -2,7 +2,7 @@
 // ios/LostCity/NativeSettings.swift; docs/ANDROID.md §3.1) and printed in the launch log line.
 //
 // `window.LostCityNative` on Android: {platform: 'android', appVersion, build, osVersion, sdkInt, deviceModel,
-// manufacturer, simulator: false, emulator, debug, webView, haptics, settings, lm}. `simulator` stays false (there is no
+// manufacturer, simulator: false, emulator, debug, webView, haptics, settings, lm, savedPasswords}. `simulator` stays false (there is no
 // iOS simulator here, and the page's "Not on the simulator" means llama.cpp is missing, which an emulator is not);
 // `emulator` says whether this is the Android emulator. The page ignores keys it does not know.
 package io.github.purexyz.scape2004
@@ -54,8 +54,11 @@ object AppInfo {
         false
     }
 
-    /** The object injected as `window.LostCityNative` (keys sorted when it is encoded). */
-    fun pageInfo(context: Context, settings: JsonObject, lm: JsonObject): JsonObject = buildJsonObject {
+    /**
+     * The object injected as `window.LostCityNative` (keys sorted when it is encoded). `savedPasswords`: the names with a
+     * remembered password per server id, as `LostCityHost.accounts.saved` later sends them.
+     */
+    fun pageInfo(context: Context, settings: JsonObject, lm: JsonObject, savedPasswords: JsonObject = JsonObject(emptyMap())): JsonObject = buildJsonObject {
         put("platform", JsonPrimitive("android"))
         put("appVersion", JsonPrimitive(version))
         put("build", JsonPrimitive(build))
@@ -70,5 +73,6 @@ object AppInfo {
         put("haptics", JsonPrimitive(canVibrate(context)))
         put("settings", settings)
         put("lm", lm)
+        put("savedPasswords", savedPasswords)
     }
 }

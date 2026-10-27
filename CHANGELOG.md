@@ -5,6 +5,21 @@ with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
 ## [Unreleased]
 
+- **Online mode.** The app can play on a Lost City (Engine-TS 274) server that you or a friend run, on your Wi-Fi or
+  on the internet, instead of the world on the phone: the title's new **World** button (and Settings › World › Play on)
+  chooses This phone or a server, **Add server** takes an address and checks it, and switching restarts the game in
+  that world (logging out first, or saving the phone's world first). Online you log in with a name and the server's
+  password; a **Remember** box in the keyboard bar keeps it in the iPhone's Keychain (on Android encrypted with the
+  Keystore) for **Continue as**, and **Accounts** lists the names played there. The touch interface is the same, Report
+  abuse comes back to the chat bar, and the world settings, Bot chat and Saved data, which are the phone's world's, step
+  aside. A server whose game data differs from the app's works too: what differs is downloaded and kept. A server
+  that cannot be reached, or takes the connection and never answers, says so in a box, with Try again, Play offline
+  and Choose world. On Android 17 the app asks for the local network permission before it connects to a server on your
+  network; on the iPhone, when the local network is not allowed, the app says where to allow it. Lost City's
+  official worlds are not supported. It saves the phone's memory (no world, no bots, no chat model on the phone), not
+  much battery: drawing stays on the phone. How to run a server: [docs/ONLINE.md](docs/ONLINE.md). The world on the
+  phone plays as before.
+
 Performance work that changes nothing a player can see or hear: the same game state and bot behaviour, the same pixels
 and sound samples, 600 ms ticks, and saves that are byte for byte the same. Each change was checked against the code it
 replaces, and main and this build were run side by side from the same seeds at 0, 500 and 1,000 bots. The numbers below

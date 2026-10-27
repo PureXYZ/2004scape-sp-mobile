@@ -1,0 +1,28 @@
+ios: online, a server that never answers the login
+
+Online (docs/ONLINE.md) the game socket goes to a server the player added, and one can take the connection and
+then send nothing: an Engine-TS whose login worker is not running, a proxy whose backend is down, something
+else at that address. The login's first read then gives up after its 30 s timeout and rejects with the socket
+still open, which login() did not count as an IO error: it rethrew, GameShell.run() has no catch around
+mainloop(), and the client stopped for good on "Connecting to server...". Now any rejection with the socket is
+an IO error: the socket is closed and the form says "Error connecting to server.", as for a refused connection
+(the host's box then names the reason). The same login runs the reconnect after a lost connection. A socket that
+is already closed (the upstream case, and every offline one) goes the way it always did.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 92a0e8f..83ae163 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -2220,6 +2220,12 @@ export class Client extends GameShell {
+                 // IO error
+                 this.loginMes1 = '';
+                 this.loginMes2 = 'Error connecting to server.';
++            } else if (e instanceof WebSocket) {
++                // custom (ios): a server that took the connection and never answered (the read's 30 s timeout rejects with
++                // the socket still open): an IO error too, the socket closed, where upstream rethrows and its loop ends
++                this.stream?.close();
++                this.loginMes1 = '';
++                this.loginMes2 = 'Error connecting to server.';
+             } else {
+                 // exceptions in Java get stuck permanently on "Connecting to server..."
+                 throw e;

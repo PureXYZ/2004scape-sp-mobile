@@ -1,0 +1,34 @@
+ios: online, the login key is the game server's
+
+Online (docs/ONLINE.md) the page plays on a game server that may have a login key of its own (an Engine-TS
+server that ran tools/server/rsa.ts): the host gives it with the server's entry (lcHost.server.rsa, the two
+decimal numbers the server's own client bundle carries, read by native's probe), and the login's RSA block is
+encrypted with it. lcLoginKey() (overrides LcHost.ts) is null offline and for an entry without a key of its own,
+and then the build-time key is used exactly as before: the same packet, byte for byte. A wrong key shows as
+response 6 at login ("RuneScape has been updated!"), which the host words for a server.
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index ca8d402..92a0e8f 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -4,7 +4,7 @@ import { stopMidi, setMidiVolume, playMidi } from '#3rdparty/tinymidipcm.js';
+ import ClientBuild from '#/client/ClientBuild.js';
+ import { ClientCode } from '#/client/ClientCode.js';
+ import GameShell from '#/client/GameShell.js';
+-import { lcEvent, lcHaptic, lcSetting, lcTakeSecondaryClick } from '#/client/LcHost.js';
++import { lcEvent, lcHaptic, lcLoginKey, lcSetting, lcTakeSecondaryClick } from '#/client/LcHost.js';
+ import { MiniMenuAction } from '#/client/MiniMenuAction.js';
+ import MobileKeyboard from '#/client/MobileKeyboard.js';
+ import MouseTracking from '#/client/MouseTracking.js';
+@@ -1995,7 +1995,10 @@ export class Client extends GameShell {
+                 this.out.p4(1337); // uid
+                 this.out.pjstr(username);
+                 this.out.pjstr(password);
+-                this.out.rsaenc(BigInt(process.env.LOGIN_RSAN!), BigInt(process.env.LOGIN_RSAE!));
++                // custom (ios): online the game server's own login key (lcHost.server.rsa: the one its client bundle carries),
++                // else the build-time key, exactly as before (offline, and a server that kept the Engine-TS repo's key)
++                const loginKey = lcLoginKey();
++                this.out.rsaenc(loginKey?.n ?? BigInt(process.env.LOGIN_RSAN!), loginKey?.e ?? BigInt(process.env.LOGIN_RSAE!));
+ 
+                 this.loginout.pos = 0;
+                 if (reconnect) {

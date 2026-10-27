@@ -220,6 +220,49 @@ until the app is back)", "crash: a real renderer crash in front is noticed (cras
 | 171 | hw shown: characters via insertText | **drive (A)**, `keyboard:hardware` (the bar only, no IME) | with Gboard up |
 | 172 | hw shown: ⌫ ↩ via pressKey | **drive (A)** | |
 
+## drive.mjs --online: online mode (phases online … online-offline; ARCHITECTURE.md §3.1, §7.2-7.5; docs/ANDROID.md §7)
+
+`node android/test/drive.mjs --online` runs iOS's `game-test/online.js` in the Android app, against the same stand-in
+(`web/test/native/online-stub.mjs`, on this Mac, reached through `adb reverse`), an address where nothing listens (the
+emulator's own port, not reversed, so it refuses as nothing on the Mac would) and, with `ENGINE_URL`, the local
+Engine-TS (reversed too). Every iOS check below runs on Android by the same name. Android's meanings: the User-Agent
+names Android; a PUT's bytes go in `X-LC-Body` (test.js `writeInit`), and "over 4 MiB" is said by `X-LC-Length` (413
+before decoding, as the saves' 32 MiB); the Add / Edit box is ServerDialog (2004 look) filled through the same
+`server-alert` hook; `rememberLayout` is in dp in the bar; WebContent is killed with DEBUG `renderer-crash` (as the
+offline crash phases).
+
+| # | iOS check | Android | Notes |
+|---|---|---|---|
+| O1 | online: LostCityNative.savedPasswords is {} with nothing stored | **drive --online**, `JVM ServerPasswordStoreTest` | |
+| O2 | online: offline page: no server, the cover says offline | **drive --online** | `online-state` caption from the cover's state |
+| O3 | online: User-Agent names the app and iOS | **drive --online (A)**, `JVM OnlineProxyTest.crcIsTheServersTable`, `SocketBridgeTest.openSendInOrderAndEcho` | `2004Scape/<version> (Android <release>)` |
+| O4 | socket: open offline → error "no server", then close 1006 | **drive --online**, `JVM SocketBridgeTest.aRefusedUpgradeNothingListeningAndNoServer` | |
+| O5-O12 | probe: no url → 400; the stub (world 7 free, its key, single quotes); no rs2.cgi or client.js (both notes); /short, /badtrailer, /http500, /nothing-here; nothing listening → unreachable quickly; 12 s → timed out after 10 s; URL normalization vectors; the local Engine-TS (minified client.js) | **drive --online** (each), `JVM OnlineProxyTest.probeOfAServer`, `.probeNotesAndFailures`, `.worldSettingsAndLoginKey`, `OnlineServerTest.normalizesAsThePageDoes` (all of serverurl-vectors.json) | |
+| O13-O17 | server box: "Add server" with Address and Name (placeholders), empty; OK answers trimmed; prefilled for Edit, Cancel → null; the keyboard bridge first responder again; no box → shown false | **drive --online (A)**, `online:add` | ServerDialog; the focus lend closes and the bridge activates |
+| O12a | URL normalization: native's rules give every shared vector's answer (serverurl-vectors.json, through the debug hook `url-normalize`) | **drive --online**, `JVM OnlineServerTest.normalizesAsThePageDoes` | |
+| O18-O23 | accounts: save-password refused (unknown server, 21-character password, 13-character name); save → saved({s-stub: [tester]}); login → the stored password; login without one → null; forget → saved({}) and null; two servers | **drive --online**, `JVM ServerPasswordStoreTest` (each rule), `online:login`, `online:crash` | the Keystore-wrapped files |
+| O23a | accounts (iOS): the launch's sweep forgets the passwords of a server not in the settings, and only those (Keychain items outlive the app) | — (iOS only: `purge-passwords`) | the Keystore files go with the app's data on uninstall |
+| O24-O29 | remember: the box not ticked, left of Log in, clear of the line; a tap ticks it and calls keyboard.remember(true); an update without remember leaves it; the page's next remember wins; no box for login-user; none without remember | **drive --online (A)**, `JVM KeyboardBridgeTest.rememberBoxForAServersPasswordOnly`, `online:login` | layout in dp in the bar |
+| O30-O34 | server use: an unknown id ignored (no reload); reloads; savedPasswords at document start; settings.server stored; this page plays on the stub, the cover said online | **drive --online**, `online:add` | the server is decided when the router serves the main document |
+| O35-O47 | proxy: /crc (40 bytes, no-store), with a suffix; the bundle's archive without asking; an archive fetched, checked; cached; the app's User-Agent, no Origin, no cookies; the cache under s-stub/; a cached copy failing its CRC fetched again; checksum mismatch (not cached); 404 → not a 2004scape server; http 500; a slow archive (2 s); not an archive → a bundle file | **drive --online** (each), `JVM OnlineProxyTest.archivesFromTheBundleTheServerOrTheCache`, `.archiveFailures`, `.crcFailuresInPlainWords` | `cacheDir/online/` |
+| O48-O54 | ondemand: GET not cached → 404; PUT → 204 and GET the same bytes; archive 0-3 and file 0-65535 in plain decimal, else 400; PUT with no body → 400; over 4 MiB → 413; file 0 and 65535; DELETE → 405 | **drive --online (A)**, `JVM OnlineProxyTest.onDemandCache` | X-LC-Body; 413 by X-LC-Length |
+| O55-O68 | socket: queued sends in order; a 5,000-byte round trip; 60 in a row in order; a burst of 50 in a few calls; the upgrade (binary, User-Agent, no Origin, no cookie); no event after the page's close; the server saw 1000; unknown ids ignored; 3 messages then close 4000 "bye"; the server's close 1000 "done"; a text frame → error, 1006; a drop → network, 1006; a refused upgrade → http 403; no sockets left open | **drive --online** (each), `JVM SocketBridgeTest` (each) | OkHttp |
+| O69-O73 | online-crash: WebContent killed; the notice says to log in again; still online after the restart; the dead page's socket closed by native (1001); online-reload: the page's own reload closed its sockets (1001) | **drive --online (A)**, `online:crash` | the renderer crashed through DEBUG `renderer-crash` |
+| O74-O79 | online-down: plays on the server that is down, the cover said online; /crc → 502 unreachable; an archive → 502 unreachable; the bundle's archives still served; a socket → error refused, 1006 | **drive --online (A)**, `JVM OnlineProxyTest.crcFailuresInPlainWords`, `SocketBridgeTest.aRefusedUpgradeNothingListeningAndNoServer` | the emulator's own unused port |
+| O80-O81 | online-slow: /crc of a server answering after 12 s → 502 timed out after 10 s | **drive --online**, `JVM OnlineProxyTest.crcFailuresInPlainWords` (a 1.5 s timeout) | |
+| O82-O86 | online-engine: plays on the local Engine-TS; its /crc; its config archive through the proxy; a socket: OnDemand opcode 15 → its 8 bytes | **drive --online** (with ENGINE_URL), `online:boot`, `online:login` (a full game over the bridge) | |
+| O87-O93 | online-offline: back offline, the cover said offline; /crc the bundle's again; /ondemand a bundle path again (GET 404, PUT 405); the probe offline too; s-stub's cached files; server delete: the cache folder and the passwords go | **drive --online**, `JVM OnlineProxyTest.offlineEveryPathIsTheBundlesAsBefore`, `.onDemandCache`, `ServerPasswordStoreTest.theListingAndAServersPasswordsAtOnce`, `online:offline` | |
+| O94 | drive.mjs: the logs carry no password and no socket contents | **drive --online**, `online:leaks` | logcat and the app's log file |
+
+Android only: `online.mjs` (the real app: Add server through the World sheet and the native box, the probe, Use; boot
+online with no engine; a password login through the native keyboard with Remember; walk; Report abuse; HOME for 5, 25,
+45 and 70 s; a renderer crash and Continue as with the kept password; back offline through Settings › World; Android
+17's local network permission: Add server with the emulator's private alias for the Mac asks first, a probe without
+the permission says "local network" and asks then) and `shell:cover`'s online caption against the page's, pixel for
+pixel. iOS's `app-test --server` plan is this run's counterpart. Measured 2026-10-26: drive --online 92/92 (90 page +
+2 driver) twice; online.mjs every phase passing across its runs (add, boot, login, background 5/25/45/70 s, crash and
+Continue as, play, offline 42/43 with the lan phase alone 23/23 after its fix).
+
 ## What drive.mjs does besides checks, and the rest of web/test/native
 
 | iOS | Android |
@@ -247,3 +290,15 @@ Nothing of the iOS checks is uncovered. Weaker than iOS, and why:
 World map, save, background 5 s and 25 s, dropped connection, reload, re-login, memory warning, Saved data; with bots
 their checks; `--lm-bench` the chat model under load), so its checks are the iOS ones by name. Android differences are
 in the driver only (Settings app for the background, dumpsys meminfo for memory, logcat for the page's console).
+
+`--server` runs iOS's `app-test --server` online run, check for check (31 on both): Add server through the box and
+the probe, Use; a New User password login with Remember; logout, Accounts' key mark and "Continue as" from the
+Keystore; a walk, a Banker and the bank; the game socket's traffic standing and walking; the background 5, 25, 45 and
+70 s; the web view's process lost and "Continue as" again; to the phone's world in game and back from the title; with
+`--engine` the server stopped (the unreachable box, Play offline) and the content-drift server (fetched, cached, the
+next launch from the cache); no password in the logs. Where Android differs: the renderer is crashed through DEBUG
+`renderer-crash` (iOS: the driver kills WebContent), the engine is reached through `adb reverse`, the logs checked are
+logcat and the app's log file, and before the relaunch the page waits 8 s for Chromium to write its localStorage and the
+driver presses HOME. Measured 2026-10-26 on the API 37 AVD: 31/31 (backgrounds 5, 25 and 45 s kept the session, 70 s
+reconnected; after the renderer crash "Continue as" got "already logged in" until the server let the old session go,
+6 tries in 32 s); on the iOS simulator 31/31.

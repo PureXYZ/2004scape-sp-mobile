@@ -30,6 +30,8 @@ class NativeSettings(private val store: Store) {
         }
     }
 
+    /** (Volatile: the router reads it on Chromium's threads when a page loads, to know its server.) */
+    @Volatile
     var values: JsonObject = (store.load()?.let(JsonText::parse) as? JsonObject) ?: JsonObject(emptyMap())
         private set
 

@@ -7,7 +7,9 @@
     <title>2004Scape</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="host.css">
-    <!-- Classic script on purpose: it must install the WebSocket replacement before client.js is evaluated. -->
+    <!-- Classic scripts on purpose: host.js must install the WebSocket replacement before client.js is evaluated, and it
+         reads the server choice with serverurl.js's rules to choose it. -->
+    <script src="serverurl.js"></script>
     <script src="host.js"></script>
     <script src="bzip2.js"></script>
     <script src="hud.js"></script>
@@ -25,7 +27,7 @@
         <!-- everything over the world; zoomed as a whole on large screens (hud.js) -->
         <div id="hud-ui">
             <!-- bottom left: the newest chat lines, the chatbox when open, its buttons (the 2004 chat filters beside them
-                 while it is open; Report abuse has nobody to report in a world of one) -->
+                 while it is open; Report abuse only online: in a world of one there is nobody to report) -->
             <div id="hud-chat-lines" aria-live="polite"></div>
             <div id="hud-chat-box" class="stone-frame" hidden><canvas id="surface-chat" class="surface"></canvas></div>
             <!-- a dialogue's answers as finger-sized rows, in the chatbox's place (hud.js) -->
@@ -39,6 +41,7 @@
                     <button class="stone-btn chat-mode" data-chat-mode="0" aria-label="Public chat"><span class="chat-label">Public<span class="label-more"> chat</span></span><span class="chat-value"></span></button>
                     <button class="stone-btn chat-mode" data-chat-mode="1" aria-label="Private chat"><span class="chat-label">Private<span class="label-more"> chat</span></span><span class="chat-value"></span></button>
                     <button class="stone-btn chat-mode" data-chat-mode="2" aria-label="Trade/duel"><span class="chat-label">Trade<span class="label-more">/duel</span></span><span class="chat-value"></span></button>
+                    <button class="stone-btn chat-mode report" data-chat-mode="3" id="btn-report" aria-label="Report abuse" hidden><span class="chat-label">Report<span class="label-more"> abuse</span></span></button>
                 </div>
             </div>
 
@@ -114,11 +117,14 @@
         <button class="orb" id="btn-settings" aria-label="Settings"><span class="icon icon-cog"></span></button>
     </div>
 
-    <!-- The title screen's own buttons under the titlebox (host.js titleScreen). -->
+    <!-- The title screen's own buttons under the titlebox (host.js titleScreen): Continue as and Characters (online
+         Accounts: the server's names), or the first-run hint, and the World the page plays on (the picker). -->
     <div id="title-actions" hidden>
         <button class="title-btn" id="btn-continue"><span class="continue-label">Continue as</span><span id="continue-name"></span></button>
         <button class="title-btn" id="btn-characters">Characters</button>
+        <button class="title-btn" id="btn-accounts" hidden>Accounts</button>
         <div id="title-hint">Offline world: log in with any name to make a character</div>
+        <button class="title-btn" id="btn-world"><span class="continue-label">World</span><span id="world-name">This phone</span></button>
     </div>
 
     <div id="status-pill" hidden></div>
@@ -127,7 +133,9 @@
         <div class="loading-card">
             <div class="loading-logo" role="img" aria-label="RuneScape"></div>
             <div class="loading-bar"><div class="loading-fill" id="loading-fill"></div><div class="loading-text" id="loading-text">Loading - please wait.</div></div>
-            <div class="loading-sub">2004Scape · November 2004 · offline</div>
+            <div class="loading-sub" id="loading-sub">2004Scape · November 2004 · offline</div>
+            <!-- online: "· online", before the first paint (host.js lcLoaderCaption; the native covers say the same) -->
+            <script>window.lcLoaderCaption?.(document.getElementById('loading-sub'));</script>
         </div>
     </div>
 
@@ -147,6 +155,55 @@
             </div>
             <div class="characters-list" id="characters-list"></div>
             <div class="characters-where" id="characters-where"></div>
+        </div>
+    </div>
+
+    <!-- The worlds (host.js servers): this phone's and the game servers the player added; a tap plays on it (the page
+         reloads), Edit and Delete beside each server, Add server at the end. An address the player typed is checked
+         here (the probe) before it is saved: the result takes the list's place. -->
+    <div id="worlds" class="overlay" hidden>
+        <div class="settings-panel characters-panel worlds-panel" role="dialog" aria-label="Worlds">
+            <div class="panel-header">
+                <div class="panel-title" id="worlds-title">Choose a world</div>
+                <button class="close-btn" id="worlds-close" aria-label="Close">Close</button>
+            </div>
+            <div class="characters-list" id="worlds-list"></div>
+            <div class="worlds-probe" id="worlds-probe" hidden>
+                <div class="data-name" id="probe-address"></div>
+                <div class="probe-status" id="probe-status" role="status"></div>
+                <div class="data-detail" id="probe-notes"></div>
+                <div class="panel-actions">
+                    <button class="title-btn" id="probe-use">Use</button>
+                    <button class="title-btn" id="probe-save">Save</button>
+                    <button class="title-btn" id="probe-cancel">Cancel</button>
+                </div>
+            </div>
+            <div class="characters-where" id="worlds-where">Online, the game runs on the server: it keeps your progress there, not on this phone.</div>
+        </div>
+    </div>
+
+    <!-- Online: the names played on this server (host.js accounts), a key mark where a password is kept (Remember). -->
+    <div id="accounts" class="overlay" hidden>
+        <div class="settings-panel characters-panel accounts-panel" role="dialog" aria-label="Accounts">
+            <div class="panel-header">
+                <div class="panel-title" id="accounts-title">Accounts</div>
+                <button class="close-btn" id="accounts-close" aria-label="Close">Close</button>
+            </div>
+            <div class="characters-list" id="accounts-list"></div>
+            <div class="characters-where" id="accounts-where"></div>
+        </div>
+    </div>
+
+    <!-- Online: the server cannot be reached, or refused the game (host.js unreachable), in plain words. -->
+    <div id="unreachable" class="overlay" hidden>
+        <div class="settings-panel confirm-panel" role="alertdialog" aria-labelledby="unreachable-title">
+            <div class="panel-header"><div class="panel-title" id="unreachable-title"></div></div>
+            <div class="confirm-text" id="unreachable-text"></div>
+            <div class="panel-actions">
+                <button class="title-btn" id="unreachable-retry">Try again</button>
+                <button class="title-btn" id="unreachable-offline">Play offline</button>
+                <button class="title-btn" id="unreachable-choose">Choose world</button>
+            </div>
         </div>
     </div>
 
@@ -209,17 +266,24 @@
                         </div>
                     </div>
 
-                    <!-- Restart beside the settings it applies (it says "Restart to apply" when one of them changed) -->
+                    <!-- Play on (host.js servers: the world on this phone or a game server, Change opens the picker); Restart
+                         beside the settings it applies (it says "Restart to apply" when one of them changed). Online the
+                         phone's world rows give way to a note under Detail (the client's: it stays). -->
                     <div class="settings-section" role="tabpanel" id="section-world" hidden>
-                        <div class="data-row">
+                        <div class="data-row" id="world-playon">
+                            <span class="data-text"><span class="data-name">Play on</span><span class="data-detail" id="world-playon-name">This phone</span></span>
+                            <button class="data-btn plain" id="world-change">Change</button>
+                        </div>
+                        <div class="data-row offline-only" id="world-restart-row">
                             <span class="data-text"><span class="data-detail">These apply after a restart.</span><span class="data-detail">More bots: a warmer phone and more battery use.</span></span>
                             <button class="title-btn" id="settings-restart">Restart</button>
                         </div>
-                        <div class="row"><span>World type</span><div class="seg" data-setting="members" data-restart><button data-value="true">Members</button><button data-value="false">Free</button></div></div>
-                        <div class="row"><span>XP rate</span><div class="seg" data-setting="xpRate" data-restart><button data-value="1">1×</button><button data-value="2">2×</button><button data-value="5">5×</button><button data-value="10">10×</button><button data-value="25">25×</button><button data-value="50">50×</button></div></div>
-                        <div class="row"><span>Jmod</span><div class="seg" data-setting="jmod" data-restart><button data-value="true">On</button><button data-value="false">Off</button></div></div>
-                        <div class="row"><span>Bots</span><div class="seg" data-setting="bots" data-restart><button data-value="0">Off</button><button data-value="25">25</button><button data-value="50">50</button><button data-value="100">100</button><button data-value="250">250</button><button data-value="500">500</button><button data-value="750">750</button><button data-value="1000">1000</button></div></div>
+                        <div class="row offline-only"><span>World type</span><div class="seg" data-setting="members" data-restart><button data-value="true">Members</button><button data-value="false">Free</button></div></div>
+                        <div class="row offline-only"><span>XP rate</span><div class="seg" data-setting="xpRate" data-restart><button data-value="1">1×</button><button data-value="2">2×</button><button data-value="5">5×</button><button data-value="10">10×</button><button data-value="25">25×</button><button data-value="50">50×</button></div></div>
+                        <div class="row offline-only"><span>Jmod</span><div class="seg" data-setting="jmod" data-restart><button data-value="true">On</button><button data-value="false">Off</button></div></div>
+                        <div class="row offline-only"><span>Bots</span><div class="seg" data-setting="bots" data-restart><button data-value="0">Off</button><button data-value="25">25</button><button data-value="50">50</button><button data-value="100">100</button><button data-value="250">250</button><button data-value="500">500</button><button data-value="750">750</button><button data-value="1000">1000</button></div></div>
                         <div class="row"><span>Detail</span><div class="seg" data-setting="lowMemory" data-restart><button data-value="false">High</button><button data-value="true">Low</button></div></div>
+                        <div class="section-note" id="world-online-note" hidden>Online the server sets the world: its type, XP rate, staff and bots. Detail applies the next time the game loads.</div>
                     </div>
 
                     <!-- Bot chat (host.js botChat): who writes the bots' replies to you, the model in the app, the Claude key
@@ -269,7 +333,7 @@
                             <span class="data-text"><span class="data-name" id="about-version">2004Scape · Lost City 274</span><span class="data-detail" id="about"></span></span>
                             <button class="data-btn plain" id="about-licences">Licences</button>
                         </div>
-                        <div class="section-note about-text" id="about-disclaimer">2004Scape is an unofficial fan project. It is not affiliated with, endorsed by or connected to Jagex Ltd or the Lost City project. RuneScape is a registered trademark of Jagex Ltd. The game data the app is built from is the intellectual property of Jagex Ltd. This project is free: no ads, no payments, no accounts.</div>
+                        <div class="section-note about-text" id="about-disclaimer">2004Scape is an unofficial fan project. It is not affiliated with, endorsed by or connected to Jagex Ltd or the Lost City project. RuneScape is a registered trademark of Jagex Ltd. The game data the app is built from is the intellectual property of Jagex Ltd. This project is free: no ads, no payments, no accounts. Online mode connects only to servers you add.</div>
                         <div class="section-note about-text" id="about-credits">Built on Lost City (engine, client, content) and 2004SP Progressive (the bots' AI), with llama.cpp and Qwen3.5 (the on-device chat model). Most of this app's own code was written with Claude (Anthropic).</div>
                     </div>
                 </div>

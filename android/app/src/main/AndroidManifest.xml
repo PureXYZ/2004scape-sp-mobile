@@ -1,26 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   The app's manifest (docs/ANDROID.md §1; ports the iOS Info.plist and project settings).
-  The permissions: VIBRATE (haptics) here, INTERNET (Claude online) from :llm's manifest.
+  The permissions: VIBRATE (haptics), INTERNET (online mode's game servers; :llm's manifest has it too, for Claude online,
+  but a build without the chat model must still reach a server) and ACCESS_LOCAL_NETWORK (Android 17: a server on the
+  home network; asked for only when the system refuses one, docs/ANDROID.md §7).
 
   - LostCityApp: the log, the launch line and the save store first (AppDelegate).
   - label 2004Scape, as the iOS CFBundleDisplayName.
   - hasFragileUserData: an uninstall from Settings offers to keep the saves (docs/ANDROID.md §1 Saves on disk).
   - allowBackup with the rules in res/xml: Auto Backup and device transfer keep the saves and the settings, nothing
     else (iOS backs up Documents and UserDefaults).
-  - networkSecurityConfig: no cleartext anywhere (the page never touches the network; its router answers 403).
+  - networkSecurityConfig: cleartext allowed for native connections (a game server the player adds is usually plain
+    http/ws on a home network); the page itself never touches the network (its router answers other hosts 403).
   - appCategory game: also keeps Android 16+ from ignoring the landscape lock on large screens.
   - singleTask: one game at a time (iOS UIApplicationSupportsMultipleScenes = NO); two would run two engines on the
     same saves.
   - configChanges: every change the activity handles itself, so a rotation, keyboard, theme, font or locale change never
     recreates it and reloads the WebView, which would restart the world (the newer kinds included).
   - adjustNothing: the WebView is never resized by the keyboard; the page lifts its own UI (LostCityHost.keyboard.frame).
-  - WebView meta-data: no Safe Browsing lookups (offline), no metrics.
+  - WebView meta-data: no Safe Browsing lookups (the page loads only the app's own origin), no metrics.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Haptics.kt: the page's and native's haptics (a normal permission, granted at install). -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Online mode: the game server's files and sockets, fetched natively (OnlineProxy, SocketBridge). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 17 (API 37): a game server on the local network (a runtime permission; Network.kt). -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <!-- Online mode: whether the phone has a network at all, for the words of a failed connection (a normal permission). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:name=".LostCityApp"

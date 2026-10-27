@@ -7,7 +7,7 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) first: everything there applies unless t
 
 Numbers marked "measured" come from the arm64 emulator (AVD `Medium_Phone_API_37.0`: 2400×1080 at 420 dpi, a device
 pixel ratio of 2.625, Android 17 / API 37, WebView 145.0.7632.218, Gboard) on an Apple M2 Mac, unless they say
-otherwise. The app has been tested on the emulator; what only a phone can show is listed in §8.
+otherwise. The app has been tested on the emulator; what only a phone can show is listed in §9.
 
 ## 1. Decisions
 
@@ -27,6 +27,7 @@ otherwise. The app has been tested on the emulator; what only a phone can show i
 | Canvas pushes | A canvas gets its **whole frame when any of its pixels changed**, and nothing when none did (client patch 0026, `lcHost.platform` `'android'`). iOS sends only the rect of the changed pixels; on the emulator that rect made in-game frames of 100 ms or more come about three times as often as upstream's whole frame every frame (walking 35 instead of 38 fps). Whole frames of the changed canvases only come about half as often as upstream's (3 runs each: at Lumbridge standing still 18 a minute instead of 50, walking 30 instead of 64, at 42 and 40 fps instead of 40.5 and 38; at Varrock West with 500 bots 30 instead of 42 and 49 instead of 90). |
 | bots.sav | Written at most once every 30 s, plus at every save occasion (pause, background, Save now, autosave, your logout, Reset world). Both apps. |
 | Saves on disk | `filesDir/Documents/` with the iOS layout (`players/<profile>/<name>.sav`, `bots/<profile>/bots.sav`), atomic writes with `.bak` (JNI `renameat2(RENAME_EXCHANGE)`; `link()` is EACCES under SELinux). A player save is fsynced, the file and then its folder (the swap is a folder entry), before its 204; bots.sav is not (iOS syncs neither). A `DocumentsProvider` shows the folder in the system Files app as **2004Scape** (§4.6). `android:hasFragileUserData="true"`, so an uninstall from the launcher or Settings offers to keep the data. |
+| Online | Play on a self-hosted Engine-TS 274 server (docs/ONLINE.md), as on iOS: the page's sockets and the server's files go through native code (**OkHttp 4.12**), remembered passwords are Keystore-wrapped files, the Add server box is a native dialog in the 2004 look. Details: §7. |
 | Bot chat | The same three choices. On-device: llama.cpp **b11297**'s official Android arm64 prebuilt, **CPU only**, the same GGUF and model.json as iOS, loaded from the APK by fd (stored uncompressed, 32-byte aligned by the build, mmapped). Claude online: the same request, through `HttpURLConnection` (not the Java SDK), with the key in an AndroidKeyStore-wrapped file. Details: §5. |
 
 ## 2. Layout of `android/`
@@ -38,7 +39,7 @@ android/
     src/main/java/io/github/purexyz/scape2004/...    provider, bot chat glue (§4, §5.2)
     src/main/cpp/          fsx.c (renameat2)
     src/test/              JVM unit tests
-    src/debug/res/xml/     network_security_config.xml (cleartext to 127.0.0.1: the Claude mock)
+    src/debug/res/xml/     network_security_config.xml (as src/main's: cleartext allowed for native connections)
   botchat/                 pure Kotlin/JVM library: BotChatModel, LocalModel, OnlineModel, ModelKeyStore, LlmJni (runs on the Mac JVM too)
   llm/                     Android library: liblcllm (src/main/cpp: the llama.cpp C++ core + JNI), AndroidBotChat (the facade),
                            AndroidModelKeyStore, ThermalGate, ModelAssets, KeyEntryDialog, DeviceStats; instrumented tests
@@ -46,7 +47,7 @@ android/
   scripts/                 deploy.sh, fetch-llama.sh, prepare-model.sh, make-icon.swift
   store/                   icon-512.png
   test/                    all.mjs (every test, one build), smoke.mjs, keyboard.mjs, shell.mjs, lm.mjs, crisp.mjs, app-test.mjs,
-                           drive.mjs (the real app on an emulator or phone, over adb and CDP), PARITY.md, lib/ (adb + CDP,
+                           drive.mjs, online.mjs (the real app on an emulator or phone, over adb and CDP), PARITY.md, lib/ (adb + CDP,
                            screen pixels, test builds); native/lm-harness.mjs (the bot chat on the Mac JVM),
                            native/check-apk-alignment.mjs
   build/                   generated, git-ignored: web/Game (the web bundle), model-assets/Model (prepare-model.sh),
@@ -94,6 +95,11 @@ The router implements ARCHITECTURE.md §3 for the origin above. `shouldIntercept
   without padding (`[A-Za-z0-9_-]`, length mod 4 ≠ 1) → 400; decoded size ≠ `X-LC-Length` → 400. Then the bytes go
   through the iOS rules (an empty write → 400, identical bytes skipped, `.bak`; 204, or 500 when the write fails).
 - Measured with the real engine and 1,000 bots: bots.sav (about 1 MB) takes 18–33 ms, a player save 3–4 ms.
+- **Online** (ARCHITECTURE.md §7.2): the page stores a game server's OnDemand files the same way, `PUT
+  /ondemand/<archive>/<file>` with the bytes in `X-LC-Body` + `X-LC-Length` (LocalOnDemand, `lcPlatform()` `'android'`);
+  native's calls to the page (socket events, `accounts.login`/`saved`, `servers.answer`, `keyboard.remember`) go
+  through `window.__lcCall` like the others. `node web/test/e2e.mjs --engine <dir> --platform android` plays the online
+  checks as this page, with the desktop double of native speaking this bridge (web/test/online/native-double.mjs).
 - `POST /log` takes its text from `X-LC-Body` or from `?text=`.
 - Desktop tests: `serve.mjs` accepts both kinds of write (`--android` / `android: true`: only the header, as the
   router), and `node web/test/e2e.mjs --platform android` runs the page with an Android `LostCityNative`, a recording
@@ -490,7 +496,72 @@ host.css `html.ui-snapped`):
   device px per game px, as on a 3x iPhone), soft by design.
 - Screens and the sizes they get: `web/test/android-stub.mjs`.
 
-## 7. Tests
+## 7. Online mode (ARCHITECTURE.md §3.1, §7.2-7.6; docs/ONLINE.md)
+
+Playing on a self-hosted Engine-TS 274 server instead of the world on the phone. The page side is shared (host.js
+`NativeSocket`, the worlds sheet, Accounts, the unreachable box; client patch 0030 and LocalOnDemand's remote files); the
+native side does what the Swift one does, with the contract's messages, words and DEBUG hooks:
+
+| File | What (the iOS file it ports) |
+|---|---|
+| `OnlineServer.kt` | The page load's server from the stored settings; addresses normalized by web/host/serverurl.js's rules, rule for rule (the JVM test runs `web/test/online/serverurl-vectors.json`); `GameCrc` (CRC-32, `/crc`'s trailer). (`OnlineServer.swift`) |
+| `OnlineProxy.kt` | The router's online routes: `/crc`, the archives (bundle → `cacheDir/online/<id>/` by CRC → the server, checked, stored), `/ondemand/<a>/<f>` (GET, PUT through `X-LC-Body`), `/server-probe` in every mode; 502 bodies in the contract's words. (`OnlineProxy.swift`) |
+| `Network.kt` | One OkHttp client (the User-Agent `2004Scape/<version> (Android <release>)`, no Origin, no cookies, no cache, no pings); Android 17's local network permission (`LocalNetwork`). |
+| `SocketBridge.kt` | The page's WebSockets over OkHttp: open/send/close by id, `socket.events` batched over 2 ms, the error words and close codes, 10 s to open, a page reset closes with 1001. (`SocketBridge.swift`) |
+| `ServerPasswordStore.kt` | Remembered passwords: one AndroidKeyStore AES-256-GCM key (`io.github.purexyz.scape2004.server-passwords`), a file per account in `noBackupFilesDir/server-passwords/<id>/<hex name>.bin` (AAD `<id>/<lower-case name>`), listed without decrypting. (`ServerPasswordStore.swift`, the Keychain) |
+| `OnlineComponent.kt` | The session component: `socket`, `account`, `server` messages, `savedPasswords`, the restart notices' "You will need to log in again.", the local network notice and prompt, the DEBUG hooks. (`GameViewController.swift`'s online half) |
+| `ServerDialog.kt` | The Add / Edit server box. (`presentServerAlert`) |
+| `KeyboardAccessoryBar.kt` | The Remember box left of Log in. (`KeyboardAccessoryBar.swift`) |
+| `LoadingCover.kt`, `Cover.kt` | The caption "… · online" for a page load on a server (CoverController.online, set by `loadGame`). (`LoadingOverlay.swift`) |
+
+What differs from iOS, and why:
+
+- **Which server a page load plays on** is decided when the router is asked for the main document (`/`, `/index.html`),
+  from the stored settings (iOS: on the main frame's navigation). The same moments: a load, a reload the page made
+  itself, the reload after a renderer death.
+- **The socket bridge is OkHttp 4.12** (Android has no WebSocket client; WebView's own would send the app's origin and
+  could not reach `ws://` from the https origin). OkHttp reads each socket on one thread and its callbacks are posted to
+  the UI thread in order, so the messages before a close are always delivered before it (iOS drains its receive loop
+  first). OkHttp queues sends until the socket is open, as iOS's own queue.
+- **In the background** the WebView's timers are paused (§3.4), so the client sends nothing; the server's 30 s idle
+  request and 60 s silence logout apply as on an iPhone that suspended WebContent. Socket events that arrive meanwhile
+  reach the page when its timers run again; the client then reconnects (its own opcode 18) as on iOS.
+- **Passwords** are Keystore-wrapped files (the Claude key's way, §5) where iOS has the Keychain; both are outside
+  backups and this device only.
+- **The Add / Edit server box** is a native dialog in the 2004 look (RSTheme: stone, the window edge, the game's fonts and
+  buttons; ids `server_title`, `server_address`, `server_name`, `server_cancel`, `server_ok`) where iOS has a system
+  alert. As the Claude key's box, on a landscape phone it comes up with the keyboard down, and a tap on a field opens the
+  IME's full-screen editor for it (Next goes to Name, Done is OK); the keyboard bridge lends its focus meanwhile.
+- **Cleartext**: `INTERNET` is declared in `:app` itself (a `-Plc.model=none` build still reaches a server), and
+  `res/xml/network_security_config.xml` allows cleartext for native connections (a server at home is plain http/ws),
+  as iOS's `NSAllowsArbitraryLoads`. The page itself still reaches nothing but the app's origin (its router answers 403).
+- **Android 17's local network access.** `ACCESS_LOCAL_NETWORK` is a runtime permission on API 37 (`prot=dangerous`,
+  the Nearby devices prompt), and an app that targets 37 does not get through to a device on the local network until
+  the player allows it (measured on the AVD: a connection to 10.0.2.2, the emulator's private alias for the Mac, times
+  out without it and works with it; `dumpsys platform_compat` lists RESTRICT_LOCAL_NETWORK as disabled all the same).
+  iOS asks at the first LAN connection by itself (`NSLocalNetworkUsageDescription`; while it asks, or after Don't Allow,
+  URLSession fails at once, which iOS also reports as `local network`). Here native asks first, before it
+  connects to a local address (a private, link-local or unique-local IP literal or a `.local` name): when the Add
+  server box gives one (the answer waits for the prompt, so the page's probe gets through) and when a page load plays on
+  one (the load waits). A notice says why ("To reach a server on your network, allow 2004Scape to find and connect to
+  devices on your local network."), then the system's prompt; once a page load. A connection that fails that way
+  anyway (a name that resolves to a local address, the prompt refused: a timeout from a local address, or EPERM)
+  reports the words `local network`, and asks then if it has not. A server on the internet, or on the phone itself
+  (127.0.0.1, what `adb reverse` gives the tests), never needs it. `online.mjs`'s `lan` phase checks both ways. Who
+  waits for the system's prompt is the session's (`GameSession.permissionResult`), not the activity's: an activity
+  recreated while the prompt is up delivers the answer to the same wait.
+- **No network**: Android's resolver says "No address associated with hostname" both for a name that does not exist
+  and for any name in airplane mode; the socket bridge reports `network` (as iOS) unless the phone has a network with
+  internet (ConnectivityManager, `ACCESS_NETWORK_STATE`, a normal permission granted at install).
+- **OnDemand PUTs** carry their bytes in `X-LC-Body` (§3.2); too large by `X-LC-Length` (over 4 MiB) is 413 before
+  anything is decoded.
+
+DEBUG actions (iOS's names): `server-alert {address?, name?, button?}`, `remember-tap`, `online-state` (`{server, url,
+sockets, caption, userAgent}`), `online-cache {op?: 'corrupt', path?}`, `last-notice`; Android's own `local-network`
+(`{exists, granted}`) and `overlay`'s `online` (the cover's caption, for shell.mjs). `keyboard-state` adds `remember` and
+`rememberLayout` (dp in the bar).
+
+## 8. Tests
 
 | What | Command (from the repo root unless it says otherwise) |
 |---|---|
@@ -504,9 +575,11 @@ host.css `html.ui-snapped`):
 | Shell: haptics (dumpsys vibrator_manager), audio (focus, the ringer ignored, a call), the cover against the page pixel for pixel and the filmed hand-over, the Files provider and DocumentsUI, the icon | `node android/test/shell.mjs [--serial S] [--no-build] [--only haptics,audio,cover,provider,files,icon]` |
 | The chat model in the real app (`model`: status, Settings › Bot chat, the warm-up, real replies, the key's box and the focus lend, Claude online against the mock, thermal, unloads; `release`: the R8 build with a probe; `none`: `-Plc.model=none`) | `node android/test/lm.mjs [--serial S] [--no-build] [--only model,release,none] [--mock-port 47591]` |
 | The pixel snap on the device's own screen | `node android/test/crisp.mjs [--serial S] [--no-build] [--no-install]` |
-| Everything on one device, one build (JVM, smoke, keyboard, shell, lm `--only model`, drive, app-test; a summary table in `android/build/all/`) | `node android/test/all.mjs [--serial S] [--quick] [--no-build] [--only a,b] [--skip a,b] [--bots N] [--instrumented]` |
-| The in-app test: the same `autotest.js` run as the iPhone's app-test, the chat model's bench under load (`--lm-bench[=MIN] [--lm-think]`), and the soaks that A/B a branch (`--soak NAME`, docs/BUILDING.md §4) | `node android/test/app-test.mjs [--serial S \| --device [serial]] [--bots N] [--lm-bench[=MIN]] [--lm-think] [--soak NAME] [--keep-data] [--no-build]` |
+| Everything on one device, one build (JVM, smoke, keyboard, shell, lm `--only model`, drive, app-test; a summary table in `android/build/all/`) | `node android/test/all.mjs [--serial S] [--quick] [--no-build] [--only a,b] [--skip a,b] [--bots N] [--instrumented] [--prebuilt]` (`--prebuilt`: drive's and app-test's last `--build-only` APKs, no Gradle beside the emulator) |
+| The in-app test: the same `autotest.js` run as the iPhone's app-test, the chat model's bench under load (`--lm-bench[=MIN] [--lm-think]`), the soaks that A/B a branch (`--soak NAME`, docs/BUILDING.md §4), and online mode's run (`--server`, the iPhone's steps against a local Engine-TS through `adb reverse`) | `node android/test/app-test.mjs [--serial S \| --device [serial]] [--bots N] [--lm-bench[=MIN]] [--lm-think] [--soak NAME] [--server http://127.0.0.1:<port> [--engine <dir> --engine-node <dir>]] [--keep-data] [--no-build]` |
 | The native layer: iOS's drive.mjs / drive-hw.mjs page with Android's meanings; `android/test/PARITY.md` maps every iOS check | `node android/test/drive.mjs [--serial emulator-S] [--no-build] [--start-phase P]` |
+| Online mode's native layer: iOS's `game-test/online.js` (proxy, sockets, probe, Keystore, the server box, Remember) against the stand-in and a local Engine-TS through `adb reverse` | `ENGINE_URL=http://127.0.0.1:47640 node android/test/drive.mjs --online [--no-build]` |
+| Online mode in the real app on a local Engine-TS (`add`, `boot`, `login`, `background`, `crash`, `play`, `offline`, `lan`, `leaks`: §7) | `node android/test/online.mjs --engine <dir> --node-bin <dir> [--only …]` or `--server <url>` |
 | The page as Android runs it, in desktop Chrome | `node web/test/e2e.mjs --platform android`, `node web/test/hud.mjs --platform android`, `node web/test/gallery/gallery.mjs --platform android` |
 
 Each device test writes its screenshots and `results.json` to `android/build/<test>/`. On the AVD Gboard shows beside
@@ -538,7 +611,15 @@ How the test tools work:
   `/proc/<pid>/task/*/stat` of the app, its renderer, SurfaceFlinger, the composer, the audio server and system_server;
   `dumpsys gfxinfo`, `SurfaceFlinger --latency`, meminfo) into `soak/`, a start-up series relaunches with
   `am start -S -W` (its times in `launches.jsonl`), and the soak's lines come from the app's log file at the end;
-  `summary.json` and `summary.txt` follow (web/test/perf/summary.mjs).
+  `summary.json` and `summary.txt` follow (web/test/perf/summary.mjs). `--server <url>` plays online mode's run of
+  `autotest.js` instead, step for step as the iPhone's (docs/BUILDING.md §4, In the iPhone app): the server added through
+  the box and the probe, a password login with Remember, "Continue as" from the Keystore, a walk, a Banker and the bank,
+  the game socket's traffic standing and walking, the background 5, 25, 45 and 70 s, the renderer crashed (the DEBUG
+  hook `renderer-crash`: the AVD has no root to kill it from outside, as the simulator's WebContent is) and a login
+  again, to the phone's world and back; with `--engine <dir>` the run starts and stops a local Engine-TS itself, then
+  stops it (the unreachable box, Play offline) and plays a content-drift copy on `<port>` +3 (its files fetched, cached,
+  and taken from the cache at the next launch). `adb reverse` gives the device the Mac's ports; the run fails if a
+  password it typed reaches logcat or the app's log file.
 - **`node android/test/drive.mjs [--serial emulator-S] [--no-build] [--start-phase P]`**: web/test/native/drive.mjs's
   and drive-hw.mjs's twin: the same `web/test/native/game-test` page (its `ANDROID` branches check Android's meaning
   where the contract differs) in a debug APK built `-Plc.model=none`, the markers from logcat, the renderer crashed and
@@ -548,7 +629,7 @@ How the test tools work:
   `android/build/web/Game` or `app-debug.apk` (the normal ones are set aside for the build and put back before the run;
   an interrupted build is put right by the next).
 
-## 8. Not yet verified on a phone
+## 9. Not yet verified on a phone
 
 Everything above was checked on the emulator. What only a phone can show, and has not been checked on one yet: the IME heights, OEM keyboards and voice typing (composing
 IMEs), a hardware keyboard attached while typing and the gesture-navigation swipe-down; the 560 dp threshold and Gboard's
@@ -558,4 +639,6 @@ sends better than the emulator (client patch 0026 sends Android whole frames bec
 software GL: SwiftShader through ANGLE); the crisp snap on a phone's own screen, such as a Pixel 10's
 2424×1080 with its camera hole (crisp.mjs); Auto Backup (bmgr), a full disk (ENOSPC) and a failed main-frame load (not provoked on the emulator
 either). The chat model's bench (`app-test.mjs --lm-bench`) runs on the emulator, but its numbers only mean something
-on the phone.
+on the phone. Online mode: the local network prompt and a server on a real Wi-Fi network (the emulator reached the
+Mac's engine through `adb reverse`, and 10.0.2.2 for the `lan` phase), a mobile network, and a socket left behind for
+minutes by a phone that suspends the app more firmly than the emulator.

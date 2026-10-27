@@ -3,6 +3,11 @@
 //
 //   node drive.mjs            # copy the built app, swap Game/ for game-test/, re-sign, install,
 //                             # launch with console capture, react to the page's markers
+//   node drive.mjs --online   # the online phases instead (game-test/online.js): the proxy routes, the socket bridge,
+//                             # the probe, the Keychain, the Add server box and the Remember box, against
+//                             # online-stub.mjs (port ONLINE_STUB_PORT or 47631), an address where nothing listens
+//                             # (port ONLINE_DOWN_PORT or 47634) and, with ENGINE_URL=http://127.0.0.1:<port> (and
+//                             # ENGINE_NODE_ID / ENGINE_MEMBERS as that server was started with), a local Engine-TS
 //
 // Markers printed by test.js (through the console bridge → native stdout):
 //   SHOT <name>                 → xcrun simctl io screenshot run-*/<name>.png
@@ -19,6 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { startMockClaude } from '../lm/mock-claude.mjs';
+import { startOnlineStub } from './online-stub.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..', '..');
@@ -29,6 +35,7 @@ const BUILT = `${ROOT}/build/DerivedData-swift/Build/Products/Debug-iphonesimula
 // the bundle id the build was signed with (io.github.purexyz.scape2004, plus BUNDLE_ID_SUFFIX from ios/Config/Local.xcconfig)
 const BUNDLE = execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleIdentifier', `${BUILT}/Info.plist`], { encoding: 'utf8' }).trim();
 const APP = `${TMP}/LostCity.app`;
+const ONLINE = process.argv.includes('--online');
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const OUT = `${TMP}/run-${stamp}`;
 fs.mkdirSync(OUT, { recursive: true });
@@ -53,7 +60,23 @@ if (fs.existsSync(`${BUILT}/Game/ui`)) sh('ditto', [`${BUILT}/Game/ui`, `${APP}/
 const big = new Uint8Array(8 * 1024 * 1024 + 123);
 for (let i = 0; i < big.length; i++) big[i] = (i * 31 + (i >> 11)) & 255;
 fs.writeFileSync(`${APP}/Game/t/big.bin`, big);
-if (process.env.START_PHASE) fs.writeFileSync(`${APP}/Game/start-phase.txt`, process.env.START_PHASE);
+if (process.env.START_PHASE || ONLINE) fs.writeFileSync(`${APP}/Game/start-phase.txt`, process.env.START_PHASE ?? 'online');
+// --online: the stand-in server, and where everything is for game-test/online.js
+const stub = ONLINE ? await startOnlineStub({ port: Number(process.env.ONLINE_STUB_PORT ?? 47631) }) : null;
+if (ONLINE) {
+    fs.writeFileSync(`${APP}/Game/online.json`, JSON.stringify({
+        stub: stub.url, stubCrcs: stub.crcs, down: `http://127.0.0.1:${process.env.ONLINE_DOWN_PORT ?? 47634}`,
+        engine: process.env.ENGINE_URL ?? null, engineNodeId: Number(process.env.ENGINE_NODE_ID ?? 10), engineMembers: process.env.ENGINE_MEMBERS !== 'false',
+        normalize: JSON.parse(fs.readFileSync(`${ROOT}/web/test/online/serverurl-vectors.json`, 'utf8')).normalize,
+    }));
+}
+// --online: the built app lets plain http/ws reach a named host (ATS) and says why it asks for the local network. The
+// test servers are IP literals, which ATS does not cover, so the runtime checks would pass without these keys.
+const plist = (key) => { try { return sh('/usr/libexec/PlistBuddy', ['-c', `Print :${key}`, `${BUILT}/Info.plist`]).trim(); } catch { return null; } };
+const appChecks = ONLINE ? [
+    ['the app allows plain http/ws to any host (NSAppTransportSecurity NSAllowsArbitraryLoads)', plist('NSAppTransportSecurity:NSAllowsArbitraryLoads') === 'true'],
+    ['the app says why it asks for the local network (NSLocalNetworkUsageDescription)', !!plist('NSLocalNetworkUsageDescription')],
+] : [];
 const mock = await startMockClaude({ port: Number(process.env.LM_MOCK_PORT ?? 47591), slowMs: 6000 });
 fs.writeFileSync(`${APP}/Game/lm-mock.txt`, mock.url);
 sh('codesign', ['--force', '--sign', '-', '--timestamp=none', '--preserve-metadata=entitlements', APP]);
@@ -149,7 +172,7 @@ const onData = (chunk) => {
         const total = line.match(/TOTAL (pass=\d+ fail=\d+.*)$/);
         if (total) lastTotal = total[1];
         if (/\b(SHOT|ACTION|DONE) /.test(line)) { queue.push(line); pump(); }
-        if (/\b(FAIL|PASS|INFO|LIFECYCLE) /.test(line) || /\[(life|host|kbd)\]/.test(line)) process.stdout.write(line + '\n');
+        if (/\b(FAIL|PASS|INFO|LIFECYCLE) /.test(line) || /\[(life|host|kbd|socket|online|accounts)\]/.test(line)) process.stdout.write(line + '\n');
     }
 };
 app.stdout.on('data', onData);
@@ -165,6 +188,7 @@ function finish(code) {
     note(`mock API: ${mock.requests.length} requests${wrong.length ? `, ${wrong.length} malformed: ${wrong.map((r) => r.problems.join('; ')).join(' | ')}` : ', all as the API takes them'}`);
     if (wrong.length) code = code || 1;
     void mock.close();
+    void stub?.close();
     try { sh('xcrun', ['simctl', 'terminate', UDID, BUNDLE], { stdio: 'ignore' }); } catch {}
     try { sh('xcrun', ['simctl', 'terminate', UDID, 'com.apple.Preferences'], { stdio: 'ignore' }); } catch {}
     setTimeout(() => {
@@ -174,6 +198,18 @@ function finish(code) {
             fs.cpSync(`${container}/Library/Caches/Logs`, `${OUT}/app-logs`, { recursive: true });
             note(`Documents tree:\n${sh('find', ['.'], { cwd: `${container}/Documents` })}`);
         } catch (e) { note(`could not copy container files: ${e.message}`); }
+        if (ONLINE) {
+            // the logs never carry a password or what a socket sent (online.js's PASSWORD and PAYLOAD_MARK, plain or base64)
+            const logs = [logPath, ...(fs.existsSync(`${OUT}/app-logs`) ? fs.readdirSync(`${OUT}/app-logs`).map((f) => `${OUT}/app-logs/${f}`) : [])];
+            const secrets = ['Pw4OnlineT3st', 'LCPAYLOADMARK', Buffer.from('LCPAYLOADMARK').toString('base64').slice(0, 16)];
+            const leaks = logs.flatMap((file) => secrets.filter((secret) => fs.readFileSync(file, 'latin1').includes(secret)).map((secret) => `${path.basename(file)}: ${secret}`));
+            note(leaks.length ? `FAIL the logs carry secrets: ${leaks.join(', ')}` : `logs checked: no password, no socket contents (${logs.length} files)`);
+            if (leaks.length) code = code || 1;
+        }
+        for (const [name, ok] of appChecks) {
+            note(`${ok ? 'PASS' : 'FAIL'} ${name}`);
+            if (!ok) code = code || 1;
+        }
         note(`console log: ${logPath}`);
         process.exit(code);
     }, 800);

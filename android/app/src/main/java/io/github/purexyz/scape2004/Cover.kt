@@ -53,6 +53,9 @@ interface CoverView {
 
     /** Settings › Display's margins, which the page lays its overlay out with (host.js readSafeArea). */
     fun margins(margins: CoverMargins) {}
+
+    /** The page load plays on a server: the loader's caption says "online" (the plain cover has none). */
+    fun online(online: Boolean) {}
 }
 
 /**
@@ -79,9 +82,18 @@ class CoverController {
             view?.margins(value)
         }
 
+    /** The page that is loading plays on a server (GameSession.loadGame): the caption says "online". */
+    var online = false
+        set(value) {
+            if (value == field) return
+            field = value
+            view?.online(value)
+        }
+
     fun attach(view: CoverView) {
         this.view = view
         view.margins(margins)
+        view.online(online)
         view.render(state, animated = false)
     }
 
@@ -114,8 +126,13 @@ class CoverController {
         view?.render(state, animated = false)
     }
 
+    /** The last notice's text (the debug hook `last-notice`). */
+    var lastNotice: String? = null
+        private set
+
     fun notice(text: String, durationMs: Long = NOTICE_MS) {
         Log.info("host", "notice: $text")
+        lastNotice = text
         view?.notice(text, durationMs)
     }
 

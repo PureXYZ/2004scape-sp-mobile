@@ -5,7 +5,7 @@
 // back (lib/testbuild.mjs), so the order below never installs a test variant where the next test expects the app.
 //
 //   node android/test/all.mjs [--serial emulator-5554] [--quick] [--no-build] [--only a,b] [--skip a,b]
-//                             [--bots N] [--instrumented]
+//                             [--bots N] [--instrumented] [--prebuilt]
 //
 // Steps, in order (each one's output is shown and kept in android/build/all/<step>.log):
 //   build      ./gradlew :app:assembleDebug (the web bundle, the model, the APK)
@@ -19,7 +19,8 @@
 //              Messages API behind adb reverse (docs/ANDROID.md §5.5)
 //   drive      android/test/drive.mjs (emulators only: it clears the app's data)
 //   app-test   android/test/app-test.mjs [--bots N] (on a phone: --device <serial>, which keeps its data)
-// --quick: build, jvm and smoke. --no-build: use the APK already built. A step that fails does not stop the others; one
+// --quick: build, jvm and smoke. --no-build: use the APK already built. --prebuilt: drive and app-test use their last test
+// builds too (made beforehand with their --build-only), so no Gradle runs beside the emulator. A step that fails does not stop the others; one
 // of smoke, keyboard or shell that found no page to drive at its start (no DevTools target in 30 s, before any check)
 // runs once more, and the table says so.
 // Exit status 0 only if every step passed; android/build/all/summary.json has the table.
@@ -42,6 +43,7 @@ const STEPS = ['build', 'jvm', 'smoke', 'keyboard', 'shell', 'lm', 'llm', 'drive
 const ONLY = option('--only', null)?.split(',') ?? null;
 const SKIP = option('--skip', '')?.split(',').filter(Boolean) ?? [];
 const BOTS = option('--bots', null);
+const PREBUILT = argv.includes('--prebuilt');
 for (const name of [...(ONLY ?? []), ...SKIP]) {
     if (!STEPS.includes(name)) {
         console.error(`unknown step ${name} (steps: ${STEPS.join(', ')})`);
@@ -158,11 +160,11 @@ for (const step of steps) {
                 record(step, true, null, 'skipped: emulators only (it clears the app\'s data)');
                 continue;
             }
-            const r = await run(step, node, [test('drive.mjs'), ...serialArgs]);
+            const r = await run(step, node, [test('drive.mjs'), ...serialArgs, ...(PREBUILT ? ['--no-build'] : [])]);
             record(step, r.code === 0, checksOf(r.text), 'android/build/drive/');
         } else if (step === 'app-test') {
             const target = emulator ? serialArgs : ['--device', SERIAL];
-            const r = await run(step, node, [test('app-test.mjs'), ...target, ...(BOTS !== null ? ['--bots', BOTS] : [])]);
+            const r = await run(step, node, [test('app-test.mjs'), ...target, ...(BOTS !== null ? ['--bots', BOTS] : []), ...(PREBUILT ? ['--no-build'] : [])]);
             record(step, r.code === 0, checksOf(r.text), `${BOTS !== null ? `${BOTS} bots; ` : ''}android/build/app-test/`);
         }
     } catch (error) {

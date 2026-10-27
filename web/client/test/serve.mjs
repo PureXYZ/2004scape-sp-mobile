@@ -8,6 +8,9 @@
 //   POST /log                 -> appended to the request log
 //   GET/PUT/POST/DELETE /save/<relpath>, GET /save-index -> an in-memory stand-in for the native save store
 //                                (§3), so an engine build that saves through sync XHR works in the harness
+//   GET/PUT /ondemand/<archive>/<file> -> an in-memory stand-in for the app's cache of a game server's OnDemand files
+//                                (docs/ONLINE.md: LocalOnDemand's remote fallback reads it first and stores what it
+//                                fetched there; `ondemand` is the map, for the checks)
 // Every request is recorded (method, path, status) so tests can assert e.g. that no ondemandworker.js was loaded.
 //   node web/client/test/serve.mjs --game <dir> [--port 47400] [--engine-bundle <dir>] [--engine <engineDir>]
 import fs from 'node:fs';
@@ -47,6 +50,7 @@ export function startServer({ port = 47400, gameDir, engineDir = DEFAULT_ENGINE_
     }
     const requests = [];
     const saves = new Map(); // relpath -> { data: Buffer, modified }
+    const ondemand = new Map(); // 'archive/file' -> Buffer
     const packDir = path.join(engineDir, 'data', 'pack');
     const server = http.createServer((req, res) => {
         const url = new URL(req.url, 'http://x');
@@ -75,6 +79,23 @@ export function startServer({ port = 47400, gameDir, engineDir = DEFAULT_ENGINE_
                 });
             } else if (req.method === 'DELETE') {
                 done(saves.delete(rel) ? 204 : 404);
+            } else {
+                done(405);
+            }
+            return;
+        }
+        const od = /^\/ondemand\/([0-3])\/(\d{1,5})$/.exec(p);
+        if (od) {
+            const key = `${od[1]}/${od[2]}`;
+            if (req.method === 'GET') {
+                ondemand.has(key) ? done(200, ondemand.get(key)) : done(404);
+            } else if (req.method === 'PUT') {
+                const chunks = [];
+                req.on('data', c => chunks.push(c));
+                req.on('end', () => {
+                    ondemand.set(key, Buffer.concat(chunks));
+                    done(204);
+                });
             } else {
                 done(405);
             }
@@ -115,7 +136,7 @@ export function startServer({ port = 47400, gameDir, engineDir = DEFAULT_ENGINE_
     });
     return new Promise((resolve, reject) => {
         server.once('error', reject);
-        server.listen(port, '127.0.0.1', () => resolve({ server, requests, saves, url: `http://127.0.0.1:${port}`, close: () => new Promise(r => server.close(r)) }));
+        server.listen(port, '127.0.0.1', () => resolve({ server, requests, saves, ondemand, url: `http://127.0.0.1:${port}`, close: () => new Promise(r => server.close(r)) }));
     });
 }
 

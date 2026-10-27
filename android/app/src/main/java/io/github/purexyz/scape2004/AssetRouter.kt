@@ -16,6 +16,9 @@
 // count → 400; above 32 MiB → 413, before anything is decoded; X-LC-Body not base64url without padding → 400; decoded
 // size ≠ X-LC-Length → 400. Then the bytes go through the iOS rules (an empty write → 400, identical bytes skipped, .bak).
 //
+// Online (docs/ARCHITECTURE.md §3.1, docs/ANDROID.md §7) OnlineProxy takes `/crc`, the archives and `/ondemand/…` while
+// the page load plays on a server, and `/server-probe` in every mode; offline those paths are the bundle's as before.
+//
 // Every response has a non-empty reason phrase (WebResourceResponse throws on an empty one), Cache-Control: no-store,
 // Access-Control-Allow-Origin: * and a Content-Length. A request to any other http(s) host is answered 403: the game never
 // touches the network (iOS gets that for free from its custom scheme).
@@ -121,7 +124,7 @@ class RouterReply(
     }
 }
 
-class AssetRouter(private val assets: AssetSource, private val saves: SaveStore) {
+class AssetRouter(private val assets: AssetSource, private val saves: SaveStore, private val online: OnlineProxy? = null) {
     fun handle(request: RouterRequest): RouterReply {
         if (request.host != HOST || request.scheme != "https") {
             // (only http(s) requests reach the router: GameWebViewClient leaves data: and blob: to WebView)
@@ -129,6 +132,7 @@ class AssetRouter(private val assets: AssetSource, private val saves: SaveStore)
             return RouterReply.empty(403)
         }
         val path = PercentDecoding.path(request.encodedPath) ?: return RouterReply.text(400, "malformed path")
+        online?.handle(request, path)?.let { return it }
         return when {
             path == "/save-index" -> saveIndex(request)
             path == "/log" -> log(request)

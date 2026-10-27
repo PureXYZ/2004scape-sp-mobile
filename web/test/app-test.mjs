@@ -34,7 +34,16 @@
 //            app until N clean launches have reported their start-up marks (startup.trace 'am': each launch recorded on
 //            the iPhone). Output beside the console log: soak.jsonl, soak-raw.jsonl, startup.jsonl, traces/ or samples/,
 //            and summary.json + summary.txt (web/test/perf/summary.mjs; --no-summary: not made),
-//            --build-only (build the test app and stop: the runs after it take --no-build)
+//            --build-only (build the test app and stop: the runs after it take --no-build),
+//            --server <url> (online mode, docs/ONLINE.md: instead of the offline checks the run adds that server through the
+//            Add server box and its probe, plays there (a password login with Remember, Continue as from the Keychain, a
+//            walk, a banker's dialogue and the bank), backgrounds the app 5, 25, 45 and 70 s around the server's 30 and 60 s
+//            limits, kills WebContent and logs in again, switches to the world on the phone and back; never an official
+//            server), --engine <dir> (with --server http://127.0.0.1:<port>: the run starts and stops a local Engine-TS
+//            itself, web/test/online/engine.mjs: the copy in <dir> on <port>, its management port +1 and node port +2; then
+//            also the server stopped (the unreachable box, Play offline) and a content-drift copy (drift.mjs, <dir>-drift)
+//            on <port> +3: its files fetched and cached, and taken from the cache at the next launch),
+//            --engine-node <dir> (a folder with the Node 24 the engine's worker threads need, as e2e.mjs --engine-node)
 //
 // The run plays in the app's own Documents, profile `main` (the simulator's are wiped first unless --keep-data). So a
 // --device run leaves on the iPhone: the TEST build (until ios/scripts/deploy.sh), the character "Autotest"
@@ -49,6 +58,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { CONTENT_DIR } from '../../scripts/lib/upstream.mjs';
+import { prepareDrift } from './online/drift.mjs';
+import { prepareEngine, startEngine } from './online/engine.mjs';
 import { SoakLines, launchTestArg, lmPrompts, loadSoak, soakBuildProblem, soakTimeoutMin } from './perf/soak.mjs';
 
 const IOS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -96,7 +108,25 @@ function soakOrExit(load) {
     }
 }
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-const OUT = path.join(IOS, 'build', 'tmp', 'app-test', `${onDevice ? 'device' : 'sim'}-${stamp}${SOAK ? `-${SOAK.name}` : ''}`);
+// (online mode: the server, and the local engine the run controls; the passwords it types, for the logs' check)
+const SERVER = flag('--server') ? argv[argv.indexOf('--server') + 1] : null;
+const ENGINE_DIR = flag('--engine') ? path.resolve(argv[argv.indexOf('--engine') + 1]) : null;
+const ENGINE_NODE = flag('--engine-node') ? path.resolve(argv[argv.indexOf('--engine-node') + 1]) : null;
+const serverPort = SERVER ? Number(/^http:\/\/127\.0\.0\.1:(\d+)\/?$/.exec(SERVER)?.[1] ?? 0) : 0;
+if (SERVER && (BOTS !== null || SOAK || LM_BENCH_MIN !== null || PROFILE !== null)) {
+    console.error('--server runs the online checks alone (no --bots, --soak, --lm-bench or --profile)');
+    process.exit(1);
+}
+if (ENGINE_DIR && !(serverPort > 0 && serverPort < 65532)) {
+    console.error('--engine takes --server http://127.0.0.1:<port> (the engine on <port>, management +1, node +2, the drift copy +3)');
+    process.exit(1);
+}
+if (ENGINE_DIR && onDevice) {
+    console.error('--engine runs on a simulator (the iPhone cannot reach 127.0.0.1): give the device --server with the Mac\'s address');
+    process.exit(1);
+}
+const ONLINE = SERVER ? { url: SERVER.replace(/\/$/, ''), drift: ENGINE_DIR ? `http://127.0.0.1:${serverPort + 3}` : null, control: !!ENGINE_DIR, passwords: [`pw${stamp.replace(/\D/g, '').slice(-6)}`, `dr${stamp.replace(/\D/g, '').slice(-6)}`] } : null;
+const OUT = path.join(IOS, 'build', 'tmp', 'app-test', `${onDevice ? 'device' : 'sim'}-${stamp}${SOAK ? `-${SOAK.name}` : ''}${ONLINE ? '-online' : ''}`);
 fs.mkdirSync(OUT, { recursive: true });
 
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', maxBuffer: 64 << 20, ...opts });
@@ -188,16 +218,23 @@ if (LM_BENCH_MIN !== null) {
     note(`lm-bench: ${model.name} (${Math.round(model.bytes / 1048576)} MB, template ${model.template ?? 'qwen-chatml-nothink'}), main phase ${LM_BENCH_MIN} min${LM_THINK ? ', every reply with its note first (--lm-think)' : ''}`);
 }
 
+// --engine: the engine's copy and the drift copy (made once; the drift's moved files go to autotest.json for its checks)
+if (ENGINE_DIR) {
+    prepareEngine(ENGINE_DIR, path.dirname(CONTENT_DIR));
+    const drift = prepareDrift({ dir: `${ENGINE_DIR}-drift`, from: ENGINE_DIR, nodeBin: ENGINE_NODE });
+    ONLINE.driftFiles = { anims: drift.anims, map: drift.map };
+}
+
 if (!flag('--no-build')) {
     note('building web (autotest)…');
     sh('node', [path.join(IOS, 'scripts', 'build-web.mjs'), '--autotest', ...(flag('--debug-web') ? ['--debug'] : []), ...(SKIP_PACK ? ['--skip-pack'] : [])], { stdio: 'inherit' });
-    if (BOTS !== null || LM_BENCH_MIN !== null || SOAK) {
+    if (BOTS !== null || LM_BENCH_MIN !== null || SOAK || ONLINE) {
         // what autotest.js reads (the test build only: build/Game is rebuilt without it when the run ends); a soak build
         // has the chat model's prompts, for any soak's lm phase (the soak itself comes at launch). A soak's bots are the
         // soak's: autotest.json's count only says what --no-build runs without --soak ask for.
-        const config = { ...(BOTS !== null && !SOAK ? { bots: BOTS } : {}), ...(LM_BENCH_MIN !== null ? { lmBench: lmBenchConfig() } : {}), ...(SOAK ? { lmPrompts: lmPrompts(IOS) } : {}) };
+        const config = { ...(BOTS !== null && !SOAK ? { bots: BOTS } : {}), ...(LM_BENCH_MIN !== null ? { lmBench: lmBenchConfig() } : {}), ...(SOAK ? { lmPrompts: lmPrompts(IOS) } : {}), ...(ONLINE ? { online: ONLINE } : {}) };
         fs.writeFileSync(path.join(IOS, 'build', 'Game', 'autotest.json'), `${JSON.stringify(config)}\n`);
-        note(`autotest.json: ${SOAK ? `the soak's ${SOAK.bots} bots, the chat model's prompts` : `${BOTS ?? 'the phone\'s'} bots`}${LM_BENCH_MIN !== null ? `, lm-bench ${JSON.stringify({ ...config.lmBench, prompts: config.lmBench.prompts.length })}` : ''}`);
+        note(`autotest.json: ${ONLINE ? `online, ${ONLINE.url}${ONLINE.control ? ` (and the drift copy on ${ONLINE.drift})` : ''}` : SOAK ? `the soak's ${SOAK.bots} bots, the chat model's prompts` : `${BOTS ?? 'the phone\'s'} bots`}${LM_BENCH_MIN !== null ? `, lm-bench ${JSON.stringify({ ...config.lmBench, prompts: config.lmBench.prompts.length })}` : ''}`);
     }
     if (PROFILE !== null) {
         // the save profile, before host.js reads it (host.js PROFILE)
@@ -237,6 +274,24 @@ const builtBots = (() => {
         return null;
     }
 })();
+// (--no-build online: the build's server is what this run's must be; the run's passwords are the build's)
+const builtOnline = (() => {
+    try {
+        return JSON.parse(fs.readFileSync(path.join(APP, 'Game', 'autotest.json'), 'utf8')).online ?? null;
+    } catch {
+        return null;
+    }
+})();
+if (ONLINE && (builtOnline?.url !== ONLINE.url || builtOnline?.drift !== ONLINE.drift || JSON.stringify(builtOnline?.driftFiles) !== JSON.stringify(ONLINE.driftFiles))) {
+    console.error(`${APP} was built ${builtOnline ? `for --server ${builtOnline.url}${builtOnline.control ? ' with --engine' : ''}` : 'without --server'}; build it again (without --no-build)`);
+    process.exit(1);
+}
+if (ONLINE) {
+    ONLINE.passwords = builtOnline.passwords;
+} else if (builtOnline) {
+    console.error(`${APP} was built for --server ${builtOnline.url}; build it again (without --no-build) for the offline run`);
+    process.exit(1);
+}
 if (!SOAK && builtBots !== BOTS) {
     console.error(`${APP} was built ${builtBots === null ? 'without --bots' : `with --bots ${builtBots}`}; build it again (without --no-build) for ${BOTS === null ? 'no --bots' : `--bots ${BOTS}`}`);
     process.exit(1);
@@ -311,6 +366,41 @@ if (onDevice) {
     // WebContent (and other WebKit) processes of the simulator's other clients (none, usually) are not ours.
     webContentBefore = new Set(simWebContentPids());
     webKitBefore = new Set(simProcesses().filter(p => p.role !== 'app').map(p => p.pid));
+}
+
+// ------------------------------------------------------------------------------------------------ online: the engine
+
+// --engine: the local Engine-TS the run starts, stops (ACTION server stop) and swaps for its drift copy (ACTION server
+// start drift: on the --server port +3, with the same management and node ports, as only one runs at a time)
+let engine = null;
+
+async function startServer(variant) {
+    await stopServer();
+    const drift = variant === 'drift';
+    const dir = drift ? prepareDrift({ dir: `${ENGINE_DIR}-drift`, from: ENGINE_DIR, nodeBin: ENGINE_NODE }).engine : path.join(ENGINE_DIR, 'engine');
+    const log = fs.createWriteStream(path.join(OUT, `engine-${variant}.log`), { flags: 'a' });
+    engine = await startEngine({ dir, ports: { web: serverPort + (drift ? 3 : 0), management: serverPort + 1, node: serverPort + 2 }, nodeBin: ENGINE_NODE, log: line => log.write(`${line}\n`) });
+    note(`engine ${variant} up on ${engine.url} in ${engine.started} ms`);
+}
+
+async function stopServer() {
+    if (engine) {
+        await engine.stop();
+        note(`engine ${engine.url} stopped`);
+        engine = null;
+    }
+}
+
+function killWebContent() {
+    const pids = simWebContentPids().filter(pid => !webContentBefore.has(pid));
+    note(`killing WebContent ${pids.join(', ') || '(none found)'}`);
+    for (const pid of pids) {
+        try {
+            process.kill(pid, 'SIGKILL');
+        } catch (error) {
+            note(`kill ${pid}: ${error.message}`);
+        }
+    }
 }
 
 // ------------------------------------------------------------------------------------------------ actions
@@ -590,6 +680,8 @@ let finished = false;
 const queue = [];
 let busy = false;
 let terminations = 0; // (the native log's "WebContent process terminated")
+let leaks = 0; // (online: console chunks with a password the run typed)
+let leakTail = '';
 
 async function launchApp() {
     launches++;
@@ -662,6 +754,23 @@ async function act(line) {
         app = null; // (its launcher's exit is this relaunch, not the app's end)
         await endApp();
         await launchApp();
+    } else if (ONLINE && /LCTEST ACTION relaunch\s*$/.test(line)) {
+        // (online: the next launch takes the drift server's files from the app's cache)
+        app = null;
+        await endApp();
+        await launchApp();
+    } else if ((m = line.match(/LCTEST ACTION server (stop|start drift)\s*$/))) {
+        try {
+            await (m[1] === 'stop' ? stopServer() : startServer('drift'));
+        } catch (error) {
+            note(`server ${m[1]}: ${error.message}`);
+        }
+    } else if (/LCTEST ACTION kill-webcontent\s*$/.test(line)) {
+        if (onDevice) {
+            note('kill-webcontent: not on the iPhone (the page waits and reports it)');
+        } else {
+            killWebContent();
+        }
     } else if ((m = line.match(/LCTEST DONE (pass=\d+ fail=\d+)/))) {
         summary = m[1];
         await sleep(500);
@@ -686,6 +795,10 @@ function lineReader() {
     return chunk => {
         const text = chunk.toString();
         consoleLog.write(text);
+        if (ONLINE?.passwords.some(password => `${leakTail}${text}`.includes(password))) {
+            leaks++; // (online: a password typed in the run must never reach a log; with the end of the last chunk)
+        }
+        leakTail = text.slice(-16);
         pending += text;
         let i;
         while ((i = pending.indexOf('\n')) >= 0) {
@@ -725,6 +838,9 @@ function onLine(line) {
     }
 }
 
+if (ENGINE_DIR) {
+    await startServer('stock');
+}
 await launchApp();
 
 // Launch frames (launch screen → loading overlay → title); not in a soak, whose start-up they would slow.
@@ -760,6 +876,7 @@ function finish(crashed = false) {
             await Promise.race([Promise.all([...recordings]), sleep(10 * 60 * 1000)]);
         }
         app?.kill('SIGTERM');
+        await stopServer();
         if (!onDevice) {
             try {
                 const container = sh('xcrun', ['simctl', 'get_app_container', target.udid, BUNDLE, 'data']).trim();
@@ -781,7 +898,10 @@ function finish(crashed = false) {
         if (terminations) {
             note(`WebContent terminations during the run: ${terminations}`);
         }
-        fs.writeFileSync(path.join(OUT, 'result.json'), `${JSON.stringify({ target: onDevice ? 'device' : 'simulator', udid: target.udid, summary, crashed, terminations, bots: SOAK ? SOAK.bots : BOTS, soak: SOAK?.name ?? null, launches, port: builtPort(), out: OUT }, null, 1)}\n`);
+        if (ONLINE) {
+            note(leaks ? `FAIL: a password the run typed is in the app's log (${leaks} time${leaks === 1 ? '' : 's'})` : 'the app\'s log has none of the passwords the run typed');
+        }
+        fs.writeFileSync(path.join(OUT, 'result.json'), `${JSON.stringify({ target: onDevice ? 'device' : 'simulator', udid: target.udid, summary, crashed, terminations, bots: SOAK ? SOAK.bots : BOTS, soak: SOAK?.name ?? null, online: ONLINE ? { url: ONLINE.url, drift: ONLINE.drift, leaks } : null, launches, port: builtPort(), out: OUT }, null, 1)}\n`);
         if (SOAK && !flag('--no-summary')) {
             try {
                 sh('node', [path.join(IOS, 'web', 'test', 'perf', 'summary.mjs'), OUT], { stdio: 'inherit' });
@@ -790,7 +910,7 @@ function finish(crashed = false) {
             }
         }
         note(`result: ${summary ?? (crashed ? 'app exited before the test finished' : 'timeout')} — ${OUT}`);
-        const failed = !summary || !summary.endsWith('fail=0');
+        const failed = !summary || !summary.endsWith('fail=0') || leaks > 0;
         process.exit(failed ? 1 : 0);
     }, 1500);
 }
@@ -807,7 +927,7 @@ function builtPort() {
 process.on('SIGINT', () => finish(true));
 // (with bots: a restart to apply the setting, waiting for them, measuring; the lm-bench: its phases; a soak: its phases
 // and launches)
-const TIMEOUT_MIN = (BOTS > 0 || SOAK?.bots > 0 ? 12 : 8) + (LM_BENCH_MIN !== null ? (30 * LM_BENCH_MIN) / 20 + 10 : 0) + (SOAK ? soakTimeoutMin(SOAK) : 0);
+const TIMEOUT_MIN = (ONLINE ? 35 : BOTS > 0 || SOAK?.bots > 0 ? 12 : 8) + (LM_BENCH_MIN !== null ? (30 * LM_BENCH_MIN) / 20 + 10 : 0) + (SOAK ? soakTimeoutMin(SOAK) : 0);
 setTimeout(() => {
     note(`TIMEOUT (${TIMEOUT_MIN} min)`);
     finish(true);

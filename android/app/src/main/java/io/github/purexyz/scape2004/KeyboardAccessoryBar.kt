@@ -2,18 +2,18 @@
 // is attached), a strip of the 2004 interface (ports ios/LostCity/KeyboardAccessoryBar.swift). In
 // landscape the keyboard covers the game's chat line, so the bar shows what is being typed:
 //
-//     [prompt] [input line*] [chip] [chip] …  [Cancel] [Send] [v]
+//     [prompt] [input line*] [chip] [chip] …  [Cancel] [x Remember] [Send] [v]
 //
 // * the prompt and the game's current input line with its blinking "*" caret (masked when the input is a password);
 // * chips (ChipStrip), one-tap entries from the page (the '::' key and recent developer commands for chat, amounts for an
 //   amount prompt). A `whenEmpty` chip only shows while the line is empty; once something is typed into a text input the
 //   row gets less room (30 % of the bar instead of 45 %), the line more;
-// * Cancel (only for prompts the page marks cancellable), the submit button (the number pad has no Return key) and the
-//   hide button.
+// * Cancel (only for prompts the page marks cancellable), the Remember box (only for an online server's password, when
+//   the page says whether it is ticked), the submit button (the number pad has no Return key) and the hide button.
 //
 // iOS lays it out with Auto Layout; here a custom ViewGroup does the same arithmetic: the row is centred 1 dp below the
 // middle, 12 dp from the leading safe edge and 6 dp from the trailing one, 10 dp between items (6 after Cancel and after
-// the submit button); the field takes what the others leave but at least 180 dp (120 for an amount); when that is short
+// the submit button, 8 after the Remember box); the field takes what the others leave but at least 180 dp (120 for an amount); when that is short
 // the chips give way first, then the prompt (iOS's priorities: chips 700, prompt 750, the field's minimum required).
 //
 // It is a child of the activity's root at the bottom (52 dp tall), above the WebView, GONE unless the keyboard is
@@ -51,11 +51,15 @@ class KeyboardAccessoryBar(context: Context) : ViewGroup(context) {
     var onCancel: (() -> Unit)? = null
     var onChip: ((KeyboardBridge.Chip) -> Unit)? = null
 
+    /** The Remember box was tapped: its new state. */
+    var onRemember: ((Boolean) -> Unit)? = null
+
     private val density = resources.displayMetrics.density
     private val promptLabel = RSTextView(context)
     private val inputField = Field(context)
     private val chipStrip = ChipStrip(context)
     private val cancelButton = RSButton(context)
+    private val rememberBox = RememberBox(context)
     private val submitButton = RSButton(context)
     private val hideButton = RSButton(context)
     private val fill = RSTheme.stoneFillDrawable(density)
@@ -66,6 +70,10 @@ class KeyboardAccessoryBar(context: Context) : ViewGroup(context) {
     private var text = ""
     private var secure = false
     private var numeric = false
+
+    /** The Remember box: null while it is not shown. */
+    var remember: Boolean? = null
+        private set
 
     /** The chips' share of the bar's width: 45 % while the line is empty, 30 % while typing, none for an amount. */
     private var chipLimit: Float? = CHIP_LIMIT_EMPTY
@@ -101,6 +109,11 @@ class KeyboardAccessoryBar(context: Context) : ViewGroup(context) {
             visibility = GONE
             onTap = { onCancel?.invoke() }
         }
+        rememberBox.apply {
+            id = R.id.kbd_remember
+            visibility = GONE
+            setOnClickListener { rememberTapped() }
+        }
         submitButton.apply {
             id = R.id.kbd_submit
             insetTop = 6f; insetLeading = 14f; insetBottom = 6f; insetTrailing = 14f
@@ -116,7 +129,7 @@ class KeyboardAccessoryBar(context: Context) : ViewGroup(context) {
             accessibilityLabel = "Hide keyboard"
             onTap = { onHide?.invoke() }
         }
-        for (view in listOf(promptLabel, inputField, chipStrip, cancelButton, submitButton, hideButton)) addView(view)
+        for (view in listOf(promptLabel, inputField, chipStrip, cancelButton, rememberBox, submitButton, hideButton)) addView(view)
     }
 
     // ------------------------------------------------------------------------------------------------ content
@@ -140,6 +153,28 @@ class KeyboardAccessoryBar(context: Context) : ViewGroup(context) {
 
     fun setCancellable(cancellable: Boolean) {
         cancelButton.visibility = if (cancellable) VISIBLE else GONE
+    }
+
+    /** Shows the Remember box ticked or not, or hides it (null). */
+    fun setRemember(on: Boolean?) {
+        val shown = (remember != null) != (on != null)
+        remember = on
+        rememberBox.on = on == true
+        rememberBox.visibility = if (on == null) GONE else VISIBLE
+        if (shown) requestLayout()
+    }
+
+    private fun rememberTapped() {
+        val on = remember ?: return
+        setRemember(!on)
+        onRemember?.invoke(!on)
+    }
+
+    /** Taps the Remember box as a finger does (test pages); false when it is not shown. */
+    fun debugTapRemember(): Boolean {
+        if (rememberBox.visibility != VISIBLE) return false
+        rememberBox.performClick()
+        return true
     }
 
     fun setText(text: String) {
@@ -237,9 +272,9 @@ class KeyboardAccessoryBar(context: Context) : ViewGroup(context) {
     /** The visible items in order with the space after each (px). */
     private fun items(): List<Pair<View, Int>> {
         val list = ArrayList<Pair<View, Int>>()
-        for (view in listOf(promptLabel, inputField, chipStrip, cancelButton, submitButton, hideButton)) {
+        for (view in listOf(promptLabel, inputField, chipStrip, cancelButton, rememberBox, submitButton, hideButton)) {
             if (view.visibility == GONE) continue
-            val after = if (view === cancelButton || view === submitButton) dp(6f) else dp(10f)
+            val after = if (view === cancelButton || view === submitButton) dp(6f) else if (view === rememberBox) dp(8f) else dp(10f)
             list.add(view to after)
         }
         return list
@@ -260,9 +295,9 @@ class KeyboardAccessoryBar(context: Context) : ViewGroup(context) {
 
         // the buttons at their own size
         var fixed = 0
-        for (button in listOf(cancelButton, submitButton, hideButton)) {
+        for (button in listOf(cancelButton, rememberBox, submitButton, hideButton)) {
             if (button.visibility == GONE) continue
-            button.measure(unspecified, MeasureSpec.makeMeasureSpec(dp(36f), MeasureSpec.EXACTLY))
+            button.measure(unspecified, MeasureSpec.makeMeasureSpec(dp(if (button === rememberBox) 32f else 36f), MeasureSpec.EXACTLY))
             fixed += button.measuredWidth
         }
         // the prompt: its text, at most 38 % of the bar
@@ -354,9 +389,127 @@ class KeyboardAccessoryBar(context: Context) : ViewGroup(context) {
             "chipStrip" to rect(chipStrip),
             "chips" to JsonArray(chipViews.map(::rect)),
             "cancel" to rect(cancelButton),
+            "remember" to rect(rememberBox),
             "submit" to rect(submitButton),
             "hide" to rect(hideButton),
         )
+    }
+
+    /**
+     * The Remember box's frame in the bar, `[x, y, width, height]` in dp, beside the submit button's, the input line's and
+     * the bar's (iOS's debugRememberLayout in points: the box sits left of the submit button, clear of the line).
+     */
+    fun debugRememberLayout(): JsonElement {
+        fun frame(view: View) = JsonArray(listOf(view.left, view.top, view.width, view.height).map { JsonPrimitive(it / density) })
+        return kotlinx.serialization.json.JsonObject(
+            mapOf(
+                "remember" to frame(rememberBox),
+                "submit" to frame(submitButton),
+                "field" to frame(inputField),
+                "bar" to JsonArray(listOf(0f, 0f, width / density, height / density).map(::JsonPrimitive)),
+            ),
+        )
+    }
+
+    /**
+     * The Remember box: a check box drawn in game pixels (a black square, dark inside, a yellow tick with a black shadow
+     * when ticked) and "Remember" on the Game Options tab's small button (red while pressed), yellow while ticked
+     * (KeyboardAccessoryBar.swift styleRememberButton). 8 dp in, 6 between the box and the word, 10 dp out.
+     */
+    private class RememberBox(context: Context) : View(context) {
+        private val density = resources.displayMetrics.density
+        private val paint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            isSubpixelText = false
+            hinting = Paint.HINTING_OFF
+        }
+        private val pixels = Paint().apply { isAntiAlias = false }
+        private val normal = RSTheme.optionButtonImage(density = density)
+        private val pressedLook = RSTheme.optionButtonImage(on = true, density = density)
+
+        var on = false
+            set(value) {
+                if (field == value) return
+                field = value
+                stateDescription = if (value) "on" else "off"
+                invalidate()
+            }
+
+        init {
+            isClickable = true
+            isFocusable = false
+            isFocusableInTouchMode = false
+            isSoundEffectsEnabled = false
+            contentDescription = "Remember password"
+            stateDescription = "off"
+        }
+
+        private fun dp(value: Float) = value * density
+        private val shadowPx: Float get() = density.roundToInt().toFloat()
+
+        private fun applyPaint() {
+            paint.typeface = RSTheme.typeface(RSTheme.Font.PLAIN12)
+            paint.textSize = RSTheme.textSizePx(RSTheme.Font.PLAIN12, 1f, density)
+        }
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            applyPaint()
+            val width = dp(8f) + dp(2f * BOX) + dp(6f) + paint.measureText(TITLE) + shadowPx + dp(10f)
+            setMeasuredDimension(resolveSize(kotlin.math.ceil(width).toInt(), widthMeasureSpec), resolveSize(dp(32f).roundToInt(), heightMeasureSpec))
+        }
+
+        override fun drawableStateChanged() {
+            super.drawableStateChanged()
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            (if (isPressed) pressedLook else normal).apply {
+                setBounds(0, 0, width, height)
+                draw(canvas)
+            }
+            // the box: 11 × 11 game pixels at 2 dp each
+            val pixel = dp(2f).roundToInt().toFloat()
+            val left = dp(8f).roundToInt().toFloat()
+            val top = ((height - BOX * pixel) / 2f).roundToInt().toFloat()
+            pixels.color = RSTheme.BLACK
+            canvas.drawRect(left, top, left + BOX * pixel, top + BOX * pixel, pixels)
+            pixels.color = RSTheme.STONE_DARK
+            canvas.drawRect(left + pixel, top + pixel, left + (BOX - 1) * pixel, top + (BOX - 1) * pixel, pixels)
+            if (on) {
+                for ((colour, offset) in listOf(RSTheme.BLACK to 1, RSTheme.YELLOW to 0)) {
+                    pixels.color = colour
+                    for ((x, y) in TICK) {
+                        val l = left + (x + offset) * pixel
+                        val t = top + (y + offset) * pixel
+                        canvas.drawRect(l, t, l + pixel, t + pixel, pixels)
+                    }
+                }
+            }
+            // the word, centred vertically like RSButton's title, with the hard shadow
+            applyPaint()
+            val x = (left + BOX * pixel + dp(6f)).roundToInt().toFloat()
+            val metrics = paint.fontMetricsInt
+            val boxHeight = metrics.descent - metrics.ascent + shadowPx
+            val baseline = ((height - boxHeight) / 2f).roundToInt() - metrics.ascent.toFloat()
+            paint.color = RSTheme.BLACK
+            canvas.drawText(TITLE, x + shadowPx, baseline + shadowPx, paint)
+            paint.color = if (on) RSTheme.YELLOW else RSTheme.WHITE
+            canvas.drawText(TITLE, x, baseline, paint)
+        }
+
+        override fun onInitializeAccessibilityNodeInfo(info: android.view.accessibility.AccessibilityNodeInfo) {
+            super.onInitializeAccessibilityNodeInfo(info)
+            info.className = android.widget.CheckBox::class.java.name
+            info.isCheckable = true
+            info.isChecked = on
+            info.hintText = "Keeps the password on this phone, encrypted, for the next login"
+        }
+
+        companion object {
+            const val TITLE = "Remember"
+            const val BOX = 11
+            val TICK = listOf(2 to 5, 3 to 6, 4 to 7, 5 to 6, 6 to 5, 7 to 4, 8 to 3)
+        }
     }
 
     /**

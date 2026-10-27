@@ -25,6 +25,10 @@ and Android. Everything runs on the phone. The iOS app:
 The optional bots (2004sp-progressive's AI, ported) are described in [BOTS.md](BOTS.md); their additions to the
 contracts below are marked **Bots**.
 
+**Online mode** ([ONLINE.md](ONLINE.md)) plays on a game server (Engine-TS 274) instead: the page then runs no engine
+worker, and native code carries the client's sockets and fetches the server's files; its contracts are §7.2, and its
+additions elsewhere are marked **Online**.
+
 **Android.** The same web bundle also runs in an Android app (`android/`, Kotlin, Android System WebView). Everything in
 this document applies there too, except where [ANDROID.md](ANDROID.md) says otherwise: the origin
 (`https://appassets.androidplatform.net` instead of `lostcity://game`), the page ↔ native bridge (`lcAndroid` and
@@ -77,7 +81,7 @@ upstream checkouts `scripts/lib/upstream.mjs` resolves. `debug` = unminified + s
 ## 2. `build/Game/` layout (served at `lostcity://game/…`)
 
 ```
-index.html  host.js  bzip2.js  hud.js  menu.js  worldmap.js  mapview.html  host.css   (web/host, copied recursively)
+index.html  serverurl.js  host.js  bzip2.js  hud.js  menu.js  worldmap.js  mapview.html  host.css   (web/host, copied recursively)
 ui/fonts/p11.ttf p12.ttf b12.ttf q8.ttf           the game's four fonts ('RS Plain 11/12', 'RS Bold 12', 'RS Quill 8')  (web/ui)
 ui/sprites/<name>[-<tile>].png                    every content sprite and title image, magenta → transparent           (web/ui)
 ui/manifest.json                                  font metrics and sprite sizes                                          (web/ui)
@@ -114,9 +118,32 @@ Origin: **`lostcity://game`** — never change it (WebKit storage is keyed by or
 | GET | `/save-index` | JSON `[{path,size,modified}]` of everything under Documents (`modified` in ms since 1970; hidden and temp files excluded). |
 | POST | `/log` | Body = UTF-8 text line(s); printed to the native log (for workers that cannot reach `webkit.messageHandlers`). |
 
+**Online** (§7.2) native adds, for a page load whose `settings.server` names a server: `GET /crc…` and the 8 jags from
+the server through a proxy (the bundled jag when its name is the server's), `GET`/`PUT /ondemand/<archive>/<file>` (the
+app's cache of the server's OnDemand files), and in every mode `GET /server-probe?url=<address>`.
+
 `relpath` must not escape the Documents folder (reject `..`, absolute paths). Player saves live at
 `players/<profile>/<safe_name>.sav` (profile defaults to `main`); **Bots**: all bots of a profile in one file,
 `bots/<profile>/bots.sav` (§5).
+
+### 3.1 Online routes (Swift `OnlineProxy`)
+
+While the page load plays on a server (§7.2), the game's own requests are that server's: native fetches them (a page
+cannot: Engine-TS sends no CORS headers) and caches what it can in `Library/Caches/online/<server id>/` (purgeable;
+deleted with the server). Offline these paths are the bundle routes above, unchanged, except `/server-probe`.
+
+| Method | Path | Behaviour |
+|---|---|---|
+| GET | `/crc…` (any suffix) | `<base>/crc`, 10 s. 40 bytes with the client's trailer (1234, then `(c << 1) + crc[i]` over the 9) → 200; else 502. |
+| GET | `/<archive><crc>` (title, config, interface, media, versionlist, textures, wordenc, sounds) | 1) bundle `Game/<archive><crc>` (same name, same CRC, same bytes); 2) the cached copy, if its CRC-32 is `<crc>` (else it is deleted); 3) `<base>/<archive><crc>`, 30 s, its CRC-32 checked, stored atomically, served; else 502. |
+| GET/HEAD | `/ondemand/<archive>/<file>` | The server's cached OnDemand file (`od/<archive>/<file>`) → 200, or 404. Archive `0`-`3`, file `0`-`65535` in plain decimal, else 400. |
+| PUT | `/ondemand/<archive>/<file>` | Body (1 B to 4 MiB, else 400 / 413; the page checked it against the server's versionlist) stored atomically → 204. |
+| GET | `/server-probe?url=<address>` | In every mode. JSON `{ok, error?, url, crc, nodeId, members, rsa, notes}`: `/crc` (10 s; `ok` = a good table), then `/rs2.cgi`'s `new Client(<node>, <lowmem>, <members>)` (else world 10, members, and a note) and `/client/client.js`'s `rsaenc(BigInt("<n>"), BigInt("<e>"))` or the only `BigInt("<40+ digits>"),BigInt("…")` pair (else `rsa: null`, the built-in key, and a note). No `url` → 400; an address that does not normalize → `error: 'invalid address'`. |
+
+A 502's body is the plain words the page shows: `unreachable` (refused, no such host, DNS, TLS, a dropped connection),
+`timed out`, `not a 2004scape server` (404, not 40 bytes, a bad trailer), `http <status>`, and for an archive `checksum
+mismatch`. Requests send the app's User-Agent (`2004Scape/<version> (iOS <version>)`), no cookies, no Origin. Nothing
+runs on the main thread. `web/test/native/drive.mjs --online` checks every case on the simulator against a stand-in server.
 
 ## 4. Page ↔ engine worker protocol (`worker.postMessage`, NOT MessageChannel — 4–8× faster in WebKit)
 
@@ -196,7 +223,8 @@ Before `client.js` is imported, the host page:
 1. Assigns `window.WebSocket = EngineSocket` (global; static `CONNECTING/OPEN/CLOSING/CLOSED`; `readyState` set to 3
    *before* firing error/close; `binaryType`, `bufferedAmount` (0), `send(Uint8Array|ArrayBuffer)`, `close()`, `onopen/
    onmessage/onerror/onclose` + `addEventListener`). The client's `e instanceof WebSocket && e.readyState === 3` checks depend
-   on this being the global.
+   on this being the global. **Online**: `NativeSocket`, the same surface over native's socket bridge (§7.2); host.js
+   reads `settings.server` (with `serverurl.js`'s rules, loaded just before it) to choose.
 2. Sets `globalThis.__LC_CACHE__ = { dat: Uint8Array, idx: [Uint8Array ×5] }` (from `cache/main_file_cache.*`) — the
    patched client's OnDemand reads models/anims/midi/maps from it synchronously (no worker, no second socket, no IndexedDB).
    With it, `globalThis.__LC_BZIP2__ = { decompress(stream) }`: libbzip2 (`engine/bzip2.wasm` through
@@ -207,7 +235,8 @@ Before `client.js` is imported, the host page:
 3. Sets `globalThis.lcHost` (API below).
 
 Then it does `const { Client } = await import('./client/client.js'); window.__client = new Client(10, lowMemory, members)`
-(nodeId 10 and the Settings' detail and members choice — must match the engine's `node.id`/`node.members`). The engine
+(nodeId 10 and the Settings' detail and members choice — must match the engine's `node.id`/`node.members`; **Online**: the
+server entry's `nodeId` and `members`, and no engine worker is started). The engine
 worker, the cache's fetch and the import of `client.js` start first, right after the stored settings are read, so that
 they load while the page builds its own controls and lays itself out; the Client is made once both are there (the
 worker's messages wait for that init: the page's first `await`).
@@ -218,7 +247,8 @@ loader shows, and by the page's 200 ms watcher). A client that fails to load
 (`errorLoading`, `errorHost`, `errorStarted`) draws its own error screen, and the loader gives way to it at once.
 Otherwise it gives way after 45 s; a world still starting then says so in the status pill ("The world is still
 starting…"), and one not started after 90 s is ended and reported: the 2004 error screen with Restart (`fatal`, §7). Both
-times count only while the page runs, so a launch spent in the background does not time out.
+times count only while the page runs, so a launch spent in the background does not time out. **Online** the loader waits
+for the client alone, and a server that cannot be reached gets the unreachable box within seconds instead (§7.2).
 
 The client's AudioContext (`window.audioContext`, 22,050 Hz) can be suspended in silences (`host.js` `audioIdle`): once
 no source has played on it for 10 s, and resumed when one starts (the music's next buffer, a sound effect: it plays once
@@ -242,6 +272,8 @@ after them).
 | `haptic(style)` | touch patches | `'light'|'medium'|'heavy'|'selection'` (nothing when the Vibration setting is off) |
 | `takeSecondaryClick()` | touch patch (`pointerUp` tap path) | Returns `true` (once) if the player armed the options-menu button (`#btn-secondary`, "next tap opens the options menu", in the classic layout's rail: the HUD has tap-to-drop in its place; it disarms after 5 s, another button or the HUD showing) → the tap clicks with button 2. |
 | `settings` | client patches | `{ stayLoggedIn: boolean, longPressMs: number, cameraSensitivity: number }` (read live; `longPressMs` is Settings › Hold for menu: 300, 400 (the default) or 600; the host's other settings are its own) |
+| `server` | client patch 0030 (`lcLoginKey()`), the LocalOnDemand override (`lcServer()`) | **Online**: `{id, name, url, nodeId, members, rsa}` (`rsa`: `{n, e}` decimal strings, or null for the build-time key); null offline |
+| `openSocket(purpose)` | the LocalOnDemand override (`lcOpenSocket('ondemand')`) | **Online**: a `NativeSocket` to the server for OnDemand's remote files; null offline |
 | `platform` | client patch 0026 (`lcPlatform()`) | Which app the page runs in, as the engine's `init` is told: `LostCityNative.platform` (`'ios'`, `'android'`), or `'web'` without an app (desktop tests). On `'android'` a canvas gets its whole frame when any of its pixels changed; everywhere else the rect of the changed pixels (§6.1) |
 | `onClientEvent(name, detail)` | client patches (optional) | `('ingame', bool)` (the host switches between the title canvas and the HUD in the same frame), `('menu-open', {serial, area, options, pointerId, x, y, width, height})` (the host shows its large menu, §6.2, and plays the long-press haptic), `('menu-close')`, `('action-label', {text, x, y})` (patch 0020: the host shows what a tap did beside x, y, page px) |
 
@@ -252,7 +284,8 @@ Client fields the host touches at runtime (property names are preserved by esbui
 `keyQueueReadPos/WritePos`, `nextMouseClick*` (the Login click), `chatInput`, `dialogInputOpen`, `dialogInput`,
 `socialInputOpen`, `socialInput`, `socialInputHeader`, `socialInputType` (a private message or a name), `reportAbuseInput`,
 `mainModalId`, `sideModalId` (the how-to card waits for no window), `reportAbuseComId`, `chatModalId`, `tfps`,
-`setTargetedFramerate(n)`, plus the HUD API below. The list also keeps `isMenuOpen`, which `web/test/hud.mjs` reads.
+`setTargetedFramerate(n)`, `lastProgressMessage` (**Online**: the client's own retry screen, §7.2), plus the HUD API
+below. The list also keeps `isMenuOpen`, which `web/test/hud.mjs` reads.
 Typed characters are injected as
 `KeyboardEvent('keydown'/'keyup', {key, code: key})` on `#canvas` (GameShell drops untrusted events with an empty `code`);
 in the HUD `#canvas` stays in the page (opacity 0, no pointer events) for exactly that reason.
@@ -437,8 +470,8 @@ Page → native: `window.webkit.messageHandlers.native.postMessage(msg)`
 |---|---|
 | `{type:'ready'}` | Host page loaded. |
 | `{type:'status', phase, detail?}` | `booting`, `engine-ready`, `title`, `ingame`, `error`. |
-| `{type:'keyboard', action:'show', kind, prompt, text, secure, numeric, cancellable?, maxLength?, charset?, chips?}` | Show the native keyboard. `kind` ∈ `chat`, `login-user`, `login-pass`, `dialog`, `social`, `report`. The accessory bar shows `prompt` and `text` (`secure` → masked; on the login form the prompt is the form's status line, e.g. "Connecting to server...", while there is one). `cancellable`: a Cancel button (prompts). `maxLength` / `charset`: the bar refuses what the input would not take (with a warning haptic and a flash of the bar), each character checked against the line with the ones before it. `charset`: `chat` (public chat: ASCII 32-122, and 123-126, `{ \| } ~`, only while the line starts with `::`, the one place the client takes them), `text` (a private message: ASCII 32-122), `alnum` (the name to report: letters, digits, space), `game` (the password: exactly the client's `CHARSET`, letters, digits, space and the 2004 keyboard's punctuation, £ included), `name` (the username and name prompts: letters, digits, space, `-`, `_`), `digits` (an amount), `any`; a name native does not know means `any`. `chips`: `[{label, text, submit?, whenEmpty?}]` one-tap entries that replace the input line (and submit): `::` and the recent developer commands for chat, recent and common amounts for "Enter amount". |
-| `{type:'keyboard', action:'update', prompt, text, chips?, charset?, maxLength?, cancellable?}` | Current input line changed (host polls the client while the keyboard is up). `chips`, `charset`/`maxLength` and `cancellable`, when present, replace the bar's (the host sends `chips`, which change as commands and amounts are used). |
+| `{type:'keyboard', action:'show', kind, prompt, text, secure, numeric, cancellable?, maxLength?, charset?, chips?}` | Show the native keyboard. `kind` ∈ `chat`, `login-user`, `login-pass`, `dialog`, `social`, `report`. The accessory bar shows `prompt` and `text` (`secure` → masked; on the login form the prompt is the form's status line, e.g. "Connecting to server...", while there is one). `cancellable`: a Cancel button (prompts). `maxLength` / `charset`: the bar refuses what the input would not take (with a warning haptic and a flash of the bar), each character checked against the line with the ones before it. `charset`: `chat` (public chat: ASCII 32-122, and 123-126, `{ \| } ~`, only while the line starts with `::`, the one place the client takes them), `text` (a private message: ASCII 32-122), `alnum` (the name to report: letters, digits, space), `game` (the password: exactly the client's `CHARSET`, letters, digits, space and the 2004 keyboard's punctuation, £ included), `name` (the username and name prompts: letters, digits, space, `-`, `_`), `digits` (an amount), `any`; a name native does not know means `any`. `chips`: `[{label, text, submit?, whenEmpty?}]` one-tap entries that replace the input line (and submit): `::` and the recent developer commands for chat, recent and common amounts for "Enter amount". `remember` (kind `login-pass`, online only): the bar's Remember box, ticked or not (§7.2, §7.5). |
+| `{type:'keyboard', action:'update', prompt, text, chips?, charset?, maxLength?, cancellable?, remember?}` | Current input line changed (host polls the client while the keyboard is up). `chips`, `charset`/`maxLength`, `cancellable` and `remember`, when present, replace the bar's (the host sends `chips`, which change as commands and amounts are used). |
 | `{type:'keyboard', action:'hide'}` | Dismiss. |
 | `{type:'haptic', style}` | `UIImpactFeedbackGenerator` / selection feedback. The page sends none while Settings › Vibration is off, and native's own haptics (a refused key, a fatal error) follow that setting too. |
 | `{type:'settings', values}` | Persist settings (native stores them; injected again on next launch). At boot the page checks them against the Settings sheet: a value it no longer offers becomes the nearest offered number (an earlier version's 450 ms hold: 400) or the default, saved once. |
@@ -446,6 +479,9 @@ Page → native: `window.webkit.messageHandlers.native.postMessage(msg)`
 | `{type:'lm', id, mode, think, local, online, maxChars, timeoutMs, fallback?}` | **Bots**: a bot's reply for the chat model to write (§7.1; `think`: Settings › Bot chat › Think first). Answered through `LostCityHost.bots.lmReply`. |
 | `{type:'lm-key', action}` | **Bots**: `set` opens native's secure box for the Claude key; `remove` deletes it (§7.1). Answered with a status. |
 | `{type:'lm-warm'}` | **Bots**: the player starts to chat with the on-device model chosen (and it is not loaded), or enters the world while no quick load is on record: native loads it in the background (§7.1). |
+| `{type:'socket', action:'open'\|'send'\|'close', id, purpose?, data?}` | **Online**: the page's WebSockets, opened natively to the page load's server (§7.2, §7.4). |
+| `{type:'account', action:'save-password'\|'forget-password'\|'login', server, name, password?}` | **Online**: remembered passwords (§7.2, §7.5). |
+| `{type:'server', action:'use'\|'delete'\|'ask', id?, title?, address?, name?}` | **Online**: switch server and reload, delete a server's cache and passwords, the Add / Edit server box (§7.2, §7.6). |
 
 Console output goes through the separate `log` handler: `{level, text}`.
 
@@ -465,9 +501,14 @@ Native → page: `webView.callAsyncJavaScript` on `window.LostCityHost`
 | `LostCityHost.audio.setMuted(muted)` | Android only (docs/ANDROID.md §3.3): a fallback mute. |
 | `LostCityHost.bots.lmReply({id, text, source, error?, ms, timings?, usage?})` | **Bots**: native's answer to `{type:'lm'}` (§7.1). |
 | `LostCityHost.bots.lmStatus({local, online})` | **Bots**: the chat model's status changed (§7.1). |
+| `LostCityHost.socket.events([{id, event, data?, code?, reason?}])` | **Online**: what the page's sockets received, in order (§7.2, §7.4). |
+| `LostCityHost.accounts.saved({<server id>: [names]})`, `LostCityHost.accounts.login(name, password \| null)` | **Online**: which names have a remembered password; the answer to `account login` (§7.2, §7.5). |
+| `LostCityHost.keyboard.remember(on)` | **Online**: the player tapped the keyboard bar's Remember box (§7.2, §7.5). |
+| `LostCityHost.servers.answer({address, name} \| null)` | **Online**: the Add / Edit server box closed (§7.2, §7.6). |
 
 Native → page at document start (WKUserScript): `window.LostCityNative = { platform: 'ios', appVersion, build,
-osVersion, deviceModel, simulator, debug, settings, lm }` (`lm`: the chat model's status, as `lmStatus` sends it, §7.1).
+osVersion, deviceModel, simulator, debug, settings, lm, savedPasswords }` (`lm`: the chat model's status, as `lmStatus` sends
+it, §7.1; `savedPasswords`: as `accounts.saved` sends it, `{}` when none, §7.2, §7.5).
 
 The native views (keyboard bar, loading cover, notices) use the same 2004 assets through `ios/LostCity/RSTheme.swift`, which
 registers `Game/ui/fonts/*.ttf` with CoreText (process scope) and loads `Game/ui/sprites/*.png`. The loading cover is a
@@ -641,6 +682,199 @@ requests to the mock with and without `think`, `botThink` kept across a reload),
 Think first shown or not by the status), `web/test/gallery/gallery.mjs` (the page on every phone size, `mini-zoomed`
 and `se-zoomed` when named: never scrolling) and `web/test/app-test.mjs --device --lm-bench` (the on-device model's benchmark;
 `--lm-think` benches the note mode).
+
+### 7.2 Online mode
+
+**Online** ([ONLINE.md](ONLINE.md) for players and server owners): the page plays on one game server, an Engine-TS 274,
+per page load. The page never touches the network: native code carries the client's sockets (the socket bridge) and
+fetches the server's files (the proxy routes). Switching server, or between online and the world on the phone, reloads
+the page. Offline nothing here applies: the bundle, the routes and the page behave as before.
+
+**The choice** (settings, checked at boot like the others: a malformed entry dropped, an address stored normalized, a
+correction saved once; never a password):
+
+```
+server   'offline' | '<server id>'                          default 'offline'
+servers  [{ id, name, url, nodeId, members, rsa, added }]   at most 50; id /^[A-Za-z0-9_-]{1,40}$/ (the page makes 's-' + 8 base36)
+         name 1-40 characters (else the host); url normalized; nodeId 1-65535 (default 10); members (default true);
+         rsa { n, e } decimal strings, or null (the build-time key); added ms
+accounts { '<server id>': [{ name, lastPlayed }] }          usernames only, newest first, at most 20
+rememberDefault { '<server id>': boolean }                  the Remember box's last state on each server
+```
+
+The page is online when `server` is the `id` of an entry whose `url` normalizes; native decides the same way when the
+page's `/index.html` is requested, and that holds for the page load. Address rules (`web/host/serverurl.js`, the same
+on every side, vectors in `web/test/online/serverurl-vectors.json`): `host`, `host:port`, `http(s)://` or `ws(s)://`
+with an optional path; ws is http and wss https, no scheme is http, the host lower-cased (IPv6 in brackets), a default
+port dropped, no trailing slash, query or fragment; credentials, other schemes, a bad port, `.`/`..` segments are not
+addresses. The socket URL is the base with http → ws, https → wss (`/` when there is no path). No host is refused or
+treated specially.
+
+**The socket bridge** (page → native `{type:'socket', …}`; native → page `LostCityHost.socket.events(batch)`):
+
+| Message / event | Meaning |
+|---|---|
+| `{action:'open', id, purpose}` | A WebSocket to the server's socket URL, subprotocol `binary`, no `Origin`, the app's User-Agent, 10 s to open. `id` 1, 2, 3… per page; `purpose` `'game'` (the client's) or `'ondemand'` (LocalOnDemand's: `lcHost.openSocket`), for the log. |
+| `{action:'send', id, data}` | One binary message, standard base64 with padding; in order per socket, queued until open. |
+| `{action:'close', id}` | Close (1000); native sends nothing more for that id. |
+| `open` / `message` (`data`: base64) | The upgrade done; one binary message (a text message: error `text frame`, closed 1003). |
+| `error` (`reason`) | `refused`, `timed out`, `not found`, `dns`, `tls`, `http <status>` (the upgrade refused), `local network` (the phone's local network privacy refused it: iOS's Local Network, Android 17's permission), `network` (a drop too, and an unknown host while the phone has no network), `no server` (an offline page). Always followed by `close` 1006 with the same words. |
+| `close` (`code`, `reason`) | Final. A close from the server keeps its code. |
+
+Native batches what arrived together into one call, in order (everything within 2 ms of the first: iOS §7.4, Android
+ANDROID.md §7), and closes a page's sockets when it goes away
+(a reload, WebContent's or the renderer's death). No keep-alive in the background: a socket that died while the app
+was suspended is reported when it runs again, and the client's own reconnect (opcode 18) does the rest. The page's
+`NativeSocket` has EngineSocket's surface; it sets `readyState` 3 before `error` and `close` fire (a socket still
+connecting that gets `close` alone fires `error` first). Connections are logged with the host and code, never their
+contents.
+
+**The proxy routes** (native, while the page load is online; offline these paths are the bundle's as before):
+
+| Route | Behaviour |
+|---|---|
+| `GET /crc…` | `<base>/crc` (10 s), 40 bytes with the client's trailer; 200, `no-store`, kept for the page load. Else 502 with one line: `unreachable`, `timed out`, `not a 2004scape server` (404, the size, the trailer), `http <status>`, `local network`. |
+| `GET /<jag><crc>` (title, config, interface, media, versionlist, textures, wordenc, sounds) | The bundled file of that name (same name, same CRC, same bytes); else `<caches>/online/<id>/<jag><crc>` when its CRC32 is the name's; else `<base>/<jag><crc>` (30 s), its CRC32 checked, stored atomically, served; else 502 (the words above, or `checksum mismatch`). |
+| `GET /ondemand/<archive>/<file>` | `<caches>/online/<id>/od/<archive>/<file>`, or 404. Archive 0-3, file 0-65535 in plain decimal, else 400. |
+| `PUT /ondemand/<archive>/<file>` | Stores it (1 byte to 4 MiB, else 400/413): 204. iOS: the body; Android: `X-LC-Body` + `X-LC-Length` as the saves. Offline: 405. |
+| `GET /server-probe?url=<address>` | In every mode: `{ok, error?, url, crc, nodeId, members, rsa, notes}`. `ok` = a good `/crc`; then `rs2.cgi`'s `new Client(<nodeid>, <lowmem>, <members>)` (else 10 and members, noted) and the key pair in `client/client.js` (`rsaenc(BigInt("…"),BigInt("…"))`, either quote, or the only adjacent pair of a minified bundle; else null, noted). `error`: `invalid address` or a `/crc` word. 400 without `url`. The first time `/crc` meets the iPhone's Local Network question (once per install), it is tried again each second for up to 30 s while the player answers. |
+
+`<caches>` is iOS `Library/Caches` (purgeable: re-downloaded when needed), Android `cacheDir`. Deleting a server deletes
+its folder and its kept passwords.
+
+**Accounts and passwords**:
+
+| Direction | Message | Meaning |
+|---|---|---|
+| page → native | `{type:'account', action:'save-password', server, name, password}` | After a new login reached the world (not a reconnect) with Remember on. iOS: a Keychain generic password (service `<bundle id>.server`, account `<server id>/<lower-case name>`, `AfterFirstUnlockThisDeviceOnly`); Android: an AndroidKeyStore-wrapped AES-GCM file. Refused for an unknown server, a name not 1-12 or a password not 1-20 characters. |
+| page → native | `{type:'account', action:'forget-password', server, name}` | Remember off at such a login while one was kept, Accounts › Forget password, Accounts › Remove. |
+| page → native | `{type:'account', action:'login', server, name}` | "Continue as", Accounts › Log in: native answers `LostCityHost.accounts.login(name, password \| null)`. With a password the page fills the form and presses Login (keeping nothing); with null it fills the name and opens the password field. The page takes an answer only for the name it asked for, within 30 s, on the title. |
+| native → page | `LostCityNative.savedPasswords` (document start), `LostCityHost.accounts.saved(map)` (after each change) | `{<server id>: [lower-case names]}` with a kept password, `{}` when none. |
+
+The keyboard's `show` for `login-pass` carries `remember: true|false` online (absent offline: no box), and every
+`update` while it is up; native draws a 2004 checkbox "Remember" in its bar left of the submit button, and a tap flips
+it and calls `LostCityHost.keyboard.remember(on)`. The page's first state: on when this name has a kept password, else
+`rememberDefault[<server id>]` (off at first); a tap becomes that default.
+
+**The server choice**:
+
+| Direction | Message | Meaning |
+|---|---|---|
+| page → native | `{type:'server', action:'use', id}` | Sent after the page's `settings` message with the new `server`: native stores it, closes the page's sockets and reloads (its usual cover, with the right caption); also for the server in use, after Edit › Use changed its entry. An id that is neither `offline` nor in `servers` is ignored. |
+| page → native | `{type:'server', action:'delete', id}` | Native deletes the server's cache folder and kept passwords (the page has removed the entry from the settings). |
+| page → native | `{type:'server', action:'ask', title, address, name}` | Native's Add / Edit server box (Address, placeholder `192.168.1.20 or my-mac.local:8888`; Name, optional; Cancel / OK), in the Claude key box's style: `LostCityHost.servers.answer({address, name} \| null)`, trimmed. `title` `Add a server` or `Edit <name>`; `address`/`name` the prefill (`''`: the placeholders). |
+
+**The page online** (host.js): `window.WebSocket = NativeSocket`; `lcHost.server` set; no engine worker, no VFS,
+no bots or chat model; `engineState` `'remote'`; the loader waits for the client alone; the client's timers are not
+frozen in a pause (the server keeps ticking: a socket that died must be noticed). Hidden or off: Save now, the autosave,
+the save warnings, Settings › Bot chat and Saved data, Settings › World's world rows and Restart (one note instead;
+Detail stays), the engine's timeouts and "The world is still starting…", the password filled in (online the
+username's key goes on to the password field). Back: Report abuse in the HUD's chat bar. The words: the loader caption
+"online" (one text node set before the first paint, so native's covers match it pixel for pixel), the title's hint and
+World button, New User's hint ("Type a name and a password. / Your server may ask you to register first.") and
+response 6 ("This server runs a different / game version or key."), replaced as the client sets them, About
+("Online: <name> (<host>)"). A `/crc` 502 at boot (the page asks once beside the client), the client's own retry screen,
+or a login whose socket failed opens the unreachable box within seconds: the reason in plain words, Try again (a
+reload), Play offline, Choose world. The worlds sheet (the title's World button, Settings › World › Play on › Change):
+This phone (offline), the servers (Edit, Delete with a confirm box), Add server (native's box, then the probe's result
+in the sheet: Use, Save, Cancel). An Edit to another address of a server with kept passwords asks "The same server?"
+first (Forget sends `forget-password` for each). A login with a kept password that ends on the title (refused) leaves
+the form to the player: a password typed there is kept by the Remember box as any other. The stored server settings are
+compared with sorted keys (native keeps them sorted), so they are saved again only when something was corrected. A
+game socket the server opened and never answered (the client gives up after 30 s, patch 0031) shows the box with
+`timed out`. Switching: offline the world is saved first (as Restart); online in game the page logs out
+through the client (the Logout tab, then its button, until the title shows, at most 5 s; else it says so and stays),
+then `settings` and `server use` (while the connection is lost and the client reconnects, at once: there is nothing to
+log out of).
+
+**The client**: patch 0030 encrypts the login with `lcLoginKey()` (the server's key) or, null, the build-time key (the
+same packet offline). Patch 0031: a login read that times out with the socket still open (a server that never
+answers) is an IO error, the socket closed, where upstream rethrew and its loop ended. LocalOnDemand (overrides `io/OnDemand.ts`) checks the bundled files against the server's
+versionlist; another version comes from `GET ondemand/…`, else over an OnDemand `NativeSocket` with upstream's protocol
+on the main thread (no Worker, no IndexedDB), is checked, kept in memory and `PUT` back (web/client/README.md). Its 20 ms
+timer stops when nothing is queued or pending, except in game (the keep-alive).
+
+**Tests**: `node web/test/serve.mjs --check` (the desktop double's routes, probe, bridge, against stub servers),
+`node web/test/e2e.mjs --engine <copy> [--platform android]` (end to end against a local Engine-TS and its variants),
+`node web/client/test/run.mjs` §17 (the login key, a failed socket, the OnDemand fallback), `web/test/gallery/gallery.mjs`
+(the online states on every screen). `web/test/online/native-double.mjs` is native's side for those desktop runs, a
+reference for the contracts above. In the apps: `web/test/native/drive.mjs --online` and `android/test/drive.mjs
+--online` (the native layer: bridge, proxy, probe, Keychain or Keystore, the server box, Remember), and `app-test
+--server` on both (`web/test/app-test.mjs`, `android/test/app-test.mjs`: the same `autotest.js` run against a local
+Engine-TS, docs/BUILDING.md §4). Android's native side is described in [ANDROID.md](ANDROID.md) §7.
+
+### 7.3 Online on iOS: the server of a page load
+
+`settings.server` (`'offline'` or a server id) names an entry of `settings.servers` (`{id, name, url, nodeId, members,
+rsa, added}`, kept by the page). Native reads it when a page starts loading (the main frame's navigation: a load, a
+reload the page does itself, a restart after a crash) and keeps it for that page load: the routes of §3.1 and the
+sockets of §7.4 use it. It plays on the server when the id is a plain name (1-64 letters, digits, `-`, `_`; it names a
+cache folder) and the entry's `url` normalizes (the page's rules: no scheme, `ws` → `http`, `wss` → `https`, default
+ports dropped, the host lower-cased, query, fragment and a trailing `/` dropped; credentials, other schemes and bad
+ports refused). No host is refused or treated differently. Anything else is offline, and the app behaves exactly as
+without online mode. The loading cover's caption ends in `online` or `offline` to match the page's, and the restart
+notices after a WebContent crash add "You will need to log in again." online. `ios/Config/Info.plist` allows
+user-typed `http`/`ws` hosts (`NSAllowsArbitraryLoads`) and explains the Local Network prompt
+(`NSLocalNetworkUsageDescription`).
+
+### 7.4 Online on iOS: the socket bridge (Swift `SocketBridge`)
+
+Online the page's `NativeSocket` replaces `window.WebSocket` and its sockets are native `URLSessionWebSocketTask`s to
+the page load's server: the base URL with `http` → `ws`, `https` → `wss` (path or `/`), whatever URL the client asked
+for. `open` (`purpose` `game` or `ondemand`, for the log) upgrades with `Sec-WebSocket-Protocol: binary`, the app's
+User-Agent, **no Origin** and no cookies, within 10 s. `send` (`data`: base64 of one binary message) waits until the
+socket is open; sends go one at a time, in order. `close` closes with 1000; after it no event comes for that id, and
+`send`/`close` for an unknown id or `open` for an id in use are ignored.
+
+`LostCityHost.socket.events` carries `open`; `message` (`data`: base64); `error` (`reason`: `refused`, `timed out`, `not
+found`, `dns`, `tls`, `http <status>` for a refused upgrade, `local network`, `network`, `no server` offline, `text
+frame`), always
+followed by `close` with 1006 and the same words; `close` (the server's code and reason). Messages that arrived before
+a close are delivered before it. Events go in one call per batch (everything within 2 ms of the first: receives complete
+one main-queue block at a time, so a burst arrives over several run-loop turns; on the simulator 50 messages sent in one
+write came in one call). A page that goes away (reload, WebContent ended) has its sockets closed (1001) and its pending
+events dropped. Nothing is kept alive in the background; a socket that died meanwhile reports its close when the app
+runs again. The log has the host, purpose, open, close code, error and message counts, never contents (the login block
+holds the password).
+
+### 7.5 Online on iOS: accounts and the Remember box (Swift `ServerPasswordStore`, `KeyboardAccessoryBar`)
+
+Passwords are remembered only when the player asks (the Remember box), in the Keychain: generic passwords of the
+service `<bundle id>.server`, account `<server id>/<lower-case name>`, `AfterFirstUnlockThisDeviceOnly`. Never in the
+settings, the page's storage, a file or a log. `save-password` (after a login that worked, Remember on) is refused for
+a server not in `settings.servers`, a name not 1-12 characters or a password not 1-20; `forget-password` removes one;
+`login` answers `accounts.login(name as sent, password | null)`, and the page fills the form and clicks Login without
+keeping it. `accounts.saved` (lower-case names per server id in `settings.servers`) follows every save, forget and
+server delete, and `LostCityNative.savedPasswords` carries the same at document start. Keychain items outlive the app:
+at launch, once the stored settings are read (or there are none), the passwords of server ids not in `settings.servers`
+are deleted (`ServerPasswordStore.purge`).
+
+**Local Network** (`LocalNetworkPrivacy`): the first connection to the player's network brings up the system's question,
+and while it is up, or after Don't Allow, URLSession fails at once with "not connected to the internet" (the path:
+"Local network prohibited"). That failure, or one to a local address (Android's rule: private, link-local and
+unique-local literals, `.local` names), is reported as `local network`; the page says where to allow it.
+
+The keyboard's `show` for kind `login-pass` online carries `remember: true|false`: the bar shows a 2004-style check box
+"Remember" (the Game Options tab's small button with a yellow tick) left of Log in. A tap flips it and calls
+`LostCityHost.keyboard.remember(on)`; the page's next `remember` wins, and an `update` without it leaves it. Without
+`remember` (offline, the username) there is no box.
+
+### 7.6 Online on iOS: server choice and the Add server box
+
+`server use` stores `settings.server` (`offline` or an id in `settings.servers`; any other id is ignored), closes the
+page's sockets and reloads the page through native's load path, with the cover's caption for the new choice; it always
+reloads, also for the id in use. `server delete` deletes the server's cache folder and remembered passwords (the page
+removes the entry). `server ask` shows a native alert in the Claude key box's style: `title`, fields Address
+(placeholder `192.168.1.20 or my-mac.local:8888`) and Name (`Optional`), prefilled from `address`/`name`, Cancel / OK,
+answered with `servers.answer({address, name})` (trimmed) or `null`. The page probes the address (`/server-probe`) and
+shows the result.
+
+Tests: `web/test/native/drive.mjs --online` (game-test/online.js against web/test/native/online-stub.mjs, an address
+where nothing listens and, with `ENGINE_URL`, a local Engine-TS), with the debug hooks `server-alert`, `remember-tap`,
+`online-state`, `online-cache`, `last-notice`, `url-normalize` (native's address rules over every vector of
+web/test/online/serverurl-vectors.json, the page's own test file) and `purge-passwords` (the launch's sweep), and the
+built app's `NSAllowsArbitraryLoads` and `NSLocalNetworkUsageDescription` (drive.mjs reads its Info.plist: the test
+servers are IP literals, which ATS does not cover) (ios/LostCity/README.md).
 
 ## 8. World configuration (engine `data/config/world.json` in the VFS)
 

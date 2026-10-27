@@ -4,8 +4,9 @@ import WebKit
 /// Hosts the game: a full-screen WKWebView running the web client (page) and the engine (a module
 /// Web Worker in the same page), all loaded from the app bundle through `AssetSchemeHandler`,
 /// plus the native side of the page contract (ARCHITECTURE.md §7): keyboard, haptics, settings,
-/// status, lifecycle, memory warnings, recovery from a WebContent process crash, and the bots' chat
-/// model (§7.1: `BotChatModel`, the Claude key's secure box).
+/// status, lifecycle, memory warnings, recovery from a WebContent process crash, the bots' chat
+/// model (§7.1: `BotChatModel`, the Claude key's secure box), and online mode (§7.2-7.5: the server
+/// of each page load, its sockets, remembered passwords, the Add server box).
 ///
 /// The screen has one loader and one error UI: `LoadingOverlay` draws the page's own loader until the page has drawn
 /// it (fonts and logo in, two frames later), and errors the page reports (`fatal`) are shown by the page alone;
@@ -15,7 +16,9 @@ final class GameViewController: UIViewController {
     private let saveStore = SaveStore.documents()
     private let settings = NativeSettings()
     private let page = PageBridge()
-    private lazy var schemeHandler = AssetSchemeHandler(bundleRoot: Self.gameFolder, saveStore: saveStore)
+    private lazy var online = OnlineProxy(bundleRoot: Self.gameFolder)
+    private lazy var schemeHandler = AssetSchemeHandler(bundleRoot: Self.gameFolder, saveStore: saveStore, online: online)
+    private lazy var sockets = makeSockets()
     private lazy var keyboard = KeyboardBridge(bridge: page)
     private lazy var lifecycle = LifecycleCoordinator(bridge: page)
     private lazy var haptics = Haptics(view: view)
@@ -23,6 +26,8 @@ final class GameViewController: UIViewController {
     private lazy var botChat = makeBotChat()
     /// The Claude key's secure box while it is up (Settings › Bot chat › Set key…).
     private var keyAlert: UIAlertController?
+    /// The Add / Edit server box while it is up (the title's World picker).
+    private var serverAlert: UIAlertController?
     private var observers: [NSObjectProtocol] = []
     private var overlayFallback: Task<Void, Never>?
     private var terminations: [Date] = []
@@ -68,6 +73,10 @@ final class GameViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // (remembered passwords of servers the settings no longer have: left by an uninstall, the Keychain keeps them)
+        if settings.readable {
+            ServerPasswordStore.purge(keeping: OnlineServer.ids(in: settings.values))
+        }
         observeApp()
         keyboard.onActivity = { [weak self] in self?.userActivity() }
         keyboard.onHaptic = { [weak self] in self?.playHaptic($0) }
@@ -161,7 +170,7 @@ final class GameViewController: UIViewController {
     private func installUserScripts(_ scripts: WKUserContentController) {
         scripts.removeAllUserScripts()
         scripts.addUserScript(WKUserScript(source: Self.consoleBridge, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        let info = AppInfo.pageInfo(settings: settings.values, lm: botChat.status)
+        let info = AppInfo.pageInfo(settings: settings.values, lm: botChat.status, savedPasswords: savedPasswords())
         let json = (try? JSONSerialization.data(withJSONObject: info, options: [.sortedKeys]))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{\"platform\":\"ios\",\"settings\":{}}"
         scripts.addUserScript(WKUserScript(source: "window.LostCityNative = \(json);", injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -170,6 +179,7 @@ final class GameViewController: UIViewController {
     private func loadGame(reason: String) {
         Log.info("host", "loading \(AssetSchemeHandler.indexURL.absoluteString) (\(reason))")
         resetPageState()
+        overlay.online = OnlineServer.current(in: settings.values) != nil
         overlay.show()
         overlayFallback?.cancel()
         gameLoad = webView.load(URLRequest(url: AssetSchemeHandler.indexURL))
@@ -187,6 +197,7 @@ final class GameViewController: UIViewController {
         pageSerial += 1
         uncovering = false
         botChat.pageReset()
+        sockets.reset()
     }
 
     /// The page is up (`ready`, or any status): fades the loader out once the page has drawn its own, identical one
@@ -288,7 +299,7 @@ final class GameViewController: UIViewController {
     private func reloadIfNeeded() {
         guard reloadWhenActive else { return }
         reloadWhenActive = false
-        Notice.show("2004Scape was closed by iOS while in the background and is restarting.", in: view)
+        Notice.show("2004Scape was closed by iOS while in the background and is restarting." + loginAgain, in: view)
         loadGame(reason: "web content ended while in the background")
     }
 
@@ -326,6 +337,12 @@ final class GameViewController: UIViewController {
             botChat.warm()
         case "lm-key":
             handleModelKey(message["action"] as? String ?? "")
+        case "socket":
+            sockets.handle(message)
+        case "account":
+            handleAccount(message)
+        case "server":
+            handleServer(message)
         #if DEBUG
         case "debug":
             handleDebug(message)
@@ -456,6 +473,142 @@ final class GameViewController: UIViewController {
         top.present(controller, animated: true)
     }
 
+    // MARK: - Online mode (ARCHITECTURE.md §7.2-7.5)
+
+    private func makeSockets() -> SocketBridge {
+        let sockets = SocketBridge(bridge: page)
+        sockets.server = { [online] in online.server }
+        return sockets
+    }
+
+    /// What the restart notices add when the page that went away played on a server: its session there is gone.
+    private var loginAgain: String {
+        online.server == nil ? "" : " You will need to log in again."
+    }
+
+    /// The names with a remembered password, per server id (only the servers in the settings).
+    private func savedPasswords() -> [String: [String]] {
+        let ids = OnlineServer.ids(in: settings.values)
+        return ServerPasswordStore.saved().filter { ids.contains($0.key) }
+    }
+
+    /// A password was remembered or forgotten: the page hears it now (`accounts.saved`), and a reload at document start.
+    private func passwordsChanged() {
+        installUserScripts(webView.configuration.userContentController)
+        page.call("accounts.saved", [savedPasswords()])
+    }
+
+    /// `{type:'account', action, server, name, password?}`: `save-password` (after a login that worked, with Remember on),
+    /// `forget-password`, and `login` (answered with `LostCityHost.accounts.login(name, password | null)`). Passwords are
+    /// never logged.
+    private func handleAccount(_ message: [String: Any]) {
+        let action = message["action"] as? String ?? ""
+        let server = message["server"] as? String ?? ""
+        let name = message["name"] as? String ?? ""
+        let known = OnlineServer.entry(server, in: settings.values) != nil && ServerPasswordStore.isValid(name: name)
+        switch action {
+        case "save-password":
+            guard known, let password = message["password"] as? String, ServerPasswordStore.isValid(name: name, password: password) else {
+                Log.info("accounts", "save-password refused: not a server in the settings, or not a name and password the game takes")
+                return
+            }
+            if ServerPasswordStore.save(server: server, name: name, password: password) {
+                Log.info("accounts", "remembered the password of \(name) on \(server)")
+                passwordsChanged()
+            }
+        case "forget-password":
+            guard OnlineServer.isValidID(server), !name.isEmpty else { return }
+            ServerPasswordStore.remove(server: server, name: name)
+            Log.info("accounts", "forgot the password of \(name) on \(server)")
+            passwordsChanged()
+        case "login":
+            let password = known ? ServerPasswordStore.read(server: server, name: name) : nil
+            Log.info("accounts", "login as \(name) on \(server): \(password == nil ? "no stored password" : "the stored password")")
+            page.call("accounts.login", [name, password ?? NSNull()])
+        default:
+            Log.info("accounts", "unknown account action: \(action)")
+        }
+    }
+
+    /// `{type:'server', action, …}`: `use` (store the choice, close the page's sockets, reload with the right cover),
+    /// `delete` (the server's cache and remembered passwords; the page removes its entry), `ask` (the Add / Edit box).
+    private func handleServer(_ message: [String: Any]) {
+        let id = message["id"] as? String ?? ""
+        switch message["action"] as? String {
+        case "use":
+            guard id == "offline" || OnlineServer.entry(id, in: settings.values) != nil else {
+                Log.info("online", "server use \(id): not a server in the settings; ignored")
+                return
+            }
+            settings.merge(["server": id])
+            installUserScripts(webView.configuration.userContentController)
+            sockets.reset()
+            loadGame(reason: id == "offline" ? "play offline" : "play on server \(id)")
+        case "delete":
+            guard OnlineServer.isValidID(id) else { return }
+            let online = self.online
+            Task.detached(priority: .utility) { online.deleteCache(id) }
+            let removed = ServerPasswordStore.removeAll(server: id)
+            Log.info("online", "server \(id) deleted (\(removed) remembered password\(removed == 1 ? "" : "s"))")
+            passwordsChanged()
+        case "ask":
+            presentServerAlert(title: message["title"] as? String ?? "Add server",
+                               address: message["address"] as? String ?? "", name: message["name"] as? String ?? "")
+        default:
+            Log.info("online", "unknown server action: \(message["action"] ?? "none")")
+        }
+    }
+
+    /// The Add / Edit server box, in the Claude key box's style: Address and Name (optional), Cancel / OK; answered with
+    /// `LostCityHost.servers.answer({address, name} | null)`. The page probes the address and shows the result.
+    private func presentServerAlert(title: String, address: String, name: String) {
+        guard serverAlert == nil else { return }
+        let alert = UIAlertController(title: title, message: "Address, and a name (optional).", preferredStyle: .alert)
+        alert.addTextField { field in
+            field.text = address
+            field.placeholder = "192.168.1.20 or my-mac.local:8888"
+            field.keyboardType = .URL
+            field.textContentType = .URL
+            field.autocorrectionType = .no
+            field.autocapitalizationType = .none
+            field.spellCheckingType = .no
+            field.smartQuotesType = .no
+            field.smartDashesType = .no
+            field.keyboardAppearance = .dark
+            field.clearButtonMode = .whileEditing
+            field.accessibilityLabel = "Address"
+        }
+        alert.addTextField { field in
+            field.text = name
+            field.placeholder = "Optional"
+            field.autocorrectionType = .no
+            field.spellCheckingType = .no
+            field.keyboardAppearance = .dark
+            field.clearButtonMode = .whileEditing
+            field.accessibilityLabel = "Name"
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+            self?.serverAlertClosed(nil)
+        })
+        let ok = UIAlertAction(title: "OK", style: .default) { [weak self, weak alert] _ in
+            self?.serverAlertClosed((alert?.textFields?[0].text ?? "", alert?.textFields?[1].text ?? ""))
+        }
+        alert.addAction(ok)
+        alert.preferredAction = ok
+        keyboard.yieldFirstResponder(true)
+        serverAlert = alert
+        presentOnTop(alert)
+    }
+
+    private func serverAlertClosed(_ typed: (address: String, name: String)?) {
+        serverAlert = nil
+        keyboard.yieldFirstResponder(false)
+        keyboard.activate()
+        let answer: Any = typed.map { ["address": $0.address.trimmingCharacters(in: .whitespacesAndNewlines),
+                                       "name": $0.name.trimmingCharacters(in: .whitespacesAndNewlines)] } ?? NSNull()
+        page.call("servers.answer", [answer])
+    }
+
     // MARK: - Debug hooks for test pages (`{type:'debug', id, action, …}`; reply via `window.__lcDebugReply(id, value)`)
 
     #if DEBUG
@@ -542,6 +695,43 @@ final class GameViewController: UIViewController {
             field.text = message["text"] as? String ?? ""
             let typed = save ? field.text ?? "" : nil
             alert.dismiss(animated: false) { [weak self] in self?.keyAlertClosed(typed: typed) }
+        case "server-alert":
+            // The Add / Edit server box as the player would use it: what it showed, then the fields filled in and OK or Cancel.
+            guard let alert = serverAlert, let fields = alert.textFields, fields.count == 2 else {
+                reply = ["shown": false]
+                break
+            }
+            reply = ["shown": true, "title": alert.title ?? "", "address": fields[0].text ?? "", "name": fields[1].text ?? "",
+                     "placeholders": fields.map { $0.placeholder ?? "" }]
+            if let address = message["address"] as? String { fields[0].text = address }
+            if let name = message["name"] as? String { fields[1].text = name }
+            let typed = message["button"] as? String == "cancel" ? nil : (fields[0].text ?? "", fields[1].text ?? "")
+            alert.dismiss(animated: false) { [weak self] in self?.serverAlertClosed(typed) }
+        case "last-notice":
+            reply = Notice.last ?? NSNull()
+        case "remember-tap":
+            reply = keyboard.debugTapRemember() ?? NSNull()
+        case "online-state":
+            reply = ["server": online.server?.id ?? NSNull(), "url": online.server?.base ?? NSNull(), "sockets": sockets.openCount,
+                     "caption": overlay.debugLayout["captionText"] ?? "", "userAgent": AppInfo.userAgent]
+        case "url-normalize":
+            // native's address rules over the shared vectors (web/test/online/serverurl-vectors.json)
+            reply = (message["inputs"] as? [String] ?? []).map { input -> Any in OnlineServer.normalize(input).map { $0 as Any } ?? NSNull() }
+        case "purge-passwords":
+            // the launch's sweep of remembered passwords whose server is not in the settings: how many went
+            reply = ServerPasswordStore.purge(keeping: OnlineServer.ids(in: settings.values))
+        case "online-cache":
+            // The online cache's files (`list`), or one of them overwritten with junk (`corrupt`, a path from the list).
+            let root = online.cacheRoot
+            if message["op"] as? String == "corrupt", let path = message["path"] as? String, !path.contains("..") {
+                reply = (try? Data("junk".utf8).write(to: root.appendingPathComponent(path))) != nil
+            } else {
+                let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey])?
+                    .compactMap { $0 as? URL }
+                    .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+                    .map { String($0.standardizedFileURL.path(percentEncoded: false).dropFirst(root.standardizedFileURL.path(percentEncoded: false).count)) }
+                reply = (files ?? []).map { $0.hasPrefix("/") ? String($0.dropFirst()) : $0 }.sorted()
+            }
         case "activity":
             userActivity()  // (a long in-app test keeps the screen awake)
         case "keep-awake":
@@ -689,7 +879,13 @@ extension GameViewController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url else { return .cancel }
         switch url.scheme?.lowercased() {
-        case AssetSchemeHandler.scheme, "about", "blob", "data":
+        case AssetSchemeHandler.scheme:
+            // A new page (a load, a reload the page did itself, a restart after a crash) plays on the stored server choice.
+            if navigationAction.targetFrame?.isMainFrame == true {
+                online.pageLoaded(OnlineServer.current(in: settings.values))
+            }
+            return .allow
+        case "about", "blob", "data":
             return .allow
         case "http", "https", "mailto":
             // Everything the game needs is in the bundle; a link the player taps opens in Safari.
@@ -766,7 +962,7 @@ extension GameViewController: WKNavigationDelegate {
             return
         }
         // Player saves are written natively as they happen, so a fresh page resumes from them.
-        Notice.show("The game stopped unexpectedly (probably out of memory) and is restarting.", in: view)
+        Notice.show("The game stopped unexpectedly (probably out of memory) and is restarting." + loginAgain, in: view)
         loadGame(reason: "web content process terminated")
     }
 }

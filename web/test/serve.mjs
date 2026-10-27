@@ -12,15 +12,23 @@
 //
 //   node web/test/serve.mjs [--port 47500] [--root build/Game] [--saves <dir>] [--android]
 //   then open http://127.0.0.1:47500/
+//   node web/test/serve.mjs --server http://127.0.0.1:47620 [--platform android]   online (docs/ONLINE.md): the page
+//                                                    plays on that game server through the desktop double of native
+//                                                    (web/test/online/native-double.mjs: the socket bridge, the proxy
+//                                                    routes, the accounts, the server box); --app: the double, offline
 //   node web/test/serve.mjs --check [--port 47500]   the save routes against a scratch folder (exit code 0 = pass;
-//                                                    the Android-only refusals too)
+//                                                    the Android-only refusals too), and the double's proxy routes and
+//                                                    probe against a stub game server
 //
-// Also importable: `const server = await serve({ port, root, saves })` → `{ url, close() }`.
+// Also importable: `const server = await serve({ port, root, saves, app })` → `{ url, close(), app }` (app: the
+// double's settings, platform and cache folder; `server.app` is the double, for the tests' hooks).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { nativeDouble, probeServer } from './online/native-double.mjs';
 
 const IOS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -121,10 +129,13 @@ function listFiles(root) {
 // for every write the save and log routes take, `via` 'X-LC-Body' (Android's header) or 'body'. `logHeaderBodies`: a
 // console line for every write that came in X-LC-Body (default: as `log`). `android`: the Android router's view, which
 // never sees a body: a save write without X-LC-Body is refused (400), and /log needs X-LC-Body or ?text=.
-export async function serve({ port = 47500, root = path.join(IOS, 'build', 'Game'), saves = path.join(IOS, 'build', 'tmp', 'saves'), log = true, logHeaderBodies = log, onLog = null, onRequest = null, onWrite = null, routes = {}, android = false } = {}) {
+// `app` ({ platform, settings, savedPasswords, cacheDir }): the desktop double of native for online mode
+// (online/native-double.mjs): its document-start script goes first into index.html, and its routes come before the files.
+export async function serve({ port = 47500, root = path.join(IOS, 'build', 'Game'), saves = path.join(IOS, 'build', 'tmp', 'saves'), log = true, logHeaderBodies = log, onLog = null, onRequest = null, onWrite = null, routes = {}, android = false, app = null } = {}) {
     root = path.resolve(root);
     saves = path.resolve(saves);
     fs.mkdirSync(saves, { recursive: true });
+    const double = app ? nativeDouble({ root, cacheDir: app.cacheDir ?? path.join(path.dirname(saves), 'app-cache'), platform: app.platform ?? (android ? 'android' : 'ios'), settings: app.settings, savedPasswords: app.savedPasswords, log }) : null;
 
     // A write's bytes: from X-LC-Body when the request has it (Android), else its body. { data, via } or { status, error }.
     const writeBody = async (req, pathname) => {
@@ -159,6 +170,12 @@ export async function serve({ port = 47500, root = path.join(IOS, 'build', 'Game
             if (Object.hasOwn(routes, pathname)) {
                 const { body, type = 'application/octet-stream' } = await routes[pathname](req);
                 return send(200, body, type);
+            }
+            if (double && (pathname === '/' || pathname === '/index.html') && req.method === 'GET') {
+                return send(200, double.indexHtml(fs.readFileSync(path.join(root, 'index.html'), 'utf8')), MIME['.html']);
+            }
+            if (double && (await double.handle(req, res, url, pathname))) {
+                return;
             }
             if (pathname === '/save-index') {
                 if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -266,7 +283,14 @@ export async function serve({ port = 47500, root = path.join(IOS, 'build', 'Game
     }
     return {
         url: address,
-        close: () => new Promise(resolve => server.close(resolve))
+        app: double,
+        close: () => {
+            if (double) {
+                double.close(); // (its event streams stay open otherwise)
+                server.closeAllConnections();
+            }
+            return new Promise(resolve => server.close(resolve));
+        }
     };
 }
 
@@ -390,6 +414,10 @@ async function check(port) {
         await androidServer.close();
         fs.rmSync(androidSaves, { recursive: true, force: true });
     }
+
+    // online (docs/ONLINE.md): the desktop double of native against stub game servers (web/test/online/check.mjs)
+    const { checkNativeDouble } = await import('./online/check.mjs');
+    await checkNativeDouble({ result, tmp: path.join(IOS, 'build', 'tmp', `serve-check-${port}-app`), serve });
     return failed;
 }
 
@@ -402,5 +430,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (argv.includes('--check')) {
         process.exit((await check(Number(option('port', 47500)))) === 0 ? 0 : 1);
     }
-    await serve({ port: Number(option('port', 47500)), root: option('root', undefined), saves: option('saves', undefined), android: argv.includes('--android') });
+    // --server <url>: the page starts online on that server (an entry made from the probe, as Add server makes it)
+    let app = null;
+    if (argv.includes('--server') || argv.includes('--app')) {
+        const settings = { seenHowToPlay: true };
+        const target = option('server', null);
+        if (target) {
+            const probe = await probeServer(target);
+            if (!probe.url) {
+                console.error(`--server ${target}: not an address`);
+                process.exit(2);
+            }
+            console.log(`[serve] ${probe.url}: ${probe.ok ? `a 2004Scape server, world ${probe.nodeId}, ${probe.members ? 'members' : 'free'}${probe.rsa ? ', its own login key' : ''}` : `probe failed (${probe.error})`}${probe.notes.length ? ` (${probe.notes.join(' ')})` : ''}`);
+            const id = 's-desktop1';
+            Object.assign(settings, { server: id, servers: [{ id, name: globalThis.lcServerUrl.hostOf(probe.url), url: probe.url, nodeId: probe.nodeId, members: probe.members, rsa: probe.rsa, added: Date.now() }] });
+        }
+        app = { platform: option('platform', 'ios'), settings };
+    }
+    await serve({ port: Number(option('port', 47500)), root: option('root', undefined), saves: option('saves', undefined), android: argv.includes('--android'), app });
 }

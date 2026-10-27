@@ -6,9 +6,14 @@
 //   3. globalThis.lcHost with keyboard/haptic/takeSecondaryClick/settings/onClientEvent that only RECORD
 //      what the client asks for, so the harness can assert on it (window.__lcTest).
 // Spies: indexedDB.open and Worker construction are recorded (the patched client must use neither).
+// online=1 (docs/ONLINE.md): lcHost.server is a game server (rsa=<n>,<e>: its own login key, client patch 30) and
+// lcHost.openSocket('ondemand') a stub of the host's OnDemand socket over its bridge: upstream's protocol answered from
+// __lcTest.odServerFiles (the files LocalOnDemand's remote fallback must fetch: stub-boot.js od=fallback); game=refused:
+// the game socket fails as NativeSocket does when native reports error 'refused' (readyState 3, error, close 1006).
 (() => {
     const params = new URLSearchParams(location.search);
     const mode = params.get('mode') ?? 'engine';
+    const online = params.get('online') === '1';
     const T0 = performance.now();
     const log = [];
     const rec = (type, extra = {}) => {
@@ -77,6 +82,11 @@
             rec('event', { name, detail });
         }
     };
+    if (online) {
+        const [n, e] = (params.get('rsa') ?? '').split(',');
+        lcHost.server = { id: 's-test', url: 'http://stub.invalid', nodeId: 10, members: true, rsa: n && e ? { n, e } : null };
+        lcHost.openSocket = purpose => (purpose === 'ondemand' ? new OnDemandSocket() : null);
+    }
     if (params.get('host') !== 'none') {
         window.lcHost = lcHost;
     }
@@ -137,6 +147,11 @@
                 };
                 const fail = () => this._fail();
                 (engine ? engine.ready : Promise.reject(new Error('no engine'))).then(go, fail);
+            } else if (params.get('game') === 'refused') {
+                setTimeout(() => {
+                    rec('ws-refused', { id: this.id });
+                    this._fail();
+                }, 0);
             } else {
                 this.inbuf = [];
                 setTimeout(() => {
@@ -213,12 +228,81 @@
                 reply([0]);
                 reply([0x00, 0x12, 0x34, 0x56, 0x89, 0xab, 0xcd, 0xef]);
             } else if (b[0] === 16 || b[0] === 18) {
-                rec('stub-login', { bytes: b.length });
+                // (the packet itself: the harness decrypts its RSA block to check which key encrypted it)
+                rec('stub-login', { bytes: b.length, packet: Array.from(b) });
                 reply([3]);
             }
         }
     }
     window.WebSocket = EngineSocket;
+
+    // ---- online: the host's OnDemand socket (lcHost.openSocket('ondemand')) with a stub server behind it -------------
+    // Upstream's OnDemand protocol as Engine-TS speaks it (OnDemand.ts, OnDemandThread.ts): opcode 15 -> 8 bytes; then
+    // 4-byte requests [archive, file >> 8, file, priority] -> each file in 6-byte headers [archive, file u16, size u16,
+    // part] and parts of up to 500 bytes (size 0: no such file). The files are __lcTest.odServerFiles ('archive.file').
+    const odServerFiles = new Map();
+    class OnDemandSocket extends EventTarget {
+        constructor() {
+            super();
+            this.url = '';
+            this.protocol = 'binary';
+            this.binaryType = 'blob';
+            this.bufferedAmount = 0;
+            this.readyState = 0;
+            this.onopen = this.onmessage = this.onerror = this.onclose = null;
+            this.handshake = false;
+            this.pending = [];
+            rec('od-socket', {});
+            setTimeout(() => {
+                this.readyState = 1;
+                this._fire('open', new Event('open'));
+            }, 0);
+        }
+        _fire(type, ev) {
+            this.dispatchEvent(ev);
+            const h = this['on' + type];
+            if (typeof h === 'function') {
+                h.call(this, ev);
+            }
+        }
+        _send(bytes) {
+            setTimeout(() => this.readyState === 1 && this._fire('message', new MessageEvent('message', { data: Uint8Array.from(bytes).buffer })), 0);
+        }
+        send(data) {
+            const b = data instanceof Uint8Array ? data : new Uint8Array(data);
+            this.pending.push(...b);
+            if (!this.handshake && this.pending[0] === 15) {
+                this.pending.shift();
+                this.handshake = true;
+                this._send(new Array(8).fill(0));
+            }
+            while (this.handshake && this.pending.length >= 4) {
+                const [archive, hi, lo, priority] = this.pending.splice(0, 4);
+                const file = (hi << 8) | lo;
+                if (archive === 0 && file === 0 && priority === 10) {
+                    continue; // keep-alive
+                }
+                const data = odServerFiles.get(`${archive}.${file}`) ?? null;
+                rec('od-request', { archive, file, priority, served: data ? data.length : 0 });
+                if (!data) {
+                    this._send([archive, file >> 8, file & 255, 0, 0, 0]);
+                    continue;
+                }
+                for (let part = 0, pos = 0; pos < data.length; part++, pos += 500) {
+                    const chunk = data.subarray(pos, Math.min(data.length, pos + 500));
+                    this._send([archive, file >> 8, file & 255, data.length >> 8, data.length & 255, part, ...chunk]);
+                }
+            }
+        }
+        close() {
+            if (this.readyState >= 2) {
+                return;
+            }
+            this.readyState = 3;
+            rec('od-close', {});
+            queueMicrotask(() => this._fire('close', new CloseEvent('close', { code: 1000, wasClean: true })));
+        }
+    }
 
     // ---- engine messages (old engine-compat protocol; the new one is a superset) -------------------
     function attachEngine(worker, ready) {
@@ -252,6 +336,8 @@
     };
     window.__lcTest = {
         mode,
+        online,
+        odServerFiles,
         log,
         rec,
         settings,

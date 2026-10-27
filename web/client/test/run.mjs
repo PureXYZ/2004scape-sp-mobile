@@ -7,13 +7,16 @@
 //     --debug        test the debug build (default: release, which is what ships)
 //     --quick        simulate the 90 s idle period by back-dating idleTimer instead of really waiting
 //     --no-engine    title screen + login-screen tests only (canned "invalid login" socket, no engine bundle needed)
+// Last, online (docs/ONLINE.md) with stub hosts, in every mode: the login key (patch 30: offline the build-time key, the
+// same packet; online a server's own key), a native socket that fails, and LocalOnDemand's remote fallback.
 // Results, screenshots and logs: build/tmp/client/test-results-<release|debug>-<newengine|oldengine|noengine>-<full|quick>/
 // (results.json, *.png, console.log, requests.log, stub-log.json).
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
 import { buildClient } from '../build.mjs';
-import { TMP_DIR } from '../lib/tree.mjs';
+import { DEFAULT_ENGINE_DIR, TMP_DIR } from '../lib/tree.mjs';
 import { launchChrome, openPage } from './cdp.mjs';
 import { DEFAULT_ENGINE_BUNDLE_DIR, startServer } from './serve.mjs';
 
@@ -686,12 +689,119 @@ try {
     check('no host: keyboard falls back to a hidden text input; its keys reach the game', focused?.tag === 'INPUT' && focused.type === 'text' && typed === 'abc', { focused, typed });
     await tap(462, 400); // outside the fields
     check('no host: tapping outside hides it (canvas focused again)', await evaluate(`document.activeElement === document.getElementById('canvas')`));
+
+    // ---------------------------------------------------------------------------------------------------
+    // 17. Online (docs/ONLINE.md), with stub hosts (stub-host.js online=1)
+    fs.writeFileSync(path.join(OUT, 'stub-log-nohost.json'), JSON.stringify(await evaluate('__lcTest.log'), null, 1));
+    const bigOf = bytes => BigInt(`0x${Buffer.from(bytes).toString('hex') || '0'}`);
+    const modPow = (b, e, m) => {
+        let r = 1n;
+        b %= m;
+        for (; e > 0n; e >>= 1n) {
+            if (e & 1n) {
+                r = (r * b) % m;
+            }
+            b = (b * b) % m;
+        }
+        return r;
+    };
+    const bytesOf = big => {
+        const hex = big.toString(16);
+        const bytes = Buffer.from(hex.length % 2 ? `0${hex}` : hex, 'hex');
+        return bytes[0] & 0x80 ? Buffer.concat([Buffer.from([0]), bytes]) : bytes; // (as the client's bigIntToBytes)
+    };
+    const keyOf = keyObject => {
+        const jwk = keyObject.export({ format: 'jwk' });
+        const big = v => bigOf(Buffer.from(v, 'base64url'));
+        return { n: big(jwk.n), e: big(jwk.e), d: big(jwk.d) };
+    };
+    const stockKey = keyOf(crypto.createPrivateKey(fs.readFileSync(path.join(DEFAULT_ENGINE_DIR, 'data', 'config', 'private.pem'))));
+    const ownKey = keyOf(crypto.generateKeyPairSync('rsa', { modulusLength: 1024, publicExponent: 65537 }).privateKey);
+    // the login's RSA block (after opcode, length, 255, revision u16, low memory and 9 CRCs: byte 42 is its length)
+    const rsaBlock = packet => Buffer.from(packet.slice(43, 43 + packet[42]));
+    // what a key makes of the block: the plaintext the client wrote (10, 4 seeds, uid 1337, name, password), or null
+    const openBlock = (block, key) => {
+        const plain = bytesOf(modPow(bigOf(block), key.d, key.n)).subarray(0, 64);
+        const text = plain.length > 21 ? plain.subarray(21).toString('latin1') : '';
+        return plain[0] === 10 && plain.readInt32BE(17) === 1337 && text.startsWith('keycheck\npass1234\n') ? plain : null;
+    };
+    const tryLogin = async query => {
+        page.console.push(`---- ${query} ----`);
+        await page.navigate(`${server.url}/?${query}`);
+        await waitFor('window.__client && (window.__client.mouseTrackingInterval || window.__client.errorLoading)', 60000, `client (${query})`);
+        await sleep(300);
+        await tap(462, 291); // Existing User
+        await tap(370, 258); // username
+        await evaluate(`__lcTest.insertText('keycheck')`);
+        await sleep(150);
+        await evaluate(`__lcTest.key('Enter')`);
+        await sleep(150);
+        await evaluate(`__lcTest.insertText('pass1234')`);
+        await sleep(150);
+        await tap(302, 321); // Login
+        await waitFor(`__lcTest.log.some(e => e.type === 'stub-login' || e.type === 'ws-refused')`, 10000, 'the login');
+        await sleep(500);
+        return { packet: await evaluate(`__lcTest.log.find(e => e.type === 'stub-login')?.packet ?? null`), mes: await c('[c.loginMes1, c.loginMes2]') };
+    };
+
+    // the login key: offline the build-time one, the same packet byte for byte (decrypted with the engine's private.pem and
+    // encrypted again with the client's LOGIN_RSAN/E, which are that key's); online a server's own key
+    let attempt = await tryLogin('mode=stub');
+    let block = attempt.packet ? rsaBlock(attempt.packet) : Buffer.alloc(0);
+    let plain = attempt.packet ? openBlock(block, stockKey) : null;
+    check('online: offline (lcLoginKey() null) the login is encrypted with the build-time key, the same packet byte for byte', !!plain && bytesOf(modPow(bigOf(plain), stockKey.e, stockKey.n)).equals(block), { bytes: block.length, plain: !!plain });
+    attempt = await tryLogin('mode=stub&online=1');
+    block = attempt.packet ? rsaBlock(attempt.packet) : Buffer.alloc(0);
+    plain = attempt.packet ? openBlock(block, stockKey) : null;
+    check('online: a server with no key of its own (rsa null): the build-time key, as offline', !!plain && bytesOf(modPow(bigOf(plain), stockKey.e, stockKey.n)).equals(block), { bytes: block.length });
+    attempt = await tryLogin(`mode=stub&online=1&rsa=${ownKey.n},${ownKey.e}`);
+    block = attempt.packet ? rsaBlock(attempt.packet) : Buffer.alloc(0);
+    check('online: a server\'s own key (lcHost.server.rsa, 1024 bits): the login opens with its private key, not with the build-time one', !!attempt.packet && !!openBlock(block, ownKey) && !openBlock(block, stockKey), { bytes: block.length });
+
+    // a game socket that fails as NativeSocket does (native's error 'refused': readyState 3, error, close 1006)
+    attempt = await tryLogin('mode=stub&online=1&game=refused');
+    check('online: a game socket that fails (native error refused) -> "Error connecting to server."', attempt.packet === null && attempt.mes[1] === 'Error connecting to server.', attempt.mes);
+
+    // LocalOnDemand's remote fallback: a file the bundled cache lacks comes from the app's cache (404 the first time),
+    // then over the host's OnDemand socket (upstream's protocol), checked against the versionlist, kept, and stored in
+    // the app's cache with a PUT; the next load reads it from the app's cache and opens no socket. Offline the same
+    // missing file stays missing (no remote path).
+    const odLoad = async query => {
+        page.console.push(`---- ${query} ----`);
+        const from = server.requests.length;
+        await page.navigate(`${server.url}/?${query}`);
+        await waitFor('window.__client && (window.__client.mouseTrackingInterval || window.__client.errorLoading)', 60000, `client (${query})`);
+        await sleep(500);
+        const log = await evaluate(`__lcTest.log.filter(e => e.type.startsWith('od-'))`);
+        const taken = log.find(e => e.type === 'od-taken-out');
+        const od = taken ? `/ondemand/1/${taken.file}` : null;
+        return {
+            taken,
+            loaded: await c('({ errorLoading: c.errorLoading, remaining: c.onDemand ? c.onDemand.remaining() : null, flames: !!c.titleFlames })'),
+            sockets: log.filter(e => e.type === 'od-socket').length,
+            requests: log.filter(e => e.type === 'od-request').map(e => `${e.archive}/${e.file}:${e.served}`),
+            app: server.requests.slice(from).filter(r => r.path === od).map(r => `${r.method} ${r.status}`),
+            original: taken ? await evaluate(`Array.from(__lcTest.odServerFiles.get('1.${taken.file}'))`) : null
+        };
+    };
+    const first = await odLoad('mode=stub&online=1&od=fallback');
+    const stored = first.taken ? server.ondemand.get(`1/${first.taken.file}`) : null;
+    check(
+        'online: a file the bundled cache lacks: the app\'s cache asked first (404), then the server over the host\'s OnDemand socket; the title waits for it and loads',
+        !!first.taken && first.app[0] === 'GET 404' && first.sockets === 1 && first.requests.join() === `1/${first.taken.file}:${first.taken.size}` && !first.loaded.errorLoading && first.loaded.remaining === 0 && first.loaded.flames,
+        { ...first, original: undefined }
+    );
+    check('online: ...checked, kept, and stored in the app\'s cache (PUT ondemand/1/<file>: the server\'s bytes)', first.app.includes('PUT 204') && !!stored && stored.equals(Buffer.from(first.original ?? [])), { app: first.app, stored: stored?.length ?? null });
+    const second = await odLoad('mode=stub&online=1&od=fallback');
+    check('online: the next load reads it from the app\'s cache (GET 200), no OnDemand socket', second.app.join() === 'GET 200' && second.sockets === 0 && !second.loaded.errorLoading && second.loaded.remaining === 0, { ...second, original: undefined });
+    const offline = await odLoad('mode=stub&od=fallback');
+    check('online: offline the same missing file stays missing: no app cache, no socket (LocalOnDemand as before)', offline.app.length === 0 && offline.sockets === 0 && !offline.loaded.errorLoading && offline.loaded.flames, { ...offline, original: undefined });
 } catch (e) {
     check('harness ran to completion', false, String(e.stack ?? e).slice(0, 1500));
 } finally {
     if (page) {
         try {
-            const name = fs.existsSync(path.join(OUT, 'stub-log.json')) ? 'stub-log-nohost.json' : 'stub-log.json';
+            const name = fs.existsSync(path.join(OUT, 'stub-log-nohost.json')) ? 'stub-log-online.json' : fs.existsSync(path.join(OUT, 'stub-log.json')) ? 'stub-log-nohost.json' : 'stub-log.json';
             fs.writeFileSync(path.join(OUT, name), JSON.stringify(await page.evaluate('__lcTest.log'), null, 1));
         } catch {
             // page gone

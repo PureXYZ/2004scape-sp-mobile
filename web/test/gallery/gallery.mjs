@@ -15,6 +15,11 @@
 // screen against the expected ones (the crisp pixel snap: docs/ANDROID.md §1), and the Settings pages fit in the HUD px
 // the zoom leaves (360 on a 914x411 phone). Two more states: sound (Settings › Sound) and typing-android (the
 // chatbox above Gboard's landscape height, 270 px, with Android's IME curve).
+//
+// The title's World button on this phone: title-world. Online (docs/ONLINE.md; the page told so by a stub native,
+// STATE_INIT): title-online, title-online-accounts, worlds,
+// worlds-probe, worlds-same-server, accounts, unreachable, settings-world-online, chat-report, chat-report-panel. Each checks that its box is
+// in the safe area with nothing in it cut off, and in game that no HUD control overlaps another.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,6 +90,8 @@ const routes = {
         fs.existsSync(path.join(GAME, 'build-info.json'))
             ? { body: fs.readFileSync(path.join(GAME, 'build-info.json')), type: MIME['.json'] }
             : { body: JSON.stringify({ engine: 'stub', content: 'stub', webclient: 'stub', builtAt: 'gallery' }), type: MIME['.json'] },
+    // (worlds-probe: native's probe of the address its stub box answers)
+    '/server-probe': () => ({ body: JSON.stringify({ ok: true, url: 'http://192.168.1.20', crc: true, nodeId: 10, members: true, rsa: null, notes: ['No login key found: the built-in key.'] }), type: MIME['.json'] }),
     '/save-index': () => ({
         body: JSON.stringify([
             { path: 'players/main/gal10074.sav', size: 900, modified: Date.now() - 3600e3 },
@@ -330,13 +337,165 @@ export const STATES = {
         await openWorldMap(page);
         await tapSel(page, '#worldmap-area button[data-area="1"]');
         await mapReady(page, 1);
+    },
+
+    // the title on this phone with its World button beside Continue as and Characters: the row on the screen, whole
+    'title-world': async page => {
+        await stub(page, { title: true });
+        await sleep(600);
+        await fits(page, '#title-actions', { safe: false });
+    },
+
+    // ---- online (docs/ONLINE.md): STATE_INIT tells the page it plays on a server (a stub native)
+    // the title: the server's name on World, the online hint (no names yet)
+    'title-online': async page => {
+        await stub(page, { title: true });
+        await sleep(600);
+        await fits(page, '#title-actions', { safe: false });
+    },
+    // ...with names played there: Continue as, Accounts, World (the longest name the server box takes, 40 characters)
+    'title-online-accounts': async page => {
+        await stub(page, { title: true });
+        await sleep(600);
+        await fits(page, '#title-actions', { safe: false });
+    },
+    // the worlds from the title (this phone's world, two servers, Add server)
+    worlds: async page => {
+        await stub(page, { title: true });
+        await sleep(600);
+        await tapSel(page, '#btn-world');
+        await fits(page, '#worlds .settings-panel');
+    },
+    // Add server: native's box answers, the probe's result in the list's place (Use, Save, Cancel)
+    'worlds-probe': async page => {
+        await stub(page, { title: true });
+        await sleep(600);
+        await tapSel(page, '#btn-world');
+        await page.evaluate(`document.querySelector('#worlds-list .add-server').click()`);
+        const shown = await page.waitFor(`/^Ready/.test(document.getElementById('probe-status').textContent)`, 5000, 50);
+        if (!shown.ok) {
+            throw new Error('the probe\'s result did not show');
+        }
+        await fits(page, '#worlds .settings-panel');
+    },
+    // Edit a server with a password kept to another address: the page asks whether it is the same server
+    'worlds-same-server': async page => {
+        await stub(page, { title: true });
+        await sleep(600);
+        await tapSel(page, '#btn-world');
+        await page.evaluate(`[...document.querySelectorAll('#worlds-list .world-row')].find(r => r.querySelector('.character-name').textContent === 'Home server').querySelector('.data-btn.plain').click()`);
+        const shown = await page.waitFor(`/^Ready/.test(document.getElementById('probe-status').textContent)`, 5000, 50);
+        if (!shown.ok) {
+            throw new Error('the probe\'s result did not show');
+        }
+        await tapSel(page, '#probe-save');
+        const asked = await page.waitFor(`!document.getElementById('confirm').hidden`, 3000, 50);
+        if (!asked.ok) {
+            throw new Error('the page did not ask whether it is the same server');
+        }
+        await fits(page, '#confirm .settings-panel');
+    },
+    accounts: async page => {
+        await stub(page, { title: true });
+        await sleep(600);
+        await tapSel(page, '#btn-accounts');
+        await fits(page, '#accounts .settings-panel');
+    },
+    // a login whose socket native could not open (refused): the box over the title
+    unreachable: async page => {
+        await stub(page, { title: true });
+        await sleep(400);
+        await page.evaluate(`(() => { const s = new WebSocket('ws://game/', 'binary'); window.LostCityHost.socket.events([{ id: s.id, event: 'error', reason: 'refused' }, { id: s.id, event: 'close', code: 1006, reason: 'refused' }]); window.__client.loginMes2 = 'Error connecting to server.'; })()`);
+        const shown = await page.waitFor(`!document.getElementById('unreachable').hidden`, 3000, 50);
+        if (!shown.ok) {
+            throw new Error('the unreachable box did not show');
+        }
+        await fits(page, '#unreachable .settings-panel');
+    },
+    // Settings › World online: Play on, the note, Detail (on screen without scrolling down to Display Zoom's 320)
+    'settings-world-online': async page => {
+        await settingsSection(page, 'world', 320);
+    },
+    // in game online: the chat bar with Report abuse beside the filters; then beside the open panel
+    'chat-report': async page => {
+        await tapSel(page, '#btn-chat-toggle');
+        await hudClean(page, true);
+    },
+    'chat-report-panel': async page => {
+        await tapSel(page, '#hud-tabs .tab[data-tab="3"]');
+        await tapSel(page, '#btn-chat-toggle');
+        await hudClean(page, false);
     }
 };
+
+// Online: a box inside the screen (and the safe area, safe: true) with nothing in it wider than its own box (a row, a
+// button's text): it lays out without cutting anything off.
+async function fits(page, selector, { safe = true } = {}) {
+    const box = await page.evaluate(`(() => { const n = document.querySelector(${JSON.stringify(selector)}); const r = n.getBoundingClientRect();
+        const cut = [...n.querySelectorAll('*')].filter(e => e.offsetParent && e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'auto' && getComputedStyle(e).textOverflow !== 'ellipsis' && !e.matches('canvas')).map(e => (e.id || e.className || e.tagName) + ' ' + e.scrollWidth + '>' + e.clientWidth);
+        return { rect: [r.left, r.top, r.right, r.bottom].map(Math.round), view: [innerWidth, innerHeight], cut }; })()`);
+    const area = safe ? DEVICES[page.device].safe : { top: 0, right: 0, bottom: 0, left: 0 };
+    if (box.rect[0] < area.left - 0.5 || box.rect[1] < area.top - 0.5 || box.rect[2] > box.view[0] - area.right + 0.5 || box.rect[3] > box.view[1] + 0.5) {
+        throw new Error(`${selector} runs out of the ${safe ? 'safe area' : 'screen'}: ${JSON.stringify(box)}`);
+    }
+    if (box.cut.length) {
+        throw new Error(`${selector} cuts something off: ${box.cut.join(', ')}`);
+    }
+}
+
+// Online in game: no HUD control overlaps another or runs off the screen, and the chat filters (Report abuse among them)
+// either show whole or give way; with `filters` they must show (the chatbox alone beside the column).
+async function hudClean(page, filters) {
+    const hud = await page.evaluate(`(() => {
+        const box = sel => { const n = document.querySelector(sel); if (!n || n.closest('[hidden]') || !n.getClientRects().length) return null; const r = n.getBoundingClientRect(); return { sel, l: r.left, t: r.top, r: r.right, b: r.bottom }; };
+        const rects = ['#btn-compass', '#map-zoom', '#btn-worldmap', '#hud-tabs', '#hud-panel', '#hud-chat-bar', '#hud-chat-box', ...[...document.querySelectorAll('#hud-orbs > button')].map(b => '#' + b.id)].map(box).filter(Boolean);
+        const hit = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;
+        const found = [];
+        for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) if (hit(rects[i], rects[j])) found.push(rects[i].sel + ' / ' + rects[j].sel);
+        const modes = document.getElementById('hud-chat-modes');
+        const report = document.getElementById('btn-report');
+        return { found, offscreen: rects.filter(r => r.l < 0 || r.t < 0 || r.r > innerWidth + 0.5 || r.b > innerHeight + 0.5).map(r => r.sel), modes: !modes.hidden, report: !report.hidden && !modes.hidden,
+            cut: modes.hidden ? [] : [...modes.querySelectorAll('.chat-mode')].filter(b => !b.hidden && [...b.children].some(part => part.offsetWidth > b.clientWidth)).map(b => b.textContent) }; })()`);
+    if (hud.found.length || hud.offscreen.length || hud.cut.length) {
+        throw new Error(`the HUD overlaps or cuts off: ${JSON.stringify(hud)}`);
+    }
+    if (filters && !hud.report) {
+        throw new Error(`Report abuse is not in the chat bar: ${JSON.stringify(hud)}`);
+    }
+}
 
 // Scripts a state needs in the page before host.js (added for that state's load only; android: on an Android device,
 // after the Android app's script).
 const BOTCHAT_LM = `{ local: { available: true, loaded: false, name: '2004 chat (Qwen3.5 0.8B + LoRA)', bytes: 529297472, think: 'option' }, online: { keySet: true, hint: '\u2026a1b2', valid: true } }`;
+// Online: the page plays on a server (its settings as native gives them), a stub native that answers the server box
+const SERVERS = [
+    { id: 's-galhome1', name: 'Home server', url: 'http://192.168.1.20', nodeId: 10, members: true, rsa: null, added: 1 },
+    { id: 's-gallong1', name: 'A server name of forty characters, long!', url: 'https://scape.example.com:8443/game', nodeId: 11, members: false, rsa: null, added: 2 }
+];
+const ACCOUNTS = { 's-galhome1': [{ name: 'Zezima', lastPlayed: Date.now() - 3600e3 }, { name: 'Bob the Bldr', lastPlayed: Date.now() - 86400e3 }, { name: 'Lynx Titan', lastPlayed: Date.now() - 12 * 86400e3 }] };
+const onlineInit = ({ server = 's-galhome1', accounts = {}, address = '192.168.1.20' } = {}) => {
+    const settings = JSON.stringify({ seenHowToPlay: true, server, servers: SERVERS, accounts });
+    const saved = JSON.stringify({ 's-galhome1': ['zezima'] });
+    const answer = `if (m && m.type === 'server' && m.action === 'ask') setTimeout(() => window.LostCityHost.servers.answer({ address: '${address}', name: 'Home server' }), 30);`;
+    return {
+        ios: `window.webkit = { messageHandlers: { native: { postMessage(m) { ${answer} } } } };
+        window.LostCityNative = { platform: 'ios', settings: ${settings}, savedPasswords: ${saved} };`,
+        android: `try { localStorage.setItem('lostcity.settings', JSON.stringify(${settings})); } catch {}
+        window.LostCityNative.savedPasswords = ${saved};
+        { const post = window.LostCityNativeBridge.native.postMessage; window.LostCityNativeBridge.native.postMessage = m => { post(m); ${answer} }; }`
+    };
+};
 const STATE_INIT = {
+    'title-online': onlineInit(),
+    'title-online-accounts': onlineInit({ server: 's-gallong1', accounts: { 's-gallong1': [{ name: 'Zezima', lastPlayed: Date.now() - 3600e3 }] } }),
+    worlds: onlineInit({ server: 'offline' }),
+    'worlds-probe': onlineInit({ server: 'offline' }),
+    'worlds-same-server': onlineInit({ address: '192.168.1.21' }),
+    accounts: onlineInit({ accounts: ACCOUNTS }),
+    unreachable: onlineInit(),
+    'settings-world-online': onlineInit(),
+    'chat-report': onlineInit(),
+    'chat-report-panel': onlineInit(),
     // (a model trained both ways: Think first shows)
     botchat: {
         ios: `window.webkit = { messageHandlers: { native: { postMessage() {} } } };

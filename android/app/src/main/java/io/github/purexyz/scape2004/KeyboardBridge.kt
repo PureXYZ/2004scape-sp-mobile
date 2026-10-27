@@ -133,6 +133,9 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
         fun setChips(chips: List<Chip>)
         fun setCancellable(cancellable: Boolean)
 
+        /** The Remember box ticked or not, or hidden (null); a tap on it is [KeyboardBridge.rememberTapped]. */
+        fun setRemember(on: Boolean?) {}
+
         /** Feedback for characters the input does not take (with the warning haptic native plays). */
         fun flashRejected()
 
@@ -203,6 +206,13 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
     var submitTitle = "OK"
         private set
 
+    /**
+     * The Remember box (online, for a server's password: `remember` in `show` and `update` of kind `login-pass`), or null
+     * when there is none. A tap flips it at once and tells the page (`keyboard.remember(on)`), whose next `remember` wins.
+     */
+    var remember: Boolean? = null
+        private set
+
     /** The editor's input type and IME action (the EditorInfo of GameInputConnection), from the kind and `numeric`. */
     var inputType = TEXT_INPUT_TYPE
         private set
@@ -262,6 +272,7 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
         this.surface = surface
         if (requested) {
             surface.configure(prompt, submitTitle, secure, numeric, displayText, cancellable, chips)
+            surface.setRemember(remember)
         }
     }
 
@@ -327,6 +338,7 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
                 cancellable = message.bool("cancellable") ?: false,
                 rules = rules(message) ?: Rules(),
                 chips = chips(message["chips"]) ?: emptyList(),
+                remember = message.bool("remember"),
             )
             "update" -> update(
                 prompt = message.string("prompt"),
@@ -334,6 +346,7 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
                 chips = chips(message["chips"]),
                 rules = rules(message),
                 cancellable = message.bool("cancellable"),
+                remember = message.bool("remember"),
             )
             "hide" -> hide(userInitiated = false)
             else -> Log.info("kbd", "unknown keyboard message: ${JsonText.canonical(message)}")
@@ -349,6 +362,7 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
         cancellable: Boolean = false,
         rules: Rules = Rules(),
         chips: List<Chip> = emptyList(),
+        remember: Boolean? = null,
     ) {
         val type = if (numeric) NUMBER_INPUT_TYPE else TEXT_INPUT_TYPE
         val action = imeAction(kind)
@@ -369,8 +383,10 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
         displayText = text
         this.prompt = prompt.ifEmpty { defaultPrompt(kind) }
         submitTitle = submitTitle(kind)
+        this.remember = if (kind == "login-pass") remember else null
         val view = surface
         view?.configure(this.prompt, submitTitle, secure, numeric, text, cancellable, chips)
+        view?.setRemember(this.remember)
         Log.info(
             "kbd",
             "show kind=$kind numeric=$numeric secure=$secure cancellable=$cancellable " +
@@ -389,8 +405,12 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
         }
     }
 
-    fun update(prompt: String?, text: String?, chips: List<Chip>? = null, rules: Rules? = null, cancellable: Boolean? = null) {
+    fun update(prompt: String?, text: String?, chips: List<Chip>? = null, rules: Rules? = null, cancellable: Boolean? = null, remember: Boolean? = null) {
         if (!requested) return
+        if (remember != null && kind == "login-pass") {
+            this.remember = remember
+            surface?.setRemember(remember)
+        }
         if (prompt != null) {
             this.prompt = prompt.ifEmpty { defaultPrompt(kind) }
             surface?.setPrompt(this.prompt)
@@ -424,6 +444,15 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
         if (userInitiated) page.call("keyboard.dismissed")
     }
 
+    /** The bar's Remember box was tapped (the bar has flipped it already): the page hears the new state. */
+    fun rememberTapped(on: Boolean) {
+        if (remember == null) return
+        onActivity?.invoke()
+        remember = on
+        Log.info("kbd", "Remember ${if (on) "ticked" else "cleared"}")
+        page.call("keyboard.remember", listOf(JsonPrimitive(on)))
+    }
+
     /** The bar's Cancel: hides the keyboard and cancels the prompt (`keyboard.cancel()`). */
     fun cancel() {
         if (!requested) return
@@ -439,6 +468,7 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
     private fun endRequest() {
         requested = false
         rules = Rules()
+        remember = null
         reconcileTask?.cancel()
         surface?.closeKeyboard()
     }
@@ -450,6 +480,7 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
         hostText = ""
         displayText = ""
         rules = Rules()
+        remember = null
         coveredHeight = 0 // what a new page assumes
         if (requested) {
             requested = false
@@ -967,6 +998,7 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
         put("imeHeight", JsonPrimitive(imeHeight.toDouble()))
         put("lent", JsonPrimitive(lent))
         put("prompt", JsonPrimitive(prompt))
+        put("remember", remember?.let(::JsonPrimitive) ?: JsonNull)
         // the activity's views overwrite the bar's own fields (displayText, chips, cancelShown, flashing, canPaste, …)
         surface?.debugState()?.forEach { (key, value) -> put(key, value) }
     }
@@ -1192,6 +1224,11 @@ class KeyboardBridge(private val page: PageBridge, private val scheduler: Schedu
                     reply(JsonNull)
                 }
                 session.debugAction("keyboard-state") { _, reply -> reply(bridge.debugState()) }
+                // online: tap the bar's Remember box (→ its new state, or null when no box is shown)
+                session.debugAction("remember-tap") { _, reply ->
+                    val view = bridge.surface as? KeyboardBridgeView
+                    reply(if (view?.debugTapRemember() == true) bridge.remember?.let(::JsonPrimitive) ?: JsonNull else JsonNull)
+                }
                 // Android's own: lend input focus for `ms` as a native text field would (KeyboardFocus), run IME calls on
                 // the live InputConnection (composing, pastes), and put text on the clipboard for a Ctrl+V test (a shell
                 // cannot)

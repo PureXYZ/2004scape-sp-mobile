@@ -4,15 +4,15 @@ import UIKit
 /// strip of the 2004 interface (RSTheme: stone, yellow prompt, the game's fonts and buttons). In landscape the
 /// keyboard covers the game's chat line, so the bar shows what is being typed:
 ///
-///     [prompt] [input line*] [chip] [chip] …  [Cancel] [Send] [v]
+///     [prompt] [input line*] [chip] [chip] …  [Cancel] [x Remember] [Send] [v]
 ///
 /// * the prompt and the game's current input line with its "*" caret (masked when the input is a password);
 /// * chips, one-tap entries from the page (the '::' key and recent developer commands for chat, amounts for an amount
 ///   prompt): the Game Options tab's small buttons in a row that scrolls sideways when it does not fit, its edges
 ///   fading where there is more. A `whenEmpty` chip only shows while the line is empty; once something is typed into a
 ///   text input the row gets less room, the line more;
-/// * Cancel (only for prompts the page marks cancellable), the submit button (the number pad has no Return key) and
-///   the hide button.
+/// * Cancel (only for prompts the page marks cancellable), the Remember box (only for an online server's password, when
+///   the page says whether it is ticked), the submit button (the number pad has no Return key) and the hide button.
 final class KeyboardAccessoryBar: UIInputView {
     static let height: CGFloat = 52
 
@@ -28,6 +28,8 @@ final class KeyboardAccessoryBar: UIInputView {
     var onHide: (() -> Void)?
     var onCancel: (() -> Void)?
     var onChip: ((Chip) -> Void)?
+    /// The Remember box was tapped: its new state.
+    var onRemember: ((Bool) -> Void)?
 
     private let promptLabel = UILabel()
     private let field = UIView()
@@ -35,6 +37,7 @@ final class KeyboardAccessoryBar: UIInputView {
     private let caret = UILabel()
     private let chipStrip = ChipStrip()
     private let cancelButton = UIButton(type: .custom)
+    private let rememberButton = UIButton(type: .custom)
     private let submitButton = UIButton(type: .custom)
     private let hideButton = UIButton(type: .custom)
     private var fieldMinWidth: NSLayoutConstraint!
@@ -45,6 +48,8 @@ final class KeyboardAccessoryBar: UIInputView {
     private var text = ""
     private var secure = false
     private var numeric = false
+    /// The Remember box: nil while it is not shown.
+    private(set) var remember: Bool?
 
     init() {
         super.init(frame: CGRect(x: 0, y: 0, width: 320, height: Self.height), inputViewStyle: .default)
@@ -84,6 +89,15 @@ final class KeyboardAccessoryBar: UIInputView {
 
     func setCancellable(_ cancellable: Bool) {
         cancelButton.isHidden = !cancellable
+    }
+
+    /// Shows the Remember box ticked or not, or hides it (nil).
+    func setRemember(_ on: Bool?) {
+        remember = on
+        rememberButton.isHidden = on == nil
+        rememberButton.isSelected = on == true
+        rememberButton.accessibilityValue = on == true ? "on" : "off"
+        rememberButton.setNeedsUpdateConfiguration()
     }
 
     func setText(_ text: String) {
@@ -126,6 +140,25 @@ final class KeyboardAccessoryBar: UIInputView {
     /// The field is flashing for refused characters (`flashRejected()`, 0.35 s).
     var isFlashingRejected: Bool { field.layer.animation(forKey: "rejected") != nil }
     var submitTitle: String { submitButton.accessibilityLabel ?? "" }
+
+    #if DEBUG
+    /// Taps the Remember box as a finger does (test pages); false when it is not shown.
+    func debugTapRemember() -> Bool {
+        guard !rememberButton.isHidden else { return false }
+        rememberButton.sendActions(for: .primaryActionTriggered)
+        return true
+    }
+
+    /// The Remember box's frame in the bar, `[x, y, width, height]`, and the submit button's (the box sits left of it).
+    var debugRememberLayout: [String: [Double]] {
+        layoutIfNeeded()
+        let frame = { (view: UIView) in
+            let rect = view.convert(view.bounds, to: self)
+            return [rect.minX, rect.minY, rect.width, rect.height].map { Double($0) }
+        }
+        return ["remember": frame(rememberButton), "submit": frame(submitButton), "field": frame(field), "bar": [0, 0, Double(bounds.width), Double(bounds.height)]]
+    }
+    #endif
 
     /// Shows the `whenEmpty` chips only while the line is empty, and gives the line more room once something is typed.
     private func updateChips(animated: Bool) {
@@ -191,6 +224,53 @@ final class KeyboardAccessoryBar: UIInputView {
         return button
     }
 
+    /// The Remember box: a check box drawn in game pixels (a black square, dark inside, a yellow tick with a black shadow
+    /// when ticked) and "Remember" on the Game Options tab's small button, yellow while ticked.
+    private func styleRememberButton() {
+        var configuration = RSTheme.buttonConfiguration(background: RSTheme.optionButtonImage(),
+                                                        insets: NSDirectionalEdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 10))
+        configuration.imagePadding = 6
+        rememberButton.configuration = configuration
+        rememberButton.configurationUpdateHandler = { button in
+            let on = button.isSelected
+            button.configuration?.image = Self.checkBoxImage(on: on)
+            button.configuration?.background.image = button.isHighlighted ? RSTheme.optionButtonImage(on: true) : RSTheme.optionButtonImage()
+            button.configuration?.attributedTitle = RSTheme.buttonTitle("Remember", font: .plain12, color: on ? RSTheme.yellow : .white)
+        }
+        rememberButton.accessibilityLabel = "Remember password"
+        rememberButton.accessibilityHint = "Keeps the password in this iPhone's Keychain for the next login"
+        rememberButton.isHidden = true
+        rememberButton.setContentHuggingPriority(.required, for: .horizontal)
+        rememberButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        rememberButton.addAction(UIAction { [weak self] _ in self?.rememberTapped() }, for: .primaryActionTriggered)
+    }
+
+    private func rememberTapped() {
+        guard let on = remember else { return }
+        setRemember(!on)
+        onRemember?(!on)
+    }
+
+    private static func checkBoxImage(on: Bool) -> UIImage {
+        let pixels = 2.0 // points per game pixel
+        let tick = [(2, 5), (3, 6), (4, 7), (5, 6), (6, 5), (7, 4), (8, 3)]
+        return UIGraphicsImageRenderer(size: CGSize(width: 11 * pixels, height: 11 * pixels)).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 11 * pixels, height: 11 * pixels))
+            RSTheme.stoneDark.setFill()
+            context.fill(CGRect(x: pixels, y: pixels, width: 9 * pixels, height: 9 * pixels))
+            guard on else { return }
+            UIColor.black.setFill()
+            for (x, y) in tick {
+                context.fill(CGRect(x: Double(x + 1) * pixels, y: Double(y + 1) * pixels, width: pixels, height: pixels))
+            }
+            RSTheme.yellow.setFill()
+            for (x, y) in tick {
+                context.fill(CGRect(x: Double(x) * pixels, y: Double(y) * pixels, width: pixels, height: pixels))
+            }
+        }
+    }
+
     /// A chevron pointing down, drawn in game pixels: a one-pixel yellow V with a black outline, like the HUD's.
     private static func chevronImage() -> UIImage {
         let pixels = 2.0 // points per game pixel
@@ -253,6 +333,8 @@ final class KeyboardAccessoryBar: UIInputView {
         cancelButton.isHidden = true
         cancelButton.addAction(UIAction { [weak self] _ in self?.onCancel?() }, for: .primaryActionTriggered)
 
+        styleRememberButton()
+
         Self.styleStoneButton(submitButton, insets: NSDirectionalEdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14))
         submitButton.addAction(UIAction { [weak self] _ in self?.onSubmit?() }, for: .primaryActionTriggered)
 
@@ -261,11 +343,12 @@ final class KeyboardAccessoryBar: UIInputView {
         hideButton.accessibilityLabel = "Hide keyboard"
         hideButton.addAction(UIAction { [weak self] _ in self?.onHide?() }, for: .primaryActionTriggered)
 
-        let row = UIStackView(arrangedSubviews: [promptLabel, field, chipStrip, cancelButton, submitButton, hideButton])
+        let row = UIStackView(arrangedSubviews: [promptLabel, field, chipStrip, cancelButton, rememberButton, submitButton, hideButton])
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 10
         row.setCustomSpacing(6, after: cancelButton) // Cancel and submit read as a pair
+        row.setCustomSpacing(8, after: rememberButton)
         row.setCustomSpacing(6, after: submitButton)
 
         for view in [edge, edgeDark, row, textLabel, caret] { view.translatesAutoresizingMaskIntoConstraints = false }
@@ -307,6 +390,7 @@ final class KeyboardAccessoryBar: UIInputView {
             chipsWhole,
             chipLimitEmpty,
             cancelButton.heightAnchor.constraint(equalToConstant: 36),
+            rememberButton.heightAnchor.constraint(equalToConstant: 32),
             submitButton.heightAnchor.constraint(equalToConstant: 36),
             hideButton.heightAnchor.constraint(equalToConstant: 36),
 

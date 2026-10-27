@@ -28,11 +28,17 @@ this file describes how the native layer implements it and where it goes beyond 
 | `LocalModel.swift` | **Bots**: the on-device model: llama.cpp (Metal) on `Model/` (its `model.json` and GGUF), lazy load, one generation at a time on its own queue, unload when idle, on a memory warning and in the background; the note before the reply as the template says (`ThinkSupport`: never, always, or when the request asks) |
 | `OnlineModel.swift` | **Bots**: Claude through the Messages API (URLSession, 8 s), the request as the official docs give it (URLs in the file) |
 | `ModelKeyStore.swift` | **Bots**: the Claude key in the Keychain (`AfterFirstUnlockThisDeviceOnly`); the page only learns whether one is set and its last four characters |
+| `OnlineServer.swift` | **Online**: the server of a page load (`settings.server` in `settings.servers`), URL normalization with the page's rules, the socket URL; `CRC32` and the `/crc` table check |
+| `OnlineProxy.swift` | **Online**: `/crc`, the archives (bundle, CRC-checked cache, server), `/ondemand/<a>/<f>` and `/server-probe` (ARCHITECTURE.md §3.1); the cache in `Library/Caches/online/<server id>/` |
+| `SocketBridge.swift` | **Online**: the page's WebSockets as `URLSessionWebSocketTask`s (`{type:'socket'}` → `LostCityHost.socket.events`, batched), closed with the page (ARCHITECTURE.md §7.4) |
+| `ServerPasswordStore.swift` | **Online**: remembered passwords in the Keychain (`<bundle id>.server`, `<server id>/<name>`, `AfterFirstUnlockThisDeviceOnly`); the page learns the names, and a password only for the login it asks for |
 | `Assets.xcassets/LaunchBackground` | Black launch screen colour (`ios/Config/Info.plist` → `UILaunchScreen.UIColorName`) |
 
 The `LostCity/` folder is a synchronized group, so new `.swift` files compile without editing the
 project. `ios/Config/Info.plist` also sets `UIUserInterfaceStyle = Dark` (dark keyboard and alerts,
-black launch screen even without the colour asset).
+black launch screen even without the colour asset), and for online mode `NSAppTransportSecurity`
+`NSAllowsArbitraryLoads` (servers the player types, often plain `http`/`ws` on a LAN) and
+`NSLocalNetworkUsageDescription` (the Local Network prompt).
 
 ## Routes (`AssetSchemeHandler`)
 
@@ -44,6 +50,10 @@ black launch screen even without the colour asset).
 | DELETE | `/save/<relpath>` | 204, or 404 if missing. The deleted file is kept as `<relpath>.bak` |
 | GET / HEAD | `/save-index` | `[{path, size, modified}]`, sorted by path. `modified` is in **milliseconds** since 1970. Hidden files are left out; `.bak` files are included |
 | POST / PUT | `/log` | Body lines go to the native log, tagged `[worker]`. Optional `?src=engine&level=warn` gives `[engine:warn]`. Returns 204 |
+
+While the page load plays on a server, `OnlineProxy` answers `/crc…`, the 8 archives (`/<name><crc>`) and
+`/ondemand/<archive>/<file>` first, from that server and the cache in `Library/Caches/online/<server id>/`; `/server-probe`
+works in every mode (ARCHITECTURE.md §3.1). Offline those paths reach the bundle routes as before.
 
 The rules that apply to every route:
 - **Invalid paths get 400.** For save paths that covers an empty path, an absolute path, `..`, `.`, empty segments, dot-files (reserved for temp files), `\`, NUL and malformed `%` escapes; a PUT onto a directory also gets 400. Bundle paths get 400 for `..`, `.` and empty segments. The path is percent-decoded exactly once, so `..%2F` is caught too.
@@ -234,6 +244,7 @@ xcodebuild -project ios/LostCity.xcodeproj -scheme LostCity -destination 'generi
 xcrun simctl create LC-test com.apple.CoreSimulator.SimDeviceType.iPhone-13-mini \
   com.apple.CoreSimulator.SimRuntime.iOS-26-5 > build/tmp/swift/sim-udid.txt   # (mkdir -p it first) or UDID=<udid> below
 node web/test/native/drive.mjs       # fresh install, all phases; START_PHASE=keyboard|lifecycle to skip ahead
+node web/test/native/drive.mjs --online   # the online phases (game-test/online.js, online-stub.mjs); ENGINE_URL=… adds a local Engine-TS
 node web/test/native/drive-hw.mjs    # after drive.mjs; the first run after DeviceHub launches can drop keys: rerun
 ```
 
@@ -241,7 +252,11 @@ Each run leaves its console log and screenshots in `build/tmp/swift/`. `drive.mj
 saves and their `.bak`, the keyboard bridge (charsets, the paste cap, chips, Cancel, the chat line emptied on Send),
 haptics and the Vibration setting, the lifecycle (background, a hang past the flush timeout, `willTerminate`), a
 killed WebContent process and the crash loop's error screen, the loading cover's zoom, and the chat model's status,
-key box and requests against the mock. On the simulator `willTerminate` delivered through the main queue took the
+key box and requests against the mock. `--online` checks the probe (and the URL rules), the Add server box, the
+Keychain, the Remember box, `server use`, every proxy case (match, mismatch then cache, a cached copy that fails its
+CRC, 404, 500, down, slow), the socket bridge (a 5,000-byte round trip, order, batching, close codes, a text frame, a
+dropped connection, a refused upgrade, no Origin), sockets closed by a reload and a killed WebContent, and that the
+logs hold no password or socket contents. On the simulator `willTerminate` delivered through the main queue took the
 whole 4 s deadline, and through the run loop 6 ms (above, Threading).
 
 **Simulator keyboard state:** after DeviceHub has been used, the device keeps "hardware keyboard connected" (only the bar shows). `xcrun simctl erase` resets it.
@@ -270,6 +285,13 @@ whole 4 s deadline, and through the run loop 6 ms (above, Threading).
 | `lm-key-alert` | `{text, button: 'save' \| 'cancel'}`: types into the presented key box and presses the button; returns `shown`, `secure`, `firstResponder`, `title` |
 | `activity` | Counts as user activity (keeps the screen awake during a long in-app test) |
 | `keep-awake` | `{on}`: keeps the screen awake outside the world too (a soak measuring the title, `app-test --soak`); returns the keep-awake flag |
+| `server-alert` | `{address?, name?, button: 'ok' \| 'cancel'}`: fills the Add / Edit server box and closes it like a tap; returns `shown`, `title`, `address`, `name`, `placeholders` (as shown before the fill) |
+| `remember-tap` | Taps the keyboard bar's Remember box; returns its new state, or null when there is none |
+| `online-state` | Returns `server` (id or null), `url`, `sockets` (open), `caption` (the cover's) and `userAgent` for this page load |
+| `online-cache` | Lists the online cache's files (relative to `Library/Caches/online`), or `{op: 'corrupt', path}` overwrites one |
+| `last-notice` | Returns the last native notice's text |
+| `url-normalize` | `{inputs: [string]}`: `OnlineServer.normalize` of each (`null`: not an address), no network |
+| `purge-passwords` | Runs the launch's sweep of remembered passwords whose server is not in the settings; returns how many went |
 | `launch-test` | Returns the `-LostCityTest` launch argument (base64 JSON: the soak and which launch of a series, `app-test --soak`; the argument domain only), or null |
 
 `{type:'lm-bench', id, action}` (DEBUG) runs the on-device model directly for its benchmark on a phone (`app-test.mjs

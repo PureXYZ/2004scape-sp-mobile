@@ -7,7 +7,8 @@ import UIKit
 /// * the RuneScape logo (`ui/sprites/logo.png`, 444 × 142, at most 80 % of the width), the card centred vertically;
 /// * 18 pt below it the 304 × 34 bar: a 2 pt `#8c1111` border, a `#8c1111` fill from the left (`progress`, the
 ///   value the page's loader starts from) and "Loading - please wait." in RS Bold 12, white with the hard shadow;
-/// * 12 pt below the bar "2004Scape · November 2004 · offline" in RS Plain 11, `#75a9a9`.
+/// * 12 pt below the bar "2004Scape · November 2004 · offline" (or "· online" when the page load plays on a server, as
+///   the page's own caption says) in RS Plain 11, `#75a9a9`.
 ///
 /// On a large screen the page draws its overlays zoomed as a whole (host.js `layout()`'s `--ui-zoom`: ×1.5 or ×2 on
 /// an iPad, see `zoom(for:insets:)`), and so does the cover: every length here and in the error screen below, the
@@ -24,12 +25,23 @@ final class LoadingOverlay: UIView {
     static let progress: CGFloat = 0.06
 
     private static let loadingText = "Loading - please wait."
-    private static let captionText = "2004Scape \u{00B7} November 2004 \u{00B7} offline"
+    private static func captionText(online: Bool) -> String {
+        "2004Scape \u{00B7} November 2004 \u{00B7} \(online ? "online" : "offline")"
+    }
     /// logo 142 + 18 + bar 34 + 12 + caption line 12
     private static let cardHeight: CGFloat = 218
 
     /// The page's zoom for these bounds (`zoom(for:insets:)`), which `layoutSubviews` keeps up to date.
     private var zoom: CGFloat = 1
+
+    /// The page that is loading plays on a server: the caption says "online".
+    var online = false {
+        didSet {
+            guard online != oldValue else { return }
+            caption.text = Self.captionText(online: online)
+            setNeedsLayout()
+        }
+    }
 
     /// Settings › Display › Side margin, Top margin and Bottom margin (`safeSides`, `safeTop`, `safeBottom`: -1 None,
     /// 0 Auto, 16 or 32 more), which the page lays its overlay out with (`pageInsets`); GameViewController keeps them
@@ -71,7 +83,7 @@ final class LoadingOverlay: UIView {
         barFill.backgroundColor = RSTheme.loadingRed
         barText.text = Self.loadingText
         barText.textColor = .white
-        caption.text = Self.captionText
+        caption.text = Self.captionText(online: false)
         caption.textColor = RSTheme.loadingCaption
 
         errorTitle.text = "Error - unable to continue!"
@@ -173,6 +185,7 @@ final class LoadingOverlay: UIView {
             "zoom": Double(zoom), "font": Double(barText.font.pointSize),
             "logo": frame(logo), "bar": frame(bar), "barFill": frame(barFill), "barText": frame(barText), "caption": frame(caption),
             "errorTitle": frame(errorTitle), "errorText": frame(errorText), "retry": frame(retryButton),
+            "captionText": caption.text ?? "",
         ]
     }
     #endif
@@ -286,7 +299,15 @@ final class LoadingOverlay: UIView {
 
 /// A short native notice over the game (e.g. "restarting after a crash"), fading out by itself.
 enum Notice {
+    #if DEBUG
+    /// The last notice's text (the debug hook `last-notice`).
+    private(set) static var last: String?
+    #endif
+
     static func show(_ text: String, in host: UIView, duration: TimeInterval = 3.5) {
+        #if DEBUG
+        last = text
+        #endif
         let label = PaddedLabel()
         label.text = RSTheme.gameText(text)
         label.font = RSTheme.font(.plain12)

@@ -856,6 +856,7 @@ function finish(done = true) {
         else if (phase === 'crash-bg') await phaseCrashBackground();
         else if (phase === 'crash') await phaseCrash();
         else if (phase === 'hwkeys') await phaseHardwareKeys();
+        else if (phase.startsWith('online')) await (await import('./online.js')).runOnline(phase, { check, info, marker, debug, native, sleep, until, finish, writeInit });
         else { localStorage.lcPhase = 'hwkeys'; location.reload(); }  // 'done': next run is drive-hw.mjs
     } catch (e) {
         check(`phase ${phase} threw`, false, e?.stack ?? String(e));

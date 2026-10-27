@@ -4,6 +4,7 @@
 // dropped-connection reconnect → reload → re-login restores the saved position.
 //
 //   node web/test/e2e.mjs [--port 47510] [--keep] [--game <dir>] [--bots N] [--no-jmod] [--lm-stub] [--platform android]
+//   node web/test/e2e.mjs --engine <dir> | --server <url> [...]   online mode's suite instead: web/test/online/e2e-online.mjs
 //   (build first: node scripts/build-web.mjs [--debug])
 //
 // --bots N: the world runs N bots (Settings › World › Bots, stored before the page loads the way the page keeps its
@@ -69,6 +70,11 @@ import { serve } from './serve.mjs';
 const IOS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const argv = process.argv.slice(2);
+// online mode (docs/ONLINE.md): the page through the desktop double of native against a local Engine-TS and its variants
+if (argv.includes('--server') || argv.includes('--engine')) {
+    const { runOnline } = await import('./online/e2e-online.mjs');
+    process.exit(await runOnline(argv));
+}
 const portIndex = argv.indexOf('--port');
 const PORT = portIndex >= 0 ? Number(argv[portIndex + 1]) : 47510;
 const platformIndex = argv.indexOf('--platform');

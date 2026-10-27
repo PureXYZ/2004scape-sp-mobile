@@ -778,6 +778,11 @@ body.pixelated .surface {
     display: none;
 }
 
+/* online: Report abuse, one line as the 2004 button (no setting to show) */
+.chat-mode.report {
+    justify-content: center;
+}
+
 .chat-value.on {
     color: var(--green);
 }
@@ -1271,7 +1276,8 @@ body.pixelated .surface {
     gap: 5px;
 }
 
-#btn-continue .continue-label {
+#btn-continue .continue-label,
+#btn-world .continue-label {
     color: #c8c8c8;
     font: 16px/16px var(--font-plain);
 }
@@ -1285,6 +1291,14 @@ body.pixelated .surface {
     color: var(--yellow);
     text-shadow: var(--shadow);
     white-space: nowrap;
+}
+
+/* the world the page plays on: this phone or a server's name (cut short with an ellipsis) */
+#btn-world #world-name {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--yellow);
 }
 
 .characters-panel {
@@ -1322,6 +1336,99 @@ body.pixelated .surface {
 .character-when {
     font: 16px/16px var(--font-small);
     color: #c8c8c8;
+}
+
+/* the worlds (host.js servers): a row is the world's button (a tap plays on it) and, for a server, Edit and Delete */
+.world-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.world-row .title-btn.character {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.world-row .character-name,
+.world-row .character-when {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.world-row .character-name {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.world-row .character-when {
+    flex: 0 1 auto;
+    min-width: 0;
+    margin-left: 10px;
+}
+
+.world-row.current .title-btn.character {
+    filter: brightness(1.15);
+}
+
+#worlds-list .add-server {
+    align-self: center;
+    margin-top: 4px;
+}
+
+/* an address being checked (the probe) in the list's place, with what it found and Use / Save / Cancel */
+.worlds-probe {
+    padding: 14px 18px 4px;
+    overflow-y: auto;
+}
+
+.worlds-probe .data-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.probe-status {
+    margin: 8px 0 6px;
+    font: 16px/18px var(--font-plain);
+    color: var(--white);
+    text-shadow: var(--shadow);
+}
+
+.probe-status.ready {
+    color: var(--green);
+}
+
+.probe-status.failed {
+    color: #ff4040;
+}
+
+#probe-notes {
+    white-space: pre-line;
+}
+
+.worlds-probe .panel-actions {
+    margin: 12px 0 10px;
+}
+
+/* online: the names played on this server; a key where a password is kept */
+.accounts-panel {
+    width: min(480px, 100%);
+}
+
+#accounts-list .data-row {
+    gap: 6px;
+}
+
+.key-mark {
+    display: inline-block;
+    width: 13px;
+    height: 7px;
+    margin-left: 6px;
+    background: linear-gradient(var(--yellow), var(--yellow)) 0 2px / 5px 5px no-repeat,
+        linear-gradient(var(--yellow), var(--yellow)) 4px 3px / 9px 2px no-repeat,
+        linear-gradient(var(--yellow), var(--yellow)) 10px 4px / 2px 3px no-repeat;
+    filter: drop-shadow(1px 1px 0 #000);
 }
 
 /* ---------- status line ---------- */
@@ -1863,6 +1970,18 @@ html.ui-snapped .overlay {
     filter: none;
 }
 
+/* Settings › World's first row, where the world is (host.js servers): a little lower than the rows under it, so that the
+   world on this phone's rows and Restart still fit without scrolling on a phone; on a shorter layer (html.ui-short:
+   under 370 HUD px, as Android's 360) its other rows are as tight as Display Zoom's too */
+#world-playon {
+    min-height: 36px;
+}
+
+html.ui-short #section-world .row,
+html.ui-short #section-world .data-row {
+    min-height: 38px;
+}
+
 .savedata-all {
     display: flex;
     justify-content: center;
@@ -1925,9 +2044,29 @@ html.ui-snapped .overlay {
     color: #8c8c8c;
 }
 
-/* "Are you sure?" over Saved data and Bot chat */
+/* "Are you sure?" over Saved data and Bot chat (and the worlds' Delete) */
 #confirm {
     z-index: 51;
+}
+
+/* online: the server cannot be reached, over the title (the worlds open from it, over it) */
+#unreachable {
+    background: rgba(0, 0, 0, 0.55);
+}
+
+#worlds,
+#accounts {
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 50;
+}
+
+#unreachable .panel-actions {
+    margin: 14px 0 14px;
+}
+
+#unreachable .title-btn {
+    min-width: 120px;
+    height: 38px;
 }
 
 .confirm-panel {

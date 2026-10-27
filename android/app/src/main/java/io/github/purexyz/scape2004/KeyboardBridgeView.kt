@@ -69,6 +69,7 @@ class KeyboardBridgeView(private val activity: Activity, private val bridge: Key
         bar.onHide = { bridge.hide(userInitiated = true) }
         bar.onCancel = { bridge.cancel() }
         bar.onChip = { bridge.apply(it) }
+        bar.onRemember = { bridge.rememberTapped(it) }
     }
 
     /** Into the activity's root: this view (1×1, top left) and the bar (full width, 52 dp, at the bottom). */
@@ -126,6 +127,11 @@ class KeyboardBridgeView(private val activity: Activity, private val bridge: Key
     override fun setChips(chips: List<KeyboardBridge.Chip>) = bar.setChips(chips)
 
     override fun setCancellable(cancellable: Boolean) = bar.setCancellable(cancellable)
+
+    override fun setRemember(on: Boolean?) = bar.setRemember(on)
+
+    /** Taps the bar's Remember box (the debug `remember-tap`); false when it is not shown. */
+    fun debugTapRemember(): Boolean = bar.debugTapRemember()
 
     override fun flashRejected() = bar.flashRejected()
 
@@ -380,6 +386,8 @@ class KeyboardBridgeView(private val activity: Activity, private val bridge: Key
             "focused" to JsonPrimitive(focused?.javaClass?.simpleName ?: ""),
             "webViewFocused" to JsonPrimitive(focused is android.webkit.WebView || findWebView(root)?.hasFocus() == true),
             "views" to kotlinx.serialization.json.JsonObject(bar.debugRects()),
+            "remember" to (bar.remember?.let(::JsonPrimitive) ?: kotlinx.serialization.json.JsonNull),
+            "rememberLayout" to bar.debugRememberLayout(),
         )
     }
 

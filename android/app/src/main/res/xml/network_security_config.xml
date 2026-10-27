@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  No cleartext traffic anywhere. The game itself never touches the network (its router answers any other host with 403);
-  only the bots' Claude online talks to api.anthropic.com, over HTTPS.
+  Cleartext is allowed: online mode connects natively (OnlineProxy, SocketBridge) to the game servers the player adds,
+  and a server on a home network is plain http/ws (docs/ONLINE.md; iOS has NSAllowsArbitraryLoads for the same reason).
+  The page itself never touches the network: its router answers every request to another host 403, and WebView's own
+  WebSocket from the https origin cannot use ws:// (mixed content). The bots' Claude online is HTTPS.
 -->
-<network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <!-- (lint InsecureBaseConfiguration: on purpose, the player types the hosts) -->
+    <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration" />
 </network-security-config>

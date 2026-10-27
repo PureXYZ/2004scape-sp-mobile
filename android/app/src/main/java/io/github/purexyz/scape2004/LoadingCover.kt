@@ -6,8 +6,9 @@
 // * The loader is web/host/index.html's `#loading` with host.css's geometry, drawn by hand with RSTheme: the RuneScape
 //   logo (ui/sprites/logo.png, 444 × 142, at most 80 % of the width, nearest-neighbour), 18 below it the 304 × 34 bar
 //   (a 2 px #8c1111 border, the #8c1111 fill at the 6 % the page's loader starts from, "Loading - please wait." in RS
-//   Bold 12, white, the hard shadow), 12 below that "2004Scape · November 2004 · offline" in RS Plain 11, #75a9a9, the
-//   card centred in the overlay's box (10 px top and bottom, 12 px + the safe area at the sides).
+//   Bold 12, white, the hard shadow), 12 below that "2004Scape · November 2004 · offline" (or "· online" when the page
+//   load plays on a server, as the page's own caption says: CoverController.online) in RS Plain 11, #75a9a9, the card
+//   centred in the overlay's box (10 px top and bottom, 12 px + the safe area at the sides).
 // * At the page's zoom, which CoverGeometry computes as host.js layout() does from the same numbers (the view's size in
 //   CSS px = dp, the display cutout's safe area, the density as the device pixel ratio): ×2 or ×1.5 on a tall screen,
 //   then the crisp pixel snap at a fractional ratio (snapZoom: 2.625 → 8/7, 3 device px per game px). Every length is
@@ -309,6 +310,10 @@ class LoadingCover(context: Context) : ViewGroup(context), CoverView {
     private var styledZoom = -1.0
     private var safe = CoverGeometry.Edges()
     private var margins = CoverMargins()
+
+    /** The caption says "online" (the page load plays on a server). */
+    private var captionOnline = false
+    private val captionText: String get() = captionFor(captionOnline)
     private var loader: CoverGeometry.Loader? = null
     private var errorFrames: CoverGeometry.Error? = null
 
@@ -425,6 +430,13 @@ class LoadingCover(context: Context) : ViewGroup(context), CoverView {
         return super.onApplyWindowInsets(insets)
     }
 
+    override fun online(online: Boolean) {
+        if (online == captionOnline) return
+        captionOnline = online
+        requestLayout()
+        invalidate()
+    }
+
     override fun margins(margins: CoverMargins) {
         if (margins == this.margins) return
         this.margins = margins
@@ -472,7 +484,7 @@ class LoadingCover(context: Context) : ViewGroup(context), CoverView {
         val w = width / density
         val h = height / density
         loader = CoverGeometry.loader(
-            width, height, safe, density, zoom, advance(barText, LOADING_TEXT), advance(caption, CAPTION_TEXT),
+            width, height, safe, density, zoom, advance(barText, LOADING_TEXT), advance(caption, captionText),
             shape(barText), shape(caption), logo?.width ?: 444, logo?.height ?: 142,
         ).also { fallbackLine = CoverGeometry.Line(0.0, 0.0, it.text.size * 2, 0.0, 0.0) }
         if (shownState !is CoverState.Error) return
@@ -523,7 +535,7 @@ class LoadingCover(context: Context) : ViewGroup(context), CoverView {
         fill.color = RSTheme.LOADING_RED
         canvas.drawRect(rectOf(frames.fill), fill)
         drawLine(canvas, barText, LOADING_TEXT, frames.text, RSTheme.WHITE, shadow = true)
-        drawLine(canvas, caption, CAPTION_TEXT, frames.caption, RSTheme.LOADING_CAPTION, shadow = false)
+        drawLine(canvas, caption, captionText, frames.caption, RSTheme.LOADING_CAPTION, shadow = false)
     }
 
     private fun rectOf(area: CoverGeometry.Area): RectF = rect.apply { set(area.left.toFloat(), area.top.toFloat(), area.right.toFloat(), area.bottom.toFloat()) }
@@ -587,6 +599,7 @@ class LoadingCover(context: Context) : ViewGroup(context), CoverView {
                     put("barFill", frames.fill.json(density))
                     put("barText", line(frames.text)) // [x, baseline, font size] in dp
                     put("caption", line(frames.caption))
+                    put("captionText", JsonPrimitive(captionText))
                 }
                 errorFrames?.let { e ->
                     put("errorTitle", dp(CoverGeometry.snap(e.title, density, text = true)))
@@ -642,6 +655,9 @@ class LoadingCover(context: Context) : ViewGroup(context), CoverView {
     companion object {
         const val LOADING_TEXT = "Loading - please wait."
         const val CAPTION_TEXT = "2004Scape · November 2004 · offline"
+
+        /** The caption, offline or online (the page's `#loading .loading-sub` says the same). */
+        fun captionFor(online: Boolean) = if (online) "2004Scape · November 2004 · online" else CAPTION_TEXT
         const val FADE_MS = 250L
     }
 }

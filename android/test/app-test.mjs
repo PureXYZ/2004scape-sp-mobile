@@ -36,7 +36,16 @@
 //            marks. Output beside the console log: soak.jsonl, soak-raw.jsonl, startup.jsonl (from the app's log file,
 //            whose lines are whole), soak/ (the samples), summary.json + summary.txt (web/test/perf/summary.mjs;
 //            --no-summary: not made),
-//            --keep-test-build (leave the test build installed at the end)
+//            --keep-test-build (leave the test build installed at the end),
+//            --build-only (build the test APK and stop: a later --no-build run then needs no Gradle beside the emulator),
+//            --server <url> (online mode, docs/ONLINE.md: the online run of web/test/app-test.mjs --server, the same steps:
+//            the server added through the Add server box and its probe, a password login with Remember, Continue as from
+//            the Keystore, a walk, a banker and the bank, the background 5, 25, 45 and 70 s, the renderer crashed and a
+//            login again, to the world on the phone and back; never an official server. A server on this computer at
+//            http://127.0.0.1:<port> is reached through `adb reverse`), --engine <dir> (with --server
+//            http://127.0.0.1:<port>: the run starts and stops a local Engine-TS itself, web/test/online/engine.mjs, as
+//            on iOS: its management port +1 and node port +2, then the server stopped and the content-drift copy on
+//            <port> +3), --engine-node <dir> (a folder with the Node 24 the engine's worker threads need)
 //
 // The test APK is the debug build with the autotest web variant (Gradle :app:buildWeb -PwebAutotest, i.e. build-web.mjs
 // --autotest, plus autotest.json and the profile in the bundle), copied to android/build/app-test/app-autotest.apk. The
@@ -63,6 +72,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ACTIVITY, ADB, PKG, device, sleep } from './lib/adb.mjs';
 import { ANDROID, REPO, WEB_GAME, apkFile, buildTestApk, firstUsbDevice, gradle, normalApk } from './lib/testbuild.mjs';
+import { CONTENT_DIR } from '../../scripts/lib/upstream.mjs';
+import { prepareDrift } from '../../web/test/online/drift.mjs';
+import { prepareEngine, startEngine } from '../../web/test/online/engine.mjs';
 import { SoakLines, launchTestArg, lmPrompts, loadSoak, procStatScript, soakBuildProblem, soakTimeoutMin } from '../../web/test/perf/soak.mjs';
 
 const argv = process.argv.slice(2);
@@ -115,7 +127,21 @@ if (!SERIAL) {
 const BUILD_DIR = path.join(ANDROID, 'build', 'app-test');
 const TEST_APK = path.join(BUILD_DIR, 'app-autotest.apk');
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-const OUT = path.join(BUILD_DIR, `${emulator ? 'emulator' : 'device'}-${stamp}${SOAK ? `-${SOAK.name}` : ''}`);
+// (online mode: the server, and the local engine the run controls; the passwords it types, for the logs' check)
+const SERVER = option('--server', null);
+const ENGINE_DIR = flag('--engine') ? path.resolve(option('--engine', '')) : null;
+const ENGINE_NODE = flag('--engine-node') ? path.resolve(option('--engine-node', '')) : null;
+const serverPort = SERVER ? Number(/^http:\/\/127\.0\.0\.1:(\d+)\/?$/.exec(SERVER)?.[1] ?? 0) : 0;
+if (SERVER && (BOTS !== null || SOAK || LM_BENCH_MIN !== null || PROFILE !== null)) {
+    console.error('--server runs the online checks alone (no --bots, --soak, --lm-bench or --profile)');
+    process.exit(1);
+}
+if (ENGINE_DIR && !(serverPort > 0 && serverPort < 65532)) {
+    console.error('--engine takes --server http://127.0.0.1:<port> (the engine on <port>, management +1, node +2, the drift copy +3)');
+    process.exit(1);
+}
+const ONLINE = SERVER ? { url: SERVER.replace(/\/$/, ''), drift: ENGINE_DIR ? `http://127.0.0.1:${serverPort + 3}` : null, control: !!ENGINE_DIR, passwords: [`pw${stamp.replace(/\D/g, '').slice(-6)}`, `dr${stamp.replace(/\D/g, '').slice(-6)}`] } : null;
+const OUT = path.join(BUILD_DIR, `${emulator ? 'emulator' : 'device'}-${stamp}${SOAK ? `-${SOAK.name}` : ''}${ONLINE ? '-online' : ''}`);
 fs.mkdirSync(OUT, { recursive: true });
 
 const d = device(SERIAL);
@@ -165,18 +191,25 @@ if (LM_BENCH_MIN !== null) {
     note(`lm-bench: ${model.name} (${Math.round(model.bytes / 1048576)} MB, template ${model.template ?? 'qwen-chatml-nothink'}), main phase ${LM_BENCH_MIN} min${LM_THINK ? ', every reply with its note first (--lm-think)' : ''}`);
 }
 
+// --engine: the engine's copy and the drift copy (made once; the drift's moved files go to autotest.json for its checks)
+if (ENGINE_DIR) {
+    prepareEngine(ENGINE_DIR, path.dirname(CONTENT_DIR));
+    const drift = prepareDrift({ dir: `${ENGINE_DIR}-drift`, from: ENGINE_DIR, nodeBin: ENGINE_NODE });
+    ONLINE.driftFiles = { anims: drift.anims, map: drift.map };
+}
+
 if (!flag('--no-build')) {
     note('building the test APK (the autotest web variant)…');
     buildTestApk({
         out: TEST_APK,
         makeBundle: game => {
             gradle(':app:buildWeb', '-PwebAutotest', ...(flag('--debug-web') ? ['-PwebDebug'] : []), ...(flag('--pack') ? ['-PwebPack'] : []));
-            if (BOTS !== null || LM_BENCH_MIN !== null || SOAK) {
+            if (BOTS !== null || LM_BENCH_MIN !== null || SOAK || ONLINE) {
                 // what autotest.js reads (the test bundle only); a soak build has the chat model's prompts, for any soak's
                 // lm phase (the soak itself comes at launch, and its bots with it)
-                const config = { ...(BOTS !== null && !SOAK ? { bots: BOTS } : {}), ...(LM_BENCH_MIN !== null ? { lmBench: lmBenchConfig() } : {}), ...(SOAK ? { lmPrompts: lmPrompts(REPO) } : {}) };
+                const config = { ...(BOTS !== null && !SOAK ? { bots: BOTS } : {}), ...(LM_BENCH_MIN !== null ? { lmBench: lmBenchConfig() } : {}), ...(SOAK ? { lmPrompts: lmPrompts(REPO) } : {}), ...(ONLINE ? { online: ONLINE } : {}) };
                 fs.writeFileSync(path.join(game, 'autotest.json'), `${JSON.stringify(config)}\n`);
-                note(`autotest.json: ${SOAK ? `the soak's ${SOAK.bots} bots, the chat model's prompts` : `${BOTS ?? "the app's"} bots`}${LM_BENCH_MIN !== null ? `, lm-bench ${JSON.stringify({ ...config.lmBench, prompts: config.lmBench.prompts.length })}` : ''}`);
+                note(`autotest.json: ${ONLINE ? `online, ${ONLINE.url}${ONLINE.control ? ` (and the drift copy on ${ONLINE.drift})` : ''}` : SOAK ? `the soak's ${SOAK.bots} bots, the chat model's prompts` : `${BOTS ?? "the app's"} bots`}${LM_BENCH_MIN !== null ? `, lm-bench ${JSON.stringify({ ...config.lmBench, prompts: config.lmBench.prompts.length })}` : ''}`);
             }
             if (PROFILE !== null) {
                 // the save profile, before host.js reads it (host.js PROFILE)
@@ -188,6 +221,10 @@ if (!flag('--no-build')) {
         }
     });
     note(`test APK: ${path.relative(REPO, TEST_APK)}; ${path.relative(REPO, WEB_GAME)} and the debug APK are the normal build again`);
+}
+if (flag('--build-only')) {
+    note(`--build-only: ${path.relative(REPO, TEST_APK)} is built; run again with --no-build`);
+    process.exit(0);
 }
 if (!fs.existsSync(TEST_APK) || !apkFile(TEST_APK, 'assets/Game/autotest.js')) {
     console.error(`${TEST_APK} is missing or has no assets/Game/autotest.js; build without --no-build first`);
@@ -201,6 +238,24 @@ const builtBots = (() => {
         return null;
     }
 })();
+// (--no-build online: the build's server is what this run's must be; the run's passwords are the build's)
+const builtOnline = (() => {
+    try {
+        return JSON.parse(apkFile(TEST_APK, 'assets/Game/autotest.json')?.toString() ?? 'null')?.online ?? null;
+    } catch {
+        return null;
+    }
+})();
+if (ONLINE && (builtOnline?.url !== ONLINE.url || builtOnline?.drift !== ONLINE.drift || JSON.stringify(builtOnline?.driftFiles) !== JSON.stringify(ONLINE.driftFiles))) {
+    console.error(`${TEST_APK} was built ${builtOnline ? `for --server ${builtOnline.url}${builtOnline.control ? ' with --engine' : ''}` : 'without --server'}; build it again (without --no-build)`);
+    process.exit(1);
+}
+if (ONLINE) {
+    ONLINE.passwords = builtOnline.passwords;
+} else if (builtOnline) {
+    console.error(`${TEST_APK} was built for --server ${builtOnline.url}; build it again (without --no-build) for the offline run`);
+    process.exit(1);
+}
 if (!SOAK && builtBots !== BOTS) {
     console.error(`${TEST_APK} was built ${builtBots === null ? 'without --bots' : `with --bots ${builtBots}`}; build it again (without --no-build) for ${BOTS === null ? 'no --bots' : `--bots ${BOTS}`}`);
     process.exit(1);
@@ -247,6 +302,35 @@ if (emulator) {
 }
 d.adbQuiet('shell', 'svc', 'power', 'stayon', 'true');
 d.adbQuiet('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+// (online, a server on this computer: the emulator's or the phone's 127.0.0.1:<port>, and the drift copy's, are this
+// computer's through adb reverse; removed at the end)
+const REVERSED = serverPort ? [serverPort, ...(ENGINE_DIR ? [serverPort + 3] : [])] : [];
+for (const port of REVERSED) {
+    d.adb('reverse', `tcp:${port}`, `tcp:${port}`);
+}
+
+// ------------------------------------------------------------------------------------------------ online: the engine
+
+// --engine: the local Engine-TS the run starts, stops (ACTION server stop) and swaps for its drift copy (ACTION server
+// start drift: on the --server port +3, with the same management and node ports, as only one runs at a time)
+let engine = null;
+
+async function startServer(variant) {
+    await stopServer();
+    const drift = variant === 'drift';
+    const dir = drift ? prepareDrift({ dir: `${ENGINE_DIR}-drift`, from: ENGINE_DIR, nodeBin: ENGINE_NODE }).engine : path.join(ENGINE_DIR, 'engine');
+    const log = fs.createWriteStream(path.join(OUT, `engine-${variant}.log`), { flags: 'a' });
+    engine = await startEngine({ dir, ports: { web: serverPort + (drift ? 3 : 0), management: serverPort + 1, node: serverPort + 2 }, nodeBin: ENGINE_NODE, log: line => log.write(`${line}\n`) });
+    note(`engine ${variant} up on ${engine.url} in ${engine.started} ms`);
+}
+
+async function stopServer() {
+    if (engine) {
+        await engine.stop();
+        note(`engine ${engine.url} stopped`);
+        engine = null;
+    }
+}
 
 // ------------------------------------------------------------------------------------------------ actions
 
@@ -362,6 +446,9 @@ const soakLines = SOAK ? new SoakLines(OUT, { run: stamp }) : null;
 const STARTUP_LAUNCHES = SOAK?.startup?.launches ?? 0;
 d.clearLog();
 const logcat = spawn(ADB, ['-s', SERIAL, 'logcat', '-v', 'threadtime', 'LostCity:V', '*:S'], { stdio: ['ignore', 'pipe', 'pipe'] });
+if (ENGINE_DIR) {
+    await startServer('stock');
+}
 note(`launching: adb -s ${SERIAL} shell am start -W -S -n ${ACTIVITY}${SOAK ? ' --es lostcity.test <the soak>' : ''}`);
 let launchedAt = Date.now();
 launchApp({ fresh: true });
@@ -371,6 +458,8 @@ let finished = false;
 const queue = [];
 let busy = false;
 let terminations = 0; // (the native log's "WebView renderer gone")
+let leaks = 0; // (online: logcat chunks with a password the run typed)
+let leakTail = '';
 
 async function act(line) {
     let m;
@@ -401,6 +490,23 @@ async function act(line) {
         note(`launching again (launch ${launches + 1}, ${soakLines.cleanLaunches} of ${STARTUP_LAUNCHES} clean launches measured)`);
         launchedAt = Date.now();
         launchApp({ fresh: true });
+    } else if (ONLINE && /LCTEST ACTION relaunch\s*$/.test(line)) {
+        // (online: the next launch takes the drift server's files from the app's cache; HOME first, as a player leaves
+        // the app, so that its saves and the page's storage are written before it is stopped)
+        launchedAt = Date.now();
+        d.adbQuiet('shell', 'input', 'keyevent', 'KEYCODE_HOME');
+        await sleep(2500);
+        d.adbQuiet('shell', 'am', 'force-stop', PKG);
+        await sleep(3000);
+        note('launching again');
+        launchedAt = Date.now();
+        launchApp({ fresh: true });
+    } else if ((m = line.match(/LCTEST ACTION server (stop|start drift)\s*$/))) {
+        try {
+            await (m[1] === 'stop' ? stopServer() : startServer('drift'));
+        } catch (error) {
+            note(`server ${m[1]}: ${error.message}`);
+        }
     } else if ((m = line.match(/LCTEST DONE (pass=\d+ fail=\d+)/))) {
         summary = m[1];
         await sleep(500);
@@ -448,6 +554,10 @@ let pending = '';
 function onData(chunk) {
     const text = chunk.toString();
     consoleLog.write(text);
+    if (ONLINE?.passwords.some(password => `${leakTail}${text}`.includes(password))) {
+        leaks++; // (online: a password typed in the run must never reach a log; with the end of the last chunk)
+    }
+    leakTail = text.slice(-16);
     pending += text;
     let i;
     while ((i = pending.indexOf('\n')) >= 0) {
@@ -540,6 +650,7 @@ function finish(crashed = false) {
         // then on an emulator the app is stopped)
         d.adbQuiet('shell', 'input', 'keyevent', 'KEYCODE_HOME');
         await sleep(2500);
+        await stopServer();
         finishRun(crashed);
     })();
 }
@@ -550,6 +661,15 @@ function finishRun(crashed) {
     const files = d.adbQuiet('shell', 'run-as', PKG, 'find', 'files/Documents', '-type', 'f');
     note(`Documents:\n${files.trim()}`);
     const logText = pullAppLog();
+    for (const port of REVERSED) {
+        d.adbQuiet('reverse', '--remove', `tcp:${port}`);
+    }
+    if (ONLINE) {
+        // (the app's own log file too: what logcat had, and lines written while logcat was not reading)
+        const inFile = ONLINE.passwords.filter(password => logText.includes(password)).length;
+        leaks += inFile;
+        note(leaks ? `FAIL: a password the run typed is in the app's log (${leaks} time${leaks === 1 ? '' : 's'}${inFile ? ', the log file too' : ''})` : "the app's log (logcat and its log file) has none of the passwords the run typed");
+    }
     if (LM_BENCH_MIN !== null) writeBench(logText);
     if (SOAK) writeSoak(logText);
     if (terminations) {
@@ -569,13 +689,13 @@ function finishRun(crashed) {
     }
     d.adbQuiet('shell', 'settings', 'put', 'global', 'stay_on_while_plugged_in', /^\d+$/.test(stayOn) ? stayOn : '0');
     d.adbQuiet('forward', '--remove', `tcp:${d.devtoolsPort}`);
-    fs.writeFileSync(path.join(OUT, 'result.json'), `${JSON.stringify({ serial: SERIAL, target: emulator ? 'emulator' : 'device', summary, crashed, terminations, bots: SOAK ? SOAK.bots : BOTS, lmBench: LM_BENCH_MIN, soak: SOAK?.name ?? null, launches, port: builtPort(), out: OUT }, null, 1)}\n`);
+    fs.writeFileSync(path.join(OUT, 'result.json'), `${JSON.stringify({ serial: SERIAL, target: emulator ? 'emulator' : 'device', summary, crashed, terminations, bots: SOAK ? SOAK.bots : BOTS, lmBench: LM_BENCH_MIN, soak: SOAK?.name ?? null, online: ONLINE ? { url: ONLINE.url, drift: ONLINE.drift, leaks } : null, launches, port: builtPort(), out: OUT }, null, 1)}\n`);
     if (SOAK && !flag('--no-summary')) {
         const r = spawnSync(process.execPath, [path.join(REPO, 'web', 'test', 'perf', 'summary.mjs'), OUT], { stdio: 'inherit' });
         if (r.status !== 0) note(`the summary failed (node web/test/perf/summary.mjs ${OUT})`);
     }
     note(`result: ${summary ?? (crashed ? 'the app stopped before the test finished' : 'timeout')} — ${OUT}`);
-    const failed = !summary || !summary.endsWith('fail=0');
+    const failed = !summary || !summary.endsWith('fail=0') || leaks > 0;
     process.exit(failed ? 1 : 0);
 }
 
@@ -601,7 +721,7 @@ function builtPort() {
 process.on('SIGINT', () => finish(true));
 // (with bots: a restart to apply the setting, waiting for them, measuring; the lm-bench: its phases; a soak: its phases
 // and launches)
-const TIMEOUT_MIN = (BOTS > 0 || SOAK?.bots > 0 ? 12 : 8) + (LM_BENCH_MIN !== null ? (30 * LM_BENCH_MIN) / 20 + 10 : 0) + (SOAK ? soakTimeoutMin(SOAK) : 0);
+const TIMEOUT_MIN = (ONLINE ? 35 : BOTS > 0 || SOAK?.bots > 0 ? 12 : 8) + (LM_BENCH_MIN !== null ? (30 * LM_BENCH_MIN) / 20 + 10 : 0) + (SOAK ? soakTimeoutMin(SOAK) : 0);
 setTimeout(() => {
     note(`TIMEOUT (${TIMEOUT_MIN} min)`);
     finish(true);

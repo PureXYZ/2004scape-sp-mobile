@@ -15,4 +15,11 @@
     <item name="kbd_cancel" type="id" />
     <item name="kbd_submit" type="id" />
     <item name="kbd_hide" type="id" />
+    <item name="kbd_remember" type="id" />
+    <!-- online mode's Add / Edit server box (ServerDialog) -->
+    <item name="server_title" type="id" />
+    <item name="server_address" type="id" />
+    <item name="server_name" type="id" />
+    <item name="server_cancel" type="id" />
+    <item name="server_ok" type="id" />
 </resources>

@@ -6,6 +6,8 @@ device: the game server and the original web client both run inside the app, wit
 There is no account, no server and no internet connection involved. You can play alone, or let up to 1,000 AI players
 fill the world: they train their skills, bank, trade, chat, fight in the Wilderness, and come and go the way players
 did in 2004. Their replies to you can be written by a small chat model that runs on the phone, which is optional.
+And if you or a friend run a Lost City server, the app can play there with the same touch interface:
+[online mode](docs/ONLINE.md).
 
 > **Built on other people's work, with AI.** 2004Scape is a derived work, not an original game. The game is
 > [Lost City](https://github.com/LostCityRS)'s: its server (Engine-TS), web client (Client-TS) and game content (Content)
@@ -18,7 +20,7 @@ did in 2004. Their replies to you can be written by a small chat model that runs
 > [iPhone guide](docs/INSTALL-IPHONE.md) (about 30 minutes, needs a Mac or Windows PC) ·
 > [Download page](https://github.com/PureXYZ/2004scape-sp-mobile/releases/latest)
 
-> 2004Scape is an unofficial fan project. It is not affiliated with, endorsed by or connected to Jagex Ltd or the Lost City project. RuneScape is a registered trademark of Jagex Ltd. The game data the app is built from is the intellectual property of Jagex Ltd. This project is free: no ads, no payments, no accounts.
+> 2004Scape is an unofficial fan project. It is not affiliated with, endorsed by or connected to Jagex Ltd or the Lost City project. RuneScape is a registered trademark of Jagex Ltd. The game data the app is built from is the intellectual property of Jagex Ltd. This project is free: no ads, no payments, no accounts. Online mode connects only to servers you add.
 
 ![The world with the mobile interface](docs/images/world.png)
 
@@ -115,16 +117,28 @@ Settings opens from the ⚙ button. The defaults:
 | Sound | Silent switch: Mute / Play (iPhone; Android always plays), Vibration | Play, On |
 | Controls | Hold for menu, Camera drag, Options menu Large / Classic | Normal (400 ms), Normal, Large |
 | Tap options | What a tap does with Attack on NPCs and on players: Tap, By level, Hold or Hidden | By level (as in 2004) |
-| World | World type Members / Free | Members |
+| World | Play on: This phone, or a game server you added (**Change**: the worlds, as the title's World button) | This phone |
+| | World type Members / Free | Members |
 | | XP rate 1×, 2×, 5×, 10×, 25×, 50× | 10× |
 | | Jmod (staff commands and the crown) | Off |
 | | Bots: Off, 25, 50, 100, 250, 500, 750, 1000 | 500 |
 | | Detail High / Low | High |
 | Bot chat | Chat model: Rules, On-device, Claude online; Think first | On-device (Rules without a model), Think first On |
 
-World settings apply when you tap **Restart** in that category. Settings › About shows the version and
+World settings apply when you tap **Restart** in that category (online they are the server's: only Detail stays).
+Settings › About shows the version and
 the build, the disclaimer, the credits and, under **Licences**, the licences of everything the app is made from
 ([LICENSE](LICENSE), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+
+### Online
+
+The **World** button under the title's box chooses where you play: **This phone**, or a Lost City (Engine-TS 274)
+server that you or a friend run, on your Wi-Fi or on the internet. **Add server** takes its address (such as
+`192.168.1.20` or `my-mac.local:8888`) and checks it; tap a world to play there. Online you log in with a name and the
+server's password (tick **Remember** in the keyboard bar to keep it in the phone's Keychain or Keystore, for **Continue
+as**), and play with whoever else is on that server, with the same touch interface. It saves the phone's memory, not
+much battery: drawing the game stays on the phone. How to run a server, and why Lost City's official worlds are not
+supported: [docs/ONLINE.md](docs/ONLINE.md).
 
 ### Bots
 
@@ -164,7 +178,7 @@ Trades, adverts, Wilderness talk and "come here" always stay the bots' own lines
 ## FAQ
 
 **Does it need the internet?** No. The game, the bots and the on-device model all run on the phone. Only Claude online
-uses the network (and, on iPhone, your sideloading tool when it refreshes the app).
+and online mode use the network (and, on iPhone, your sideloading tool when it refreshes the app).
 
 **Why does the iPhone app stop after 7 days?** Apple limits apps signed with a free Apple Account to 7 days. Refresh it with
 your sideloading tool (or re-run the build with Xcode); your saves stay.
@@ -177,7 +191,8 @@ Android's backup.
 run at 50 fps, but expect more battery use and warmth on long sessions at 500 or more (Settings › World says so too).
 Lower Settings › World › Bots, then tap **Restart to apply**, if the phone gets warm.
 
-**Can I play online with friends?** No. Each phone runs its own private world, with no server to connect to.
+**Can I play online with friends?** Yes, on a Lost City server one of you runs, at home or on the internet: see
+[online mode](docs/ONLINE.md). Lost City's official worlds are not supported (their client and rules allow no other).
 
 **Is this a private server?** No. Nothing listens on the network: the game server runs inside the app, for you alone.
 
@@ -197,7 +212,8 @@ built with Node. Everything is in [docs/BUILDING.md](docs/BUILDING.md). Making a
 The Lost City game server (Engine-TS) is bundled to run as a Web Worker, and the Lost City web client (Client-TS) is
 built with touch patches; both run in the phone's web view (WKWebView on iOS, Android System WebView on Android) behind
 a native shell that serves the game files, keeps the saves and provides the keyboard and haptics. A fake WebSocket
-connects the client to the server inside the page. The upstream sources are pinned in [upstream.json](upstream.json) and
+connects the client to the server inside the page; online, native code carries the client's sockets to the game server
+instead, and the page runs no server at all. The upstream sources are pinned in [upstream.json](upstream.json) and
 used unmodified; this project's changes are the client patches, the engine's browser shims, the bots and the apps.
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the design and the contracts between the pieces.

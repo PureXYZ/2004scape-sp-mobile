@@ -11,8 +11,8 @@ import UIKit
 ///   autocorrect, autocapitalisation, spell check, smart quotes/dashes/insert-delete or inline
 ///   predictions; `.asciiCapable`, or `.asciiCapableNumberPad` for numeric prompts. Passwords are
 ///   *not* marked `isSecureTextEntry` (that brings up the iOS "Passwords" AutoFill bar and secure
-///   keyboard); they are masked in the bar instead. Both login fields have the Go key and "Log in"
-///   (offline the password is never checked), so moving between them changes only the bar.
+///   keyboard); they are masked in the bar instead. Both login fields have the Go key and "Log in", so
+///   moving between them changes only the bar.
 /// * **Idle** (initially, and after `hide`): `inputView` is an empty view, so no software
 ///   keyboard appears, but the view still owns the hardware keyboard. Characters arrive through
 ///   `insertText` (UIKit applies the layout, Shift, Option…), special keys through
@@ -34,6 +34,10 @@ import UIKit
 /// * `cancellable`: the bar shows Cancel.
 /// * `chips` (also in `update`): one-tap entries; a chip replaces the line (Backspace for its current length, then
 ///   the chip's text, through the same calls as typing) and submits it if `submit`.
+///
+/// * `remember` (kind `login-pass` only, also in `update`; online, for the server's password): the bar shows the
+///   Remember box, ticked or not; a tap flips it and tells the page (`keyboard.remember(on)`), whose next `remember`
+///   wins. Without it in `show` there is no box; an `update` without it leaves the box as it is.
 ///
 /// Native also tells the page how much of the web view the keyboard and its bar cover, whenever that changes:
 /// `keyboard.frame(points, seconds)`, 0 when hidden.
@@ -189,6 +193,11 @@ final class KeyboardBridge: UIView, UIKeyInput {
         bar.onHide = { [weak self] in self?.hide(userInitiated: true) }
         bar.onCancel = { [weak self] in self?.cancel() }
         bar.onChip = { [weak self] in self?.apply($0) }
+        bar.onRemember = { [weak self] on in
+            self?.onActivity?()
+            Log.info("kbd", "Remember \(on ? "ticked" : "cleared")")
+            self?.bridge.call("keyboard.remember", [on])
+        }
         observeKeyboard()
     }
 
@@ -234,11 +243,12 @@ final class KeyboardBridge: UIView, UIKeyInput {
                  numeric: message["numeric"] as? Bool ?? false,
                  cancellable: message["cancellable"] as? Bool ?? false,
                  rules: Self.rules(from: message) ?? Rules(),
-                 chips: Self.chips(from: message["chips"]) ?? [])
+                 chips: Self.chips(from: message["chips"]) ?? [],
+                 remember: message["remember"] as? Bool)
         case "update":
             update(prompt: message["prompt"] as? String, text: message["text"] as? String,
                    chips: Self.chips(from: message["chips"]), rules: Self.rules(from: message),
-                   cancellable: message["cancellable"] as? Bool)
+                   cancellable: message["cancellable"] as? Bool, remember: message["remember"] as? Bool)
         case "hide":
             hide(userInitiated: false)
         default:
@@ -247,7 +257,7 @@ final class KeyboardBridge: UIView, UIKeyInput {
     }
 
     func show(kind: String, prompt: String, text: String, secure: Bool, numeric: Bool,
-              cancellable: Bool = false, rules: Rules = Rules(), chips: [KeyboardAccessoryBar.Chip] = []) {
+              cancellable: Bool = false, rules: Rules = Rules(), chips: [KeyboardAccessoryBar.Chip] = [], remember: Bool? = nil) {
         let keyboard: UIKeyboardType = numeric ? .asciiCapableNumberPad : .asciiCapable
         let returnKey = Self.returnKey(for: kind)
         // Only a different keyboard or Return key needs a reload, which hides the bar for a frame.
@@ -268,6 +278,7 @@ final class KeyboardBridge: UIView, UIKeyInput {
         bar.configure(prompt: prompt.isEmpty ? Self.defaultPrompt(for: kind) : prompt,
                       submitTitle: Self.submitTitle(for: kind), secure: secure, numeric: numeric, text: text,
                       cancellable: cancellable, chips: chips)
+        bar.setRemember(kind == "login-pass" ? remember : nil)
         Log.info("kbd", "show kind=\(kind) numeric=\(numeric) secure=\(secure) cancellable=\(cancellable) " +
                  "charset=\(rules.charset.rawValue) max=\(rules.maxLength.map(String.init) ?? "-") chips=\(chips.count)")
         if !isFirstResponder {
@@ -278,8 +289,10 @@ final class KeyboardBridge: UIView, UIKeyInput {
         }
     }
 
-    func update(prompt: String?, text: String?, chips: [KeyboardAccessoryBar.Chip]? = nil, rules: Rules? = nil, cancellable: Bool? = nil) {
+    func update(prompt: String?, text: String?, chips: [KeyboardAccessoryBar.Chip]? = nil, rules: Rules? = nil, cancellable: Bool? = nil,
+                remember: Bool? = nil) {
         guard requested else { return }
+        if let remember, kind == "login-pass" { bar.setRemember(remember) }
         if let prompt {
             bar.setPrompt(prompt.isEmpty ? Self.defaultPrompt(for: kind) : prompt)
         }
@@ -777,6 +790,11 @@ final class KeyboardBridge: UIView, UIKeyInput {
         pasteText(text)
     }
 
+    /// Taps the bar's Remember box; its new state, or nil when no box is shown.
+    func debugTapRemember() -> Bool? {
+        bar.debugTapRemember() ? bar.remember : nil
+    }
+
     func debugState() -> [String: Any] {
         [
             "isFirstResponder": isFirstResponder,
@@ -801,6 +819,8 @@ final class KeyboardBridge: UIView, UIKeyInput {
             "rejections": rejections,
             "flashing": bar.isFlashingRejected,
             "canPaste": canPerformAction(#selector(paste(_:)), withSender: nil),
+            "remember": bar.remember ?? NSNull(),
+            "rememberLayout": bar.debugRememberLayout,
         ]
     }
     #endif

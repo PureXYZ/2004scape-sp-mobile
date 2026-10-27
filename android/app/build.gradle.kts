@@ -155,8 +155,13 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     // the bots' chat model (docs/ANDROID.md §5): llama.cpp's C++ core and JNI layer, the key store, AndroidBotChat
     implementation(project(":llm"))
+    // online mode (docs/ANDROID.md §7): the game server's WebSockets (Android has no WebSocket client) and its HTTP
+    // files, as URLSession does both on iOS; 4.12 is the last 4.x, one JVM artifact the JVM unit tests run as well
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     testImplementation("junit:junit:4.13.2")
+    // a local HTTP and WebSocket server for OnlineProxyTest and SocketBridgeTest
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
 
 // ------------------------------------------------------------------------------------------------------ the web bundle

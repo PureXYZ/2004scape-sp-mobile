@@ -47,6 +47,8 @@
             storageFull: 'Is the iPhone storage full?',
             onlyInApp: 'Only in the iPhone app',
             keyRemove: 'It is deleted from this iPhone\'s Keychain. Claude online then answers with the on-device model, or with the rules.',
+            passwordsWhere: 'Only the names are kept on this iPhone. A password is kept only when you tick Remember, in the Keychain.',
+            localNetwork: 'this iPhone did not reach your local network. Is it on the Wi-Fi, and is 2004Scape allowed in Settings > Privacy & Security > Local Network?',
             tooOld: () => 'This iPhone\'s iOS is too old for the game (iOS 18.4 or later is needed). Update it in Settings > General > Software Update, then open the game again.'
         },
         android: {
@@ -56,6 +58,8 @@
             storageFull: 'Is the phone\'s storage full?',
             onlyInApp: 'Only in the app',
             keyRemove: 'It is deleted from this phone. Claude online then answers with the on-device model, or with the rules.',
+            passwordsWhere: 'Only the names are kept on this phone. A password is kept only when you tick Remember, encrypted on this phone.',
+            localNetwork: 'this phone did not reach your local network. Is it on the Wi-Fi, and may 2004Scape connect to devices on it (Settings > Apps > 2004Scape > Permissions)?',
             tooOld: version => `This phone's Android System WebView is too old for the game (Chrome ${version ?? 'unknown'}; ${MIN_WEBVIEW} or later is needed). Update "Android System WebView" in Google Play, then open the game again.`
         }
     };
@@ -112,7 +116,15 @@
         botChat: window.LostCityNative?.lm?.local?.available === true ? 'local' : 'rules',
         // Settings › Bot chat › Think first: the model in the app plans each reply in a short note first (offered only for
         // a model trained both ways: native's status local.think 'option'); applied at once, with every request
-        botThink: BOT_THINK_DEFAULT
+        botThink: BOT_THINK_DEFAULT,
+        // Online (docs/ONLINE.md): where the world is, 'offline' (this phone) or the id of one of `servers`, the game
+        // servers the player added ({id, name, url, nodeId, members, rsa, added}: checkServerSettings); `accounts` the
+        // names played on each (usernames only: a password the player asked to keep stays in the Keychain or the
+        // Keystore), `rememberDefault` the Remember box's last state on each. A change of server reloads the page.
+        server: 'offline',
+        servers: [],
+        accounts: {},
+        rememberDefault: {}
     });
 
     function loadSettings() {
@@ -133,10 +145,81 @@
             }
         }
         merged.stayLoggedIn = true;
+        checkServerSettings(merged, stored);
         return merged; // (checked against the Settings sheet at boot: checkStoredSettings)
     }
 
+    // The servers, their accounts and the server chosen, checked when the page loads (before it chooses its WebSocket),
+    // like the other stored settings: an entry without a usable id or an address that is not one (web/host/serverurl.js)
+    // is dropped, its address stored normalized, a missing or malformed field set to its default (world 10, members,
+    // the built-in key); accounts and Remember states only for servers there are; 'offline' when the server chosen is
+    // not one of them. A correction is saved once, at boot (checkStoredSettings).
+    const MAX_SERVERS = 50;
+    const MAX_ACCOUNTS = 20;
+    let serverSettingsCorrected = false;
+
+    function checkServerSettings(merged, stored) {
+        const servers = [];
+        for (const entry of Array.isArray(merged.servers) ? merged.servers : []) {
+            const server = serverEntry(entry);
+            if (server && servers.length < MAX_SERVERS && !servers.some(s => s.id === server.id)) {
+                servers.push(server);
+            }
+        }
+        const accounts = {};
+        const rememberDefault = {};
+        for (const { id } of servers) {
+            const names = new Set();
+            const list = (Array.isArray(merged.accounts?.[id]) ? merged.accounts[id] : [])
+                .map(account => ({ name: typeof account?.name === 'string' ? account.name.trim() : '', lastPlayed: Number(account?.lastPlayed) > 0 ? Number(account.lastPlayed) : 0 }))
+                .filter(account => /^[A-Za-z0-9 _-]{1,12}$/.test(account.name) && !names.has(account.name.toLowerCase()) && names.add(account.name.toLowerCase()))
+                .slice(0, MAX_ACCOUNTS);
+            if (list.length) {
+                accounts[id] = list;
+            }
+            if (typeof merged.rememberDefault?.[id] === 'boolean') {
+                rememberDefault[id] = merged.rememberDefault[id];
+            }
+        }
+        const server = servers.some(s => s.id === merged.server) ? merged.server : 'offline';
+        const checked = { server, servers, accounts, rememberDefault };
+        for (const [key, value] of Object.entries(checked)) {
+            if (stored && typeof stored === 'object' && key in stored && sortedJson(stored[key]) !== sortedJson(value)) {
+                serverSettingsCorrected = true;
+            }
+            merged[key] = value;
+        }
+    }
+
+    // JSON with every object's keys sorted: native stores and gives back the settings with sorted keys (iOS
+    // JSONSerialization .sortedKeys, Android JsonText.sorted), so the order is not a change.
+    function sortedJson(value) {
+        return JSON.stringify(value, (key, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v));
+    }
+
+    // A stored server entry as the page uses it, or null when it cannot be one.
+    function serverEntry(entry) {
+        const url = entry && typeof entry === 'object' ? window.lcServerUrl?.normalize(entry.url) ?? null : null;
+        if (!url || typeof entry.id !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(entry.id)) {
+            return null;
+        }
+        const rsa = entry.rsa;
+        return {
+            id: entry.id,
+            name: typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim().slice(0, 40) : window.lcServerUrl.hostOf(url),
+            url,
+            nodeId: Number.isInteger(entry.nodeId) && entry.nodeId >= 1 && entry.nodeId <= 65535 ? entry.nodeId : 10,
+            members: typeof entry.members === 'boolean' ? entry.members : true,
+            rsa: rsa && typeof rsa === 'object' && /^\d{40,2000}$/.test(rsa.n) && /^\d{1,2000}$/.test(rsa.e) ? { n: rsa.n, e: rsa.e } : null,
+            added: Number(entry.added) > 0 ? Number(entry.added) : 0
+        };
+    }
+
     const settings = loadSettings();
+    // The game server this page plays on, or null: the world on this phone (docs/ONLINE.md). Fixed for the page's life: a
+    // change of server reloads the page (servers.use). Native routes /crc, the archives and the sockets by the same rule.
+    const SERVER = settings.servers.find(server => server.id === settings.server) ?? null;
+    const ONLINE = SERVER !== null;
     // World settings are fixed for the lifetime of the page; edits to them apply on restart. Taken at boot, once the
     // stored settings have been checked.
     let bootSettings = null;
@@ -157,7 +240,7 @@
                 corrected = true;
             }
         }
-        if (corrected) {
+        if (corrected || serverSettingsCorrected) {
             persistSettings();
         }
     }
@@ -189,7 +272,9 @@
     // ------------------------------------------------------------------------------------------------ engine worker
 
     let engine = null;
-    let engineState = 'booting'; // 'booting' | 'ready' | 'dead' | 'stopped' (Saved data's restarts: stopEngine)
+    // 'booting' | 'ready' | 'dead' | 'stopped' (Saved data's restarts: stopEngine); online 'remote': the world is the game
+    // server's, and no engine runs on the page
+    let engineState = ONLINE ? 'remote' : 'booting';
     let botsOff = false; // the bots asked for are off this session (the engine said so)
     let resolveEngineReady;
     let rejectEngineReady;
@@ -466,7 +551,192 @@
         }
     }
 
-    window.WebSocket = EngineSocket;
+    // ------------------------------------------------------------------------------------------------ NativeSocket
+
+    // Online (docs/ONLINE.md) the client's sockets, the game's and OnDemand's, go to the game server through native code,
+    // the socket bridge (docs/ARCHITECTURE.md §7.2): the page posts {type:'socket', action:'open'|'send'|'close', id, …}
+    // and native answers with LostCityHost.socket.events([{id, event, data?, code?, reason?}]), everything that arrived in
+    // one of its run-loop turns in one call. The page never touches the network itself. The same surface as EngineSocket
+    // (the global identity for the client's instanceof, readyState CLOSED before error and close fire); the URL the
+    // client passes is ignored: native opens the server's own socket URL. Messages are base64 both ways.
+    const nativeSockets = new Map();
+    let nextNativeSocketId = 1;
+    let lastSocketError = null; // { reason, at } of the last game socket that failed (the unreachable box)
+
+    class NativeSocket extends EventTarget {
+        static CONNECTING = 0;
+        static OPEN = 1;
+        static CLOSING = 2;
+        static CLOSED = 3;
+
+        // (purpose: 'game', or 'ondemand' for LocalOnDemand's remote files, lcHost.openSocket; native only logs it)
+        constructor(url, protocols, purpose = 'game') {
+            super();
+            this.url = String(url ?? '');
+            this.protocol = Array.isArray(protocols) ? (protocols[0] ?? '') : (protocols ?? '');
+            this.extensions = '';
+            this.binaryType = 'blob';
+            this.bufferedAmount = 0; // (as EngineSocket: the client's 4,900-byte guard is per message)
+            this.readyState = NativeSocket.CONNECTING;
+            this.onopen = null;
+            this.onmessage = null;
+            this.onerror = null;
+            this.onclose = null;
+            this.id = nextNativeSocketId++;
+            this.purpose = purpose === 'ondemand' ? 'ondemand' : 'game';
+            this.errorFired = false;
+            this.received = 0;
+            nativeSockets.set(this.id, this);
+            postNative({ type: 'socket', action: 'open', id: this.id, purpose: this.purpose });
+        }
+
+        get CONNECTING() {
+            return 0;
+        }
+        get OPEN() {
+            return 1;
+        }
+        get CLOSING() {
+            return 2;
+        }
+        get CLOSED() {
+            return 3;
+        }
+
+        send(data) {
+            if (this.readyState === NativeSocket.CONNECTING) {
+                throw new DOMException("Failed to execute 'send' on 'WebSocket': Still in CONNECTING state.", 'InvalidStateError');
+            }
+            if (this.readyState !== NativeSocket.OPEN) {
+                return; // a real WebSocket silently discards data once closing/closed
+            }
+            let bytes;
+            if (data instanceof ArrayBuffer) {
+                bytes = new Uint8Array(data);
+            } else if (ArrayBuffer.isView(data)) {
+                bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+            } else if (typeof data === 'string') {
+                bytes = new TextEncoder().encode(data);
+            } else {
+                throw new TypeError('NativeSocket.send: unsupported data type');
+            }
+            postNative({ type: 'socket', action: 'send', id: this.id, data: toBase64(bytes) });
+        }
+
+        close(code = 1000, reason = '') {
+            if (this.readyState === NativeSocket.CLOSING || this.readyState === NativeSocket.CLOSED) {
+                return;
+            }
+            // (a game socket the server took and never answered, which the client gives up on after 30 s: the box says so)
+            if (this.purpose === 'game' && this.readyState === NativeSocket.OPEN && this.received === 0) {
+                console.warn('[host] the game socket got no answer');
+                lastSocketError = { reason: 'timed out', at: performance.now() };
+            }
+            this.readyState = NativeSocket.CLOSED;
+            nativeSockets.delete(this.id);
+            postNative({ type: 'socket', action: 'close', id: this.id });
+            // (native sends nothing more for this id: the close is the page's own, as EngineSocket's)
+            queueMicrotask(() => this._fire('close', new CloseEvent('close', { code, reason, wasClean: true })));
+        }
+
+        // One of native's events for this socket (LostCityHost.socket.events).
+        _event(event) {
+            switch (event.event) {
+                case 'open':
+                    if (this.readyState === NativeSocket.CONNECTING) {
+                        this.readyState = NativeSocket.OPEN;
+                        this._fire('open', new Event('open'));
+                    }
+                    break;
+                case 'message': {
+                    if (this.readyState !== NativeSocket.OPEN || typeof event.data !== 'string') {
+                        break;
+                    }
+                    const bytes = fromBase64(event.data);
+                    this.received++;
+                    this._fire('message', new MessageEvent('message', { data: this.binaryType === 'arraybuffer' ? bytes.buffer : new Blob([bytes]) }));
+                    break;
+                }
+                case 'error':
+                    this._failed(event.reason);
+                    break;
+                case 'close':
+                    // (a socket still connecting that closes without an error failed: as EngineSocket, it fires both)
+                    if (this.readyState === NativeSocket.CONNECTING) {
+                        this._failed(event.reason);
+                    }
+                    this.readyState = NativeSocket.CLOSED;
+                    nativeSockets.delete(this.id);
+                    this._fire('close', new CloseEvent('close', { code: Number(event.code) || 1006, reason: String(event.reason ?? ''), wasClean: Number(event.code) === 1000 }));
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        _failed(reason) {
+            if (this.errorFired) {
+                return;
+            }
+            this.errorFired = true;
+            this.readyState = NativeSocket.CLOSED;
+            const why = String(reason ?? 'network');
+            console.warn(`[host] the ${this.purpose} socket failed: ${why}`);
+            if (this.purpose === 'game') {
+                lastSocketError = { reason: why, at: performance.now() };
+            }
+            this._fire('error', new Event('error'));
+        }
+
+        _fire(type, event) {
+            this.dispatchEvent(event);
+            const handler = this[`on${type}`];
+            if (typeof handler === 'function') {
+                try {
+                    handler.call(this, event);
+                } catch (err) {
+                    // Like a real event handler: report, but never let it break the transport.
+                    setTimeout(() => {
+                        throw err;
+                    });
+                }
+            }
+        }
+    }
+
+    // Base64 (RFC 4648, with padding) for the bridge; Uint8Array's own where the engine has it (Safari 18.2, Chrome 140).
+    function toBase64(bytes) {
+        if (typeof bytes.toBase64 === 'function') {
+            return bytes.toBase64();
+        }
+        let text = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+            text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        return btoa(text);
+    }
+
+    function fromBase64(text) {
+        if (typeof Uint8Array.fromBase64 === 'function') {
+            return Uint8Array.fromBase64(text);
+        }
+        const binary = atob(text);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+    }
+
+    window.WebSocket = ONLINE ? NativeSocket : EngineSocket;
+
+    // The loader's caption says where the world is (index.html calls this right after the element, so it is right at the
+    // first paint): one text node, as the native launch covers draw it.
+    window.lcLoaderCaption = element => {
+        if (element && ONLINE) {
+            element.textContent = '2004Scape · November 2004 · online';
+        }
+    };
 
     // ------------------------------------------------------------------------------------------------ client access
 
@@ -621,7 +891,9 @@
             const status = [c.loginMes1, c.loginMes2].filter(Boolean).join(' ');
             const message = status && status !== LOGIN_HINT ? status : null;
             if (c.loginSelect === 1) {
-                return { kind: 'login-pass', prompt: message ?? 'Password', text: '*'.repeat(c.loginPass?.length ?? 0), secure: true, numeric: false, maxLength: 20, charset: 'game' };
+                // (online: native's Remember box in the bar, accounts.rememberFor)
+                const remember = ONLINE ? { remember: accounts.rememberFor(c.loginUser) } : {};
+                return { kind: 'login-pass', prompt: message ?? 'Password', text: '*'.repeat(c.loginPass?.length ?? 0), secure: true, numeric: false, maxLength: 20, charset: 'game', ...remember };
             }
             return { kind: 'login-user', prompt: message ?? 'Username', text: c.loginUser ?? '', secure: false, numeric: false, maxLength: 12, charset: 'name' };
         }
@@ -781,14 +1053,14 @@
                 return;
             }
             const chips = JSON.stringify(next.chips ?? null);
-            if (next.text !== prev.text || next.prompt !== prev.prompt || chips !== JSON.stringify(prev.chips ?? null)) {
+            if (next.text !== prev.text || next.prompt !== prev.prompt || chips !== JSON.stringify(prev.chips ?? null) || next.remember !== prev.remember) {
                 this.context = next;
                 if (isStaff()) {
                     startsToChat(next.kind); // (a staff line as the client now holds it: a chip, a Backspace)
                 }
                 if (isNative) {
-                    // (chips too: the recent commands and amounts change as they are used)
-                    postNative({ type: 'keyboard', action: 'update', prompt: next.prompt, text: next.text, chips: next.chips ?? [] });
+                    // (chips too: the recent commands and amounts change as they are used; online the Remember box)
+                    postNative({ type: 'keyboard', action: 'update', prompt: next.prompt, text: next.text, chips: next.chips ?? [], ...('remember' in next ? { remember: next.remember } : {}) });
                 }
             }
         },
@@ -819,7 +1091,8 @@
         // In the 274 client, Enter on the login form only switches between the two fields; logging in takes a click
         // on "Login". The native keyboard labels this key "Log in", so press that button once both fields are filled.
         // The username field's key also logs in: offline the password is never checked (the engine loads the save by
-        // name), so an empty one is filled in.
+        // name), so an empty one is filled in. Online the server checks it: with none typed yet, the key goes on to the
+        // password field instead.
         // Characters typed just before are still in the client's key queue, and the client handles a click before the
         // queued keys in its cycle, so the submit waits in the queue for them (queueAfterKeys); keys typed after it
         // wait behind it.
@@ -835,6 +1108,10 @@
         submitNow() {
             const c = client();
             if (c && !c.ingame && c.loginscreen === 2 && c.loginUser?.trim().length > 0) {
+                if (!c.loginPass && ONLINE) {
+                    c.loginSelect = 1;
+                    return;
+                }
                 if (!c.loginPass) {
                     c.loginPass = OFFLINE_PASSWORD;
                 }
@@ -875,6 +1152,11 @@
         dismissed() {
             this.shown = false;
             this.context = null;
+        },
+
+        // Online: the player ticked or cleared the Remember box in the keyboard bar (the password's).
+        remember(on) {
+            accounts.setRemember(on === true);
         },
 
         // Hardware keys (KeyboardBridge sends key-down and key-up separately).
@@ -1024,6 +1306,14 @@
             titleScreen.closeList();
             return true;
         }
+        if (servers.isOpen) {
+            servers.close();
+            return true;
+        }
+        if (accounts.isOpen) {
+            accounts.close();
+            return true;
+        }
         if (menu?.open) {
             menu.close();
             return true;
@@ -1068,6 +1358,11 @@
 
     window.lcHost = {
         settings,
+        // online the game server ({id, name, url, nodeId, members, rsa: {n, e} decimal strings or null}): its login key
+        // (client patch 0030, lcLoginKey) and LocalOnDemand's remote files; null offline (docs/ONLINE.md)
+        server: ONLINE ? { id: SERVER.id, name: SERVER.name, url: SERVER.url, nodeId: SERVER.nodeId, members: SERVER.members, rsa: SERVER.rsa } : null,
+        // a socket to the game server for LocalOnDemand's remote files (purpose 'ondemand'), online only
+        openSocket: purpose => (ONLINE ? new NativeSocket(null, 'binary', purpose) : null),
         // which app the page runs in, as the engine is told: on Android client patch 0026 sends a canvas its whole frame
         // when any pixel changed, not their rect ('web' = no app: desktop tests get the iOS path, as everywhere here)
         platform: window.LostCityNative?.platform ?? 'web',
@@ -1313,7 +1608,11 @@
             case 'terminate': {
                 if (lifecycleState !== 'paused') {
                     lifecycleState = 'paused';
-                    freezeClientTimers();
+                    // (online the server keeps ticking: the client must notice a socket that died meanwhile, so its
+                    // timers run on; there is no engine to pause or save: engineRequest answers at once)
+                    if (!ONLINE) {
+                        freezeClientTimers();
+                    }
                 }
                 const reply = await engineRequest('pause', 4000);
                 return lifecycleResult(reply);
@@ -1321,7 +1620,9 @@
             case 'foreground':
             case 'resume': {
                 lifecycleState = 'running';
-                thawClientTimers();
+                if (!ONLINE) {
+                    thawClientTimers();
+                }
                 resumeAudio();
                 audioIdle.rearm();
                 const reply = await engineRequest('resume', 4000);
@@ -1363,6 +1664,23 @@
             worldMap?.release(); // (a closed World map's iframe, ~40-75 MB)
         },
         saveNow: () => lifecycle('save'),
+        // online: native's socket events, in arrival order (NativeSocket)
+        socket: {
+            events(batch) {
+                for (const event of Array.isArray(batch) ? batch : []) {
+                    nativeSockets.get(Number(event?.id))?._event(event);
+                }
+            }
+        },
+        // online: an account's kept password (or null) for "Continue as", and which accounts have one after a change
+        accounts: {
+            login: (name, password) => accounts.login(String(name ?? ''), password ?? null),
+            saved: map => accounts.setSaved(map)
+        },
+        // native's Add / Edit server box: { address, name }, or null for Cancel
+        servers: {
+            answer: answer => servers.answered(answer)
+        },
         // the bots' chat model (docs/ARCHITECTURE.md §7.1): native's answer to a {type:'lm'} request, and its status
         bots: {
             lmReply: reply => lm.reply(reply),
@@ -1445,8 +1763,11 @@
     }
 
     function titleReady(c) {
-        return !!c && (c.ingame || (c.titleFlames && c.lastProgressPercent === 100)) && engineState === 'ready';
+        return !!c && (c.ingame || (c.titleFlames && c.lastProgressPercent === 100)) && worldReady();
     }
+
+    // The world can take a login: the engine on this phone has started, or (online) the game server is the world.
+    const worldReady = () => engineState === 'ready' || engineState === 'remote';
 
     function hideLoading() {
         if (!loadingEl || loadingEl.classList.contains('fade')) {
@@ -1652,6 +1973,8 @@
         document.documentElement.classList.toggle('ui-zoomed', view.zoom !== 1); // (host.css: scaled with a transform)
         // (the snap's zoom: the zoomed layers drawn at their final scale, host.css html.ui-snapped)
         document.documentElement.classList.toggle('ui-snapped', view.zoom !== 1 && !Number.isInteger(dpr));
+        // (a short layer, under 370 HUD px: Android's 360, Display Zoom's 320: Settings › World's rows a little tighter)
+        document.documentElement.classList.toggle('ui-short', vh / view.zoom < 370);
 
         const mobile = settings.layout === 'mobile' && hud !== null;
         const inGame = isInGame(client());
@@ -1757,18 +2080,27 @@
         init() {
             this.el = document.getElementById('title-actions');
             bindTapButton(document.getElementById('btn-continue'), () => {
-                if (this.saves[0]) {
-                    this.login(this.saves[0].name);
+                const first = ONLINE ? accounts.list()[0] : this.saves[0];
+                if (first && ONLINE) {
+                    accounts.loginWith(first.name);
+                } else if (first) {
+                    this.login(first.name);
                 }
             });
             bindTapButton(document.getElementById('btn-characters'), () => this.openList());
+            bindTapButton(document.getElementById('btn-accounts'), () => accounts.open());
+            bindTapButton(document.getElementById('btn-world'), () => servers.open());
+            document.getElementById('world-name').textContent = ONLINE ? SERVER.name : 'This phone';
+            if (ONLINE) {
+                document.getElementById('title-hint').textContent = 'Online: log in with a name and a password';
+            }
             document.getElementById('characters-close').addEventListener('click', () => this.closeList());
             onBackdropTap(document.getElementById('characters'), () => this.closeList());
         },
 
-        // the saved characters, from the save folder's index
+        // the saved characters, from the save folder's index (online: none here, the accounts are the server's)
         async refresh() {
-            this.saves = characterSaves(await saveIndex());
+            this.saves = ONLINE ? [] : characterSaves(await saveIndex());
             this.loaded = true;
             this.update();
         },
@@ -1781,7 +2113,7 @@
         // shown on the welcome box once the title is ready, under the titlebox (game y 371)
         update() {
             const c = client();
-            const show = !!this.frame && !this.frame.inGame && this.loaded && c?.loginscreen === 0 && !c.ingame && !c.reconnecting && engineState === 'ready' && !!loadingEl?.hidden && !clientFailed(c);
+            const show = !!this.frame && !this.frame.inGame && this.loaded && c?.loginscreen === 0 && !c.ingame && !c.reconnecting && worldReady() && !!loadingEl?.hidden && !clientFailed(c);
             if (this.el.hidden === !show && !show) {
                 return;
             }
@@ -1792,9 +2124,11 @@
             const { left, top, scale, vh } = this.frame;
             const y = top + 371 * scale + 2;
             Object.assign(this.el.style, { left: `${left + 382 * scale}px`, top: `${y}px`, maxHeight: `${Math.max(0, vh - y - 2)}px` });
-            const first = this.saves[0];
+            // (online: the names played on this server, Accounts for every one of them)
+            const first = ONLINE ? accounts.list()[0] : this.saves[0];
             document.getElementById('btn-continue').hidden = !first;
-            document.getElementById('btn-characters').hidden = this.saves.length < 2;
+            document.getElementById('btn-characters').hidden = ONLINE || this.saves.length < 2;
+            document.getElementById('btn-accounts').hidden = !ONLINE || !first;
             document.getElementById('title-hint').hidden = !!first;
             if (first) {
                 document.getElementById('continue-name').textContent = first.name;
@@ -1803,7 +2137,7 @@
 
         login(name) {
             const c = client();
-            if (!c || c.ingame || engineState !== 'ready') {
+            if (!c || c.ingame || !worldReady()) {
                 return;
             }
             this.closeList();
@@ -1837,6 +2171,648 @@
             document.getElementById('characters').hidden = true;
         }
     };
+
+    // ------------------------------------------------------------------------------------------------ online
+
+    // Online (docs/ONLINE.md) the names played on this server: "Continue as" the newest, Accounts the rest (settings
+    // accounts[<server id>], usernames only, newest first). A password is kept only when the player ticks Remember in the
+    // keyboard bar, and only by native (the Keychain, the Keystore: {type:'account', action:'save-password'} after the
+    // login succeeded); the page never stores one and asks native for it at "Continue as" ({type:'account',
+    // action:'login'}, answered by accounts.login).
+    const ACCOUNT_ANSWER_MS = 30000; // native's password for an account the page asked for, at most this late
+    const accounts = {
+        // which accounts have a password kept: { <server id>: [lower-case names] } (native's savedPasswords, then saved())
+        stored: savedPasswordsOf(window.LostCityNative?.savedPasswords),
+        choice: null, // { name, on }: the Remember box as the player set it for this name (lower-case)
+        asked: null, // { name, at }: the account login the page asked native for
+        fromStore: null, // the lower-case name whose password native just gave (no need to keep it again)
+
+        init() {
+            document.getElementById('accounts-close').addEventListener('click', () => this.close());
+            onBackdropTap(document.getElementById('accounts'), () => this.close());
+        },
+
+        list() {
+            return ONLINE ? (settings.accounts[SERVER.id] ?? []) : [];
+        },
+
+        hasPassword(name) {
+            return ONLINE && (this.stored[SERVER.id] ?? []).includes(String(name ?? '').trim().toLowerCase());
+        },
+
+        // The Remember box for this name: as the player set it, else on when its password is kept, else as last time on
+        // this server (off the first time).
+        rememberFor(name) {
+            const key = String(name ?? '').trim().toLowerCase();
+            if (this.choice?.name === key) {
+                return this.choice.on;
+            }
+            return this.hasPassword(key) || settings.rememberDefault[SERVER?.id] === true;
+        },
+
+        setRemember(on) {
+            if (!ONLINE) {
+                return;
+            }
+            this.choice = { name: String(client()?.loginUser ?? '').trim().toLowerCase(), on };
+            settings.rememberDefault = { ...settings.rememberDefault, [SERVER.id]: on };
+            persistSettings();
+            keyboard.sync();
+        },
+
+        // native -> page: the accounts with a password kept, after a change
+        setSaved(map) {
+            this.stored = savedPasswordsOf(map);
+            this.render();
+            titleScreen.update();
+        },
+
+        // After a new login on this server (not a reconnect): the name first in the list, and its password kept or
+        // forgotten as the Remember box says.
+        loggedIn() {
+            const c = client();
+            const name = String(c?.loginUser ?? '').trim();
+            if (!ONLINE || !name) {
+                return;
+            }
+            const key = name.toLowerCase();
+            const others = this.list().filter(account => account.name.toLowerCase() !== key);
+            settings.accounts = { ...settings.accounts, [SERVER.id]: [{ name, lastPlayed: Date.now() }, ...others].slice(0, MAX_ACCOUNTS) };
+            persistSettings();
+            const remember = this.rememberFor(name);
+            if (remember && c.loginPass && this.fromStore !== key) {
+                postNative({ type: 'account', action: 'save-password', server: SERVER.id, name, password: c.loginPass });
+            } else if (!remember && this.hasPassword(name)) {
+                postNative({ type: 'account', action: 'forget-password', server: SERVER.id, name });
+            }
+            this.choice = null;
+            this.fromStore = null;
+        },
+
+        // (watcher) A login with the kept password that ended on the title (refused: the password changed on the server,
+        // or anything else) leaves the form to the player: a password typed there is their own, kept or forgotten as
+        // Remember says. (A server's transfer countdown is still the same login.)
+        watch(c) {
+            if (this.fromStore && !isInGame(c) && c.loginMes2 !== 'Connecting to server...' && !String(c.loginMes2 ?? '').startsWith('Your profile will be transferred')) {
+                this.fromStore = null;
+            }
+        },
+
+        // "Continue as", an Accounts row: native gives the kept password, or null (then the password field opens)
+        loginWith(name) {
+            const c = client();
+            if (!c || isInGame(c) || !worldReady()) {
+                return;
+            }
+            this.close();
+            if (!isNative) {
+                this.login(name, null, true);
+                return;
+            }
+            this.asked = { name, at: performance.now() };
+            postNative({ type: 'account', action: 'login', server: SERVER.id, name });
+        },
+
+        // native -> page (LostCityHost.accounts.login): with a password the form is filled and Login pressed (the page
+        // keeps nothing); without one the name is filled in and the password field opens.
+        login(name, password, own = false) {
+            const c = client();
+            const asked = this.asked;
+            if (!own && (!asked || asked.name !== name || performance.now() - asked.at > ACCOUNT_ANSWER_MS)) {
+                return;
+            }
+            this.asked = null;
+            if (!c || isInGame(c)) {
+                return;
+            }
+            c.loginUser = String(name);
+            c.loginMes1 = '';
+            c.loginscreen = 2;
+            if (typeof password === 'string' && password) {
+                this.fromStore = String(name).trim().toLowerCase();
+                c.loginPass = password;
+                c.loginMes2 = 'Connecting to server...';
+                c.loginSelect = 0;
+                clickGame(LOGIN_BUTTON_X, LOGIN_BUTTON_Y);
+            } else {
+                c.loginPass = '';
+                c.loginMes2 = LOGIN_HINT;
+                c.loginSelect = 1;
+                keyboard.show();
+            }
+            titleScreen.update();
+        },
+
+        open() {
+            this.render();
+            document.getElementById('accounts-title').textContent = `Accounts on ${SERVER.name}`;
+            document.getElementById('accounts-where').textContent = T.passwordsWhere;
+            document.getElementById('accounts').hidden = false;
+        },
+
+        close() {
+            document.getElementById('accounts').hidden = true;
+        },
+
+        get isOpen() {
+            return !document.getElementById('accounts').hidden;
+        },
+
+        render() {
+            const list = document.getElementById('accounts-list');
+            if (!list || !ONLINE) {
+                return;
+            }
+            list.textContent = '';
+            for (const account of this.list()) {
+                const kept = this.hasPassword(account.name);
+                const row = dataRow(account.name, `${lastPlayed(account.lastPlayed)}${kept ? ' · password kept' : ''}`);
+                if (kept) {
+                    const mark = document.createElement('span');
+                    mark.className = 'key-mark';
+                    mark.setAttribute('aria-label', 'password kept');
+                    row.querySelector('.data-name').append(mark);
+                }
+                const buttons = document.createElement('span');
+                buttons.className = 'data-btns';
+                const button = (label, plain, onClick) => {
+                    const b = document.createElement('button');
+                    b.className = `data-btn${plain ? ' plain' : ''}`;
+                    b.textContent = label;
+                    b.addEventListener('click', onClick);
+                    buttons.append(b);
+                };
+                button('Log in', true, () => this.loginWith(account.name));
+                if (kept) {
+                    button('Forget password', false, () => postNative({ type: 'account', action: 'forget-password', server: SERVER.id, name: account.name }));
+                }
+                button('Remove', false, () => this.remove(account.name));
+                row.append(buttons);
+                list.append(row);
+            }
+            if (!this.list().length) {
+                list.append(dataRow('None yet', 'Log in to add one'));
+            }
+        },
+
+        // the name goes from this phone's list (and its kept password); the account on the server is not touched
+        remove(name) {
+            const key = name.toLowerCase();
+            if (this.hasPassword(name)) {
+                postNative({ type: 'account', action: 'forget-password', server: SERVER.id, name });
+            }
+            settings.accounts = { ...settings.accounts, [SERVER.id]: this.list().filter(account => account.name.toLowerCase() !== key) };
+            persistSettings();
+            this.render();
+            titleScreen.update();
+            if (!this.list().length) {
+                this.close();
+            }
+        }
+    };
+
+    // native's savedPasswords: { <server id>: [lower-case names] }, anything else dropped
+    function savedPasswordsOf(map) {
+        const stored = {};
+        for (const [id, names] of Object.entries(map && typeof map === 'object' ? map : {})) {
+            if (Array.isArray(names)) {
+                stored[id] = names.filter(name => typeof name === 'string').map(name => name.toLowerCase());
+            }
+        }
+        return stored;
+    }
+
+    // The worlds (the title's World button, Settings › World › Change): this phone's world and the game servers the
+    // player added. A tap on one plays on it: the page reloads there (switch). Add server and Edit ask native's box for an
+    // address and a name (servers.answer), then check the address (/server-probe, native's: /crc, rs2.cgi, the client's
+    // key) and show what it found in the list's place: Use, Save or Cancel. Delete asks first, and native removes the
+    // server's downloaded files and kept passwords.
+    const servers = {
+        asking: null, // the resolve of native's server box while it is open
+        probe: null, // { entry, url, name, result } being checked or shown
+        leaving: false,
+
+        init() {
+            document.getElementById('worlds-close').addEventListener('click', () => this.close());
+            onBackdropTap(document.getElementById('worlds'), () => this.close());
+            document.getElementById('probe-use').addEventListener('click', () => void this.keep(true));
+            document.getElementById('probe-save').addEventListener('click', () => void this.keep(false));
+            document.getElementById('probe-cancel').addEventListener('click', () => this.showList());
+            document.getElementById('world-change').addEventListener('click', () => {
+                closeSettings();
+                this.open();
+            });
+        },
+
+        get isOpen() {
+            return !document.getElementById('worlds').hidden;
+        },
+
+        open() {
+            keyboard.hide();
+            unreachable.hide();
+            this.showList();
+            document.getElementById('worlds').hidden = false;
+        },
+
+        close() {
+            document.getElementById('worlds').hidden = true;
+            this.probe = null;
+            unreachable.reshow();
+        },
+
+        showList() {
+            this.probe = null;
+            document.getElementById('worlds-title').textContent = 'Choose a world';
+            document.getElementById('worlds-probe').hidden = true;
+            const list = document.getElementById('worlds-list');
+            list.hidden = false;
+            list.textContent = '';
+            const here = ONLINE ? SERVER.id : 'offline';
+            list.append(this.row('offline', 'This phone (offline)', here === 'offline' ? 'Playing now' : settings.bots > 0 ? `With ${settings.bots} bots` : 'No bots'));
+            for (const server of settings.servers) {
+                list.append(this.row(server.id, server.name, server.id === here ? `Playing now · ${window.lcServerUrl.address(server.url)}` : window.lcServerUrl.address(server.url), server));
+            }
+            const add = document.createElement('button');
+            add.className = 'title-btn add-server';
+            add.textContent = 'Add server';
+            add.disabled = !isNative || settings.servers.length >= MAX_SERVERS;
+            add.addEventListener('click', () => void this.add());
+            list.append(add);
+            document.getElementById('worlds-where').textContent = isNative ? 'Online, the game runs on the server: it keeps your progress there, not on this phone.' : `Add server: ${T.onlyInApp}`;
+        },
+
+        row(id, name, detail, server = null) {
+            const row = document.createElement('div');
+            row.className = `world-row${id === (ONLINE ? SERVER.id : 'offline') ? ' current' : ''}`;
+            const main = document.createElement('button');
+            main.className = 'title-btn character';
+            main.innerHTML = '<span class="character-name"></span><span class="character-when"></span>';
+            main.querySelector('.character-name').textContent = name;
+            main.querySelector('.character-when').textContent = detail;
+            main.addEventListener('click', () => void this.use(id));
+            row.append(main);
+            if (server) {
+                const edit = document.createElement('button');
+                edit.className = 'data-btn plain';
+                edit.textContent = 'Edit';
+                edit.disabled = !isNative;
+                edit.addEventListener('click', () => void this.edit(server));
+                row.append(edit);
+                if (server.id !== (ONLINE ? SERVER.id : null)) {
+                    const remove = document.createElement('button');
+                    remove.className = 'data-btn';
+                    remove.textContent = 'Delete';
+                    remove.addEventListener('click', () => void this.remove(server));
+                    row.append(remove);
+                }
+            }
+            return row;
+        },
+
+        // native's Add / Edit server box: { address, name } as typed, or null (Cancel)
+        ask(title, address = '', name = '') {
+            this.asking?.(null);
+            return new Promise(resolve => {
+                this.asking = resolve;
+                postNative({ type: 'server', action: 'ask', title, address, name });
+            });
+        },
+
+        // native -> page (LostCityHost.servers.answer)
+        answered(answer) {
+            const resolve = this.asking;
+            this.asking = null;
+            resolve?.(answer && typeof answer === 'object' ? { address: String(answer.address ?? '').trim(), name: String(answer.name ?? '').trim() } : null);
+        },
+
+        async add() {
+            const answer = await this.ask('Add a server');
+            if (answer) {
+                await this.check(null, answer.address, answer.name);
+            }
+        },
+
+        async edit(server) {
+            const answer = await this.ask(`Edit ${server.name}`, window.lcServerUrl.address(server.url), server.name);
+            if (answer) {
+                await this.check(server, answer.address, answer.name);
+            }
+        },
+
+        // The address checked by native's probe; what it found in the list's place.
+        async check(entry, typed, name) {
+            const url = window.lcServerUrl.normalize(typed);
+            document.getElementById('worlds-list').hidden = true;
+            document.getElementById('worlds-probe').hidden = false;
+            document.getElementById('worlds-title').textContent = entry ? `Edit ${entry.name}` : 'Add a server';
+            const status = document.getElementById('probe-status');
+            const show = (text, kind, notes = '') => {
+                status.textContent = text;
+                status.className = `probe-status${kind ? ` ${kind}` : ''}`;
+                document.getElementById('probe-notes').textContent = notes;
+            };
+            document.getElementById('probe-address').textContent = url ? window.lcServerUrl.address(url) : typed || '(nothing typed)';
+            const use = document.getElementById('probe-use');
+            const save = document.getElementById('probe-save');
+            if (!url) {
+                this.probe = null;
+                show('That is not an address. Type it like 192.168.1.20 or my-mac.local:8888, with http:// or https:// in front if the server needs it.', 'failed');
+                use.disabled = save.disabled = true;
+                return;
+            }
+            this.probe = { entry, url, name: name || entry?.name || window.lcServerUrl.hostOf(url), result: null };
+            const probe = this.probe;
+            show('Checking…', null);
+            use.disabled = save.disabled = true;
+            const result = await fetch(`server-probe?url=${encodeURIComponent(url)}`)
+                .then(response => (response.ok ? response.json() : null))
+                .catch(() => null);
+            if (this.probe !== probe) {
+                return; // (cancelled meanwhile)
+            }
+            probe.result = result;
+            const notes = Array.isArray(result?.notes) ? result.notes.filter(note => typeof note === 'string').join('\n') : '';
+            if (result?.ok) {
+                const world = Number(result.nodeId) - 9;
+                show(`Ready: a ${result.members === false ? 'free' : 'members'} world${world > 0 ? `, world ${world}` : ''}.`, 'ready', notes);
+            } else {
+                show(`Not ready: ${reasonWords(result?.error ?? 'unreachable')}`, 'failed', 'Save keeps it for later; Use needs it ready.');
+            }
+            use.disabled = !result?.ok;
+            save.disabled = false;
+        },
+
+        // Save the checked server (Use: and play on it).
+        async keep(use) {
+            const probe = this.probe;
+            if (!probe) {
+                return;
+            }
+            const { entry, url, name, result } = probe;
+            const found = result?.ok ? result : null;
+            if (entry && url !== entry.url && !(await this.passwordsMoved(entry, url))) {
+                return;
+            }
+            const server = serverEntry({
+                id: entry?.id ?? window.lcServerUrl.newServerId(),
+                name,
+                url,
+                nodeId: found ? found.nodeId : entry?.nodeId,
+                members: found ? found.members : entry?.members,
+                rsa: found ? found.rsa : entry?.rsa,
+                added: entry?.added || Date.now()
+            });
+            settings.servers = entry ? settings.servers.map(s => (s.id === entry.id ? server : s)) : [...settings.servers, server];
+            persistSettings();
+            if (use) {
+                // (the server in use, changed: this page still has the old one, so it loads again)
+                const changed = entry?.id === SERVER?.id && sortedJson({ ...server, added: 0 }) !== sortedJson({ ...SERVER, added: 0 });
+                await this.use(server.id, changed);
+            } else {
+                this.showList();
+            }
+        },
+
+        // An entry given another address keeps its id, so the passwords kept for it would go to the new address at
+        // "Continue as": right when the server moved (a new address on the network), wrong when it is another server.
+        // With passwords kept the player says which (false: the probe stays as it is; the passwords are forgotten when
+        // the player says it is another server).
+        async passwordsMoved(entry, url) {
+            if (this.probe?.entry !== entry || this.probe.url !== url) {
+                return false;
+            }
+            const kept = (accounts.stored[entry.id] ?? []).length;
+            if (!kept || !isNative) {
+                return true;
+            }
+            const probe = this.probe;
+            const moved = await confirmBox({
+                title: 'The same server?',
+                text: `${kept === 1 ? 'A password is' : `${kept} passwords are`} kept on this phone for ${entry.name} at ${window.lcServerUrl.address(entry.url)}. Keep ${kept === 1 ? 'it' : 'them'} only if ${window.lcServerUrl.address(url)} is the same server: "Continue as" would send ${kept === 1 ? 'it' : 'them'} there.`,
+                action: 'Forget',
+                cancel: 'Same server'
+            }).then(forget => !forget);
+            if (this.probe !== probe) {
+                return false; // (the sheet moved on meanwhile)
+            }
+            if (!moved) {
+                for (const name of accounts.stored[entry.id] ?? []) {
+                    postNative({ type: 'account', action: 'forget-password', server: entry.id, name });
+                }
+            }
+            return true;
+        },
+
+        async remove(server) {
+            const ok = await confirmBox({
+                title: `Delete ${server.name}?`,
+                text: `It goes from this phone's list, with its accounts, any password kept for them and its downloaded game files. The server itself is not changed.`,
+                action: 'Delete'
+            });
+            if (!ok) {
+                return;
+            }
+            const { [server.id]: accountsGone, ...accountsLeft } = settings.accounts;
+            const { [server.id]: rememberGone, ...rememberLeft } = settings.rememberDefault;
+            void accountsGone;
+            void rememberGone;
+            settings.servers = settings.servers.filter(s => s.id !== server.id);
+            settings.accounts = accountsLeft;
+            settings.rememberDefault = rememberLeft;
+            persistSettings();
+            postNative({ type: 'server', action: 'delete', id: server.id });
+            this.showList();
+        },
+
+        // Play on another world: the page reloads there. Leaving this phone's world saves it first, as Restart does; leaving
+        // a server in game logs out through the game first (a bare reload would leave the character in that world for
+        // 30-60 s, and the next login would be refused as "already logged in").
+        // (again: the server in use once more, its entry changed: native reloads for it as for any other)
+        async use(id, again = false) {
+            if (id === (ONLINE ? SERVER.id : 'offline') && !again) {
+                this.close();
+                return;
+            }
+            if (this.leaving || (id !== 'offline' && !settings.servers.some(s => s.id === id))) {
+                return;
+            }
+            this.leaving = true;
+            try {
+                if (ONLINE && client()?.reconnecting) {
+                    // (the connection is lost and the game is trying again: there is no logging out, and nothing to wait for)
+                    console.log('[host] leaving the server while its connection is lost');
+                } else if (ONLINE && isInGame(client())) {
+                    if (!(await logOutCleanly())) {
+                        haptic('error');
+                        showNotice('You could not be logged out (in combat?): try again in a moment.', 6000);
+                        return;
+                    }
+                } else if (!ONLINE && !(await savedBeforeLeaving())) {
+                    return;
+                }
+                settings.server = id;
+                persistSettings();
+                console.log(`[host] playing on ${id === 'offline' ? 'this phone' : id} next: reload`);
+                if (isNative) {
+                    postNative({ type: 'server', action: 'use', id });
+                } else {
+                    location.reload();
+                }
+            } finally {
+                this.leaving = false;
+            }
+        }
+    };
+
+    // Online, in game: the Logout tab's "Click here to logout" pressed through the client, as the player would (classic
+    // coordinates: the tab's centre until it is the open tab, as a first tap may only close a window; then the button in
+    // its side panel, once a second); true once the client is back on the title, within 5 s (the server keeps a character
+    // in combat a few seconds more: false then).
+    const LOGOUT_TAB_INDEX = 10;
+    const LOGOUT_TAB = [649, 484];
+    const LOGOUT_BUTTON = [553 + 94, 205 + 170];
+
+    async function logOutCleanly() {
+        const c = client();
+        const out = () => !c.ingame && !c.reconnecting;
+        if (!c || out()) {
+            return true;
+        }
+        if (typeof c.tapAt !== 'function' || typeof c.hudState !== 'function' || c.reconnecting) {
+            return false;
+        }
+        const started = performance.now();
+        let pressed = -Infinity;
+        while (performance.now() - started < 5000 && !out()) {
+            if (c.hudState().activeTab !== LOGOUT_TAB_INDEX) {
+                c.tapAt(...LOGOUT_TAB, 1);
+            } else if (performance.now() - pressed >= 1000) {
+                pressed = performance.now();
+                c.tapAt(...LOGOUT_BUTTON, 1);
+            }
+            await new Promise(resolve => setTimeout(resolve, 150));
+        }
+        return out();
+    }
+
+    // What native's words for a failed connection or file mean, in plain words (`local network`: the
+    // phone's local network privacy refused it).
+    function reasonWords(words) {
+        const text = String(words ?? '');
+        const known = {
+            unreachable: 'it cannot be reached. Is it running, and is this phone on its network?',
+            refused: 'nothing answered at that address (connection refused). Is the server running?',
+            'timed out': 'it did not answer in time.',
+            'not found': 'there is no server by that name.',
+            dns: 'its name could not be looked up. Is this phone online?',
+            tls: 'the secure connection failed (its certificate?).',
+            network: 'the connection failed.',
+            'not a 2004scape server': 'it does not answer as a 2004Scape server.',
+            'checksum mismatch': 'its game files did not arrive whole.',
+            'invalid address': 'that is not an address.',
+            'no server': 'no server is chosen.',
+            'local network': T.localNetwork
+        };
+        const http = /^http (\d{3})$/.exec(text);
+        return known[text] ?? (http ? `it refused the game's connection (HTTP ${http[1]}).` : `${text || 'unknown'}.`);
+    }
+
+    // Online: the server cannot be reached, or refuses the game: a box over the title within seconds, the reason in plain
+    // words, Try again (reload), Play offline, Choose world. From native's /crc words at boot (checkServer), the client's
+    // own retry screen while it loads, and a login whose socket failed (NativeSocket: native's error words).
+    const unreachable = {
+        crcWords: null, // the boot's /crc answer when it was not the table (native's 502 words)
+        shownFor: null, // what the box shows (closed by Choose world: shown again when the worlds close)
+        seenError: null, // the socket error the box was shown for (a new failed login shows it again)
+
+        init() {
+            document.getElementById('unreachable-retry').addEventListener('click', () => location.reload());
+            document.getElementById('unreachable-offline').addEventListener('click', () => void servers.use('offline'));
+            document.getElementById('unreachable-choose').addEventListener('click', () => servers.open());
+        },
+
+        get isOpen() {
+            return !document.getElementById('unreachable').hidden;
+        },
+
+        // watcher: the box, once something says so
+        check(c) {
+            if (!ONLINE || !c || this.isOpen || servers.isOpen || isInGame(c)) {
+                return;
+            }
+            const loading = !(c.lastProgressPercent >= 100);
+            if (this.crcWords && loading) {
+                this.show(this.crcWords);
+            } else if (loading && /Will retry in|please reload page/i.test(String(c.lastProgressMessage ?? ''))) {
+                this.show(this.crcWords ?? 'files');
+            } else if (!loading && c.loginMes2 === 'Error connecting to server.' && lastSocketError && lastSocketError !== this.seenError && performance.now() - lastSocketError.at < 15000) {
+                this.seenError = lastSocketError;
+                this.show(lastSocketError.reason);
+            }
+        },
+
+        show(words) {
+            this.shownFor = words;
+            const title = document.getElementById('unreachable-title');
+            title.textContent = `Could not connect to ${SERVER.name}`;
+            document.getElementById('unreachable-text').textContent = `${window.lcServerUrl.address(SERVER.url)}: ${words === 'files' ? 'its game files could not be loaded.' : reasonWords(words)}`;
+            keyboard.hide();
+            hideLoading();
+            document.getElementById('unreachable').hidden = false;
+            haptic('error');
+            console.warn(`[host] ${SERVER.url} could not be reached: ${words}`);
+        },
+
+        hide() {
+            document.getElementById('unreachable').hidden = true;
+        },
+
+        // (the worlds closed without a choice: the server is still unreachable)
+        reshow() {
+            if (this.shownFor && !this.isOpen) {
+                document.getElementById('unreachable').hidden = false;
+            }
+        }
+    };
+
+    // (online, boot) the server's /crc once, beside the client's own: a 502's words name what is wrong (native keeps the
+    // table for the page load, so the client's request costs nothing more)
+    function checkServer() {
+        fetch('crc', { cache: 'no-store' })
+            .then(async response => {
+                if (!response.ok) {
+                    unreachable.crcWords = (await response.text()).trim().slice(0, 60) || `http ${response.status}`;
+                }
+            })
+            .catch(() => {
+                unreachable.crcWords = 'unreachable';
+            });
+    }
+
+    // Online, the client's words that are wrong for a game server, replaced as the client sets them (so no frame shows
+    // them): New User's hint (patch 9's, for the world on this phone) and response 6's "RuneScape has been updated! /
+    // Please reload this page." (a server with another game version or login key: patch 30).
+    const ONLINE_WORDS = new Map([
+        ['New character: type any name.', 'Type a name and a password.'],
+        ['No password needed.', 'Your server may ask you to register first.'],
+        ['RuneScape has been updated!', 'This server runs a different'],
+        ['Please reload this page.', 'game version or key.']
+    ]);
+
+    function useOnlineWords(c) {
+        for (const field of ['loginMes1', 'loginMes2']) {
+            let value = c[field];
+            Object.defineProperty(c, field, {
+                configurable: true,
+                enumerable: true,
+                get: () => value,
+                set: text => {
+                    value = ONLINE_WORDS.get(text) ?? text;
+                }
+            });
+        }
+    }
 
     // Everything in the save folder ([{ path, size, modified }], ARCHITECTURE.md §3); [] if it cannot be read.
     async function saveIndex() {
@@ -2281,9 +3257,19 @@
         for (const row of document.querySelectorAll('.row[data-layout]')) {
             row.hidden = row.dataset.layout !== settings.layout;
         }
-        // saving needs a character in the world; a changed world setting asks for the restart that applies it
-        document.getElementById('settings-save').hidden = !isInGame(client());
-        const restartNeeded = Object.keys(bootSettings).some(key => settings[key] !== bootSettings[key]);
+        // where the world is (Change: the worlds); online the settings of the world on this phone, the bots' chat and its
+        // saved data are not this page's
+        document.getElementById('world-playon-name').textContent = ONLINE ? `${SERVER.name} (${window.lcServerUrl.address(SERVER.url)})` : 'This phone';
+        for (const row of document.querySelectorAll('#section-world .offline-only')) {
+            row.hidden = ONLINE;
+        }
+        document.getElementById('world-online-note').hidden = !ONLINE;
+        document.getElementById('nav-botchat').hidden = ONLINE;
+        document.getElementById('nav-savedata').hidden = ONLINE;
+        // saving needs a character in the world (on this phone: online the server saves); a changed world setting asks
+        // for the restart that applies it
+        document.getElementById('settings-save').hidden = !isInGame(client()) || ONLINE;
+        const restartNeeded = !ONLINE && Object.keys(bootSettings).some(key => settings[key] !== bootSettings[key]);
         const restart = document.getElementById('settings-restart');
         restart.classList.toggle('needed', restartNeeded);
         document.getElementById('nav-world').classList.toggle('needed', restartNeeded);
@@ -2409,14 +3395,24 @@
     let restartAnywayUntil = 0;
 
     async function restartGame(button = null) {
+        if (await savedBeforeLeaving(button)) {
+            location.reload();
+        }
+    }
+
+    // The world on this phone is left (Restart, a switch to a game server): true once it is saved, or when a save that
+    // failed is to be left anyway (the same request again within 10 s); false: stop, the status line says why.
+    async function savedBeforeLeaving(button = null) {
         const reply = await lifecycle('save').catch(() => null);
         const botsFailed = !!reply?.ok && reply.bots?.ok === false;
         if (engineState === 'ready' && (!reply?.ok || botsFailed) && performance.now() > restartAnywayUntil) {
             restartAnywayUntil = performance.now() + 10000;
+            // (with no button to say it, the notice says a second tap goes ahead)
+            const again = button ? '' : ' Tap again to go on anyway.';
             if (botsFailed) {
-                warnBotsNotSaved(reply.bots.error);
+                warnBotsNotSaved(reply.bots.error, again);
             } else {
-                warnSaveFailed(reply?.error);
+                warnSaveFailed(reply?.error, again);
             }
             if (button) {
                 button.dataset.busy = '1';
@@ -2426,22 +3422,22 @@
                     refreshSettingsPanel();
                 }, 10000);
             }
-            return;
+            return false;
         }
-        location.reload();
+        return true;
     }
 
-    function warnSaveFailed(error) {
+    function warnSaveFailed(error, more = '') {
         console.warn('[host] save failed:', error);
         haptic('error');
-        showNotice(`Your progress could not be saved. ${T.storageFull}`, 8000);
+        showNotice(`Your progress could not be saved. ${T.storageFull}${more}`, 8000);
     }
 
     // The character was saved, the bots were not (the engine keeps their saves and tries again).
-    function warnBotsNotSaved(error) {
+    function warnBotsNotSaved(error, more = '') {
         console.warn('[host] the bots could not be saved:', error);
         haptic('error');
-        showNotice(`The bots could not be saved. ${T.storageFull}`, 8000);
+        showNotice(`The bots could not be saved. ${T.storageFull}${more}`, 8000);
     }
 
     // After a save: the character's failing first, else the bots'.
@@ -2980,7 +3976,8 @@
                         document.getElementById('about-version').textContent = `2004Scape ${info.version} · Lost City 274`;
                     }
                     const commits = info ? `Engine-TS ${info.engine ?? '?'}, Content ${info.content ?? '?'}, Client-TS ${info.webclient ?? '?'}` : '?';
-                    document.getElementById('about').textContent = `Offline. Built from ${commits}${info?.debug ? ' (debug)' : ''}.`;
+                    const where = ONLINE ? `Online: ${SERVER.name} (${window.lcServerUrl.hostOf(SERVER.url)})` : 'Offline';
+                    document.getElementById('about').textContent = `${where}. Built from ${commits}${info?.debug ? ' (debug)' : ''}.`;
                 })
                 .catch(() => {});
         },
@@ -3015,14 +4012,15 @@
         }
     };
 
-    // "Are you sure?": resolves true for the action, false for Cancel, the backdrop or Escape.
+    // "Are you sure?": resolves true for the action, false for Cancel (or the cancel label given), the backdrop or Escape.
     let confirmResolve = null;
 
-    function confirmBox({ title, text, action }) {
+    function confirmBox({ title, text, action, cancel = 'Cancel' }) {
         closeConfirm(false);
         document.getElementById('confirm-title').textContent = title;
         document.getElementById('confirm-text').textContent = text;
         document.getElementById('confirm-ok').textContent = action;
+        document.getElementById('confirm-cancel').textContent = cancel;
         document.getElementById('confirm').hidden = false;
         return new Promise(resolve => {
             confirmResolve = resolve;
@@ -3155,7 +4153,7 @@
             delete globalThis.__LC_BZIP2__; // (the client has loaded its archives: libbzip2's instance and memory can go)
         }
         watchLoader();
-        if (bootNotice && engineState === 'ready' && loadingEl.hidden) {
+        if (bootNotice && worldReady() && loadingEl.hidden) {
             showNotice(bootNotice, 6000);
             bootNotice = null;
         } else if (botsNotice && engineState === 'ready' && loadingEl.hidden && statusPillEl.hidden) {
@@ -3175,6 +4173,7 @@
         if (phase !== lastPhase) {
             if (phase === 'ingame' && lastPhase === 'title' && !c.reconnecting) {
                 haptic('success'); // logged in
+                accounts.loggedIn(); // (online: the name, and its password kept or forgotten as Remember says)
             }
             lastPhase = phase;
             postNative({ type: 'status', phase });
@@ -3190,14 +4189,16 @@
         // the keyboard button is dimmed while nothing would take what is typed (e.g. during an NPC dialogue)
         document.getElementById('btn-keyboard').classList.toggle('disabled', phase === 'ingame' && !keyboard.shown && inputContext().kind === null);
         titleScreen.update();
+        accounts.watch(c);
+        unreachable.check(c);
         // the first visit to the world: how to play with fingers, once the world has settled with no window open (the
         // character designer opens only a moment after logging in)
         const settled = phase === 'ingame' && c.ingame && c.mainModalId === -1 && c.sideModalId === -1 && c.chatModalId === -1;
         windowFreeSince = settled ? windowFreeSince || performance.now() : 0;
-        if (!settings.seenHowToPlay && settled && performance.now() - windowFreeSince >= 1500 && engineState === 'ready' && document.getElementById('settings').hidden) {
+        if (!settings.seenHowToPlay && settled && performance.now() - windowFreeSince >= 1500 && worldReady() && document.getElementById('settings').hidden) {
             showHowToPlay();
         }
-        if (lifecycleState === 'paused') {
+        if (lifecycleState === 'paused' && !ONLINE) {
             freezeClientTimers(); // a late packet may have rebased them
         }
         if (audioMuted) {
@@ -3279,6 +4280,15 @@
     // the iterator helpers the engine needs (boot says so, with nothing started); else { engineError } when the worker
     // could not be made, or { cache, client } to await (their failures are reported there).
     function startLoading() {
+        if (ONLINE) {
+            // the client alone (its cache is LocalOnDemand's checked copy of the server's files, docs/ONLINE.md), and
+            // the server's /crc once, for the words of a 502 (unreachable.check); no engine, so no iterator helpers needed
+            const cache = loadClientCache();
+            const clientModule = import('./client/client.js');
+            cache.catch(() => {});
+            clientModule.catch(() => {});
+            return { cache, client: clientModule };
+        }
         if (typeof Iterator !== 'function' || typeof Iterator.prototype?.map !== 'function') {
             return null;
         }
@@ -3320,6 +4330,7 @@
             hud = window.__lcHud?.init({
                 client,
                 settings,
+                online: ONLINE, // (Report abuse in the chat bar)
                 haptic,
                 bindTapButton,
                 setMinimapZoom,
@@ -3354,6 +4365,12 @@
         about.init();
         margins.init();
         titleScreen.init();
+        accounts.init();
+        servers.init();
+        unreachable.init();
+        if (ONLINE) {
+            checkServer();
+        }
         layout();
         window.addEventListener('resize', layout);
         window.addEventListener('orientationchange', () => setTimeout(layout, 50));
@@ -3388,7 +4405,11 @@
             audioIdle.install(); // (client.js has made its AudioContext: nothing has played on it yet)
             loaderProgress.client = 0.4;
             showLoaderProgress();
-            window.__client = new Client(NODE_ID, bootSettings.lowMemory, bootSettings.members);
+            // (online the server's world: its node id names it in the friends list, its members flag the items' names)
+            window.__client = ONLINE ? new Client(SERVER.nodeId, bootSettings.lowMemory, SERVER.members) : new Client(NODE_ID, bootSettings.lowMemory, bootSettings.members);
+            if (ONLINE) {
+                useOnlineWords(window.__client);
+            }
         } catch (err) {
             console.error('[host] client failed to load', err);
             showError(`The game client failed to load.\n${err?.message ?? err}`);
