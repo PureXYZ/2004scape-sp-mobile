@@ -5,6 +5,10 @@ with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
 ## [Unreleased]
 
+- **Music keeps playing.** A song now starts again when it ends, with no gap, for as long as you stay where it plays
+  (or keep it picked in the music tab). Before, each song played once and then the music stopped until you walked
+  into an area with another song. Level-up and other jingles still play once, then the area's song comes back. The
+  music tab's Loop button is no longer needed.
 - **Delete everything deletes more, and the log keeps no chat.** Settings › Saved data › Delete everything now also
   empties the app's log and forgets the recent `::` commands and typed amounts (the box says so). Your settings, the
   Claude key and remembered server passwords are kept, and the deleted saves still stay as `.bak` files until saved

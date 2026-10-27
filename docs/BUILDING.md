@@ -376,7 +376,7 @@ beside the emulator.
 This project is not a fork: it builds unmodified Lost City sources at the commits [upstream.json](../upstream.json)
 pins (Engine-TS, Content and Client-TS, all on their `274` branches). Its own changes to them are:
 
-- `web/client/patches/*.patch`: 29 patches to Client-TS, made against the commit in `web/client/patches/BASE`, plus
+- `web/client/patches/*.patch`: 33 patches to Client-TS, made against the commit in `web/client/patches/BASE`, plus
   whole-module overrides in `web/client/overrides/` ([web/client/README.md](../web/client/README.md)).
 - `web/engine/`: shims that let Engine-TS run in a browser worker; no engine source is patched
   ([web/engine/README.md](../web/engine/README.md)).

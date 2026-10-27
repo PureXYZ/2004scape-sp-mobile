@@ -1,0 +1,164 @@
+ios: music loops
+
+A song played once and then the music stopped until the server sent a different one: the server sends a song only on
+entering a map square whose song is another (music_playbyregion), the client drops a MIDI_SONG of the song it has, and
+upstream's tinymidipcm left looping out (commented out in flush: "buggy with some midi files"). Only the music tab's
+Loop, off again at every login (musicloop is a temp varp), sent the song again: silence and the song, a 7 s fade over
+nothing, then the song from its start.
+
+A song now loops in the player: once it has all been rendered and flushed and less than 2 s of it are left to play,
+flush() has it rendered again from its first message (TinyMidiPCM.replay(): no second parse, whose messages the wasm
+could not free), its buffers queued right after the last one. A jingle still plays once: the client plays every song
+with a fade and only a jingle without, and its nextMusicDelay brings the song back after it. The song that is playing
+and looping, sent again (only Loop does that), keeps playing instead of fading out and restarting.
+
+Music off, logout and a new song stop the loop as they stopped a song (stop(): flush no longer runs; start() clears
+it). The render, the buffers and their timing are as before.
+
+diff --git a/src/3rdparty/tinymidipcm.js b/src/3rdparty/tinymidipcm.js
+index 718fdcb..5f61ebf 100644
+--- a/src/3rdparty/tinymidipcm.js
++++ b/src/3rdparty/tinymidipcm.js
+@@ -102,6 +102,14 @@ class TinyMidiPCM {
+             throw new Error('no soundfont buffer set. call .setSoundfont');
+         }
+ 
++        // custom (ios): parsed once here, and rendered from its first message by replay() as often as it loops
++        this.firstMidiMessagePtr = this.getMIDIMessagePtr(midiBuffer);
++        this.replay();
++    }
++
++    // custom (ios): the song render() was last given, again from its start (a loop), without parsing it again: the wasm
++    // has no tml_free, so the messages of every parse stay allocated (as each new song's do)
++    replay() {
+         window.clearTimeout(this.renderTimer);
+ 
+         const { setValue, getValue, _tsf_reset, _tsf_channel_set_bank_preset } = this.wasmModule;
+@@ -111,7 +119,7 @@ class TinyMidiPCM {
+         _tsf_reset(this.soundfontPtr);
+         _tsf_channel_set_bank_preset(this.soundfontPtr, 9, 128, 0);
+ 
+-        let midiMessagePtr = this.getMIDIMessagePtr(midiBuffer);
++        let midiMessagePtr = this.firstMidiMessagePtr; // custom (ios)
+ 
+         const boundRender = function () {
+             midiMessagePtr = this.renderMIDIMessage(midiMessagePtr);
+@@ -150,7 +158,17 @@ class TinyMidiPCM {
+     let fadeVolume = 0;
+     let midiFade = false;
+     // let renderEndSeconds = 0;
+-    // let currentMidiBuffer = null;
++    let currentMidiBuffer = null; // custom (ios): see sameMidi
++    // custom (ios): a song loops. Once it has all been rendered (ahead of time, about 19 times real time) and flushed,
++    // and less than loopLeadTime seconds of it are left to play, flush() has it rendered again from its start, so its
++    // next buffers are queued right after its last. A jingle plays once: the client plays every song with a fade and
++    // only a jingle (MIDI_JINGLE) without, and its nextMusicDelay brings the song back after the jingle. Upstream had no
++    // loop (commented out in flush: "buggy with some midi files"): the music stopped at a song's end, as the server
++    // sends a song only when it changes (on entering a map square with another song; the client also drops a
++    // MIDI_SONG of the song it has), unless the music tab's Loop (off at every login) sent it again.
++    const loopLeadTime = 2;
++    let loop = false;
++    let rendered = false; // since the last start(): the render has reached the song's end
+     // custom (ios): the samples rendered since the last flush are the first samplesLength of samples, a buffer kept
+     // from chunk to chunk and grown only when a chunk does not fit. Every chunk was concatenated into a new, longer
+     // Float32Array, about 190 MB of garbage per song (it is rendered ahead, about 19 times real time).
+@@ -189,6 +207,7 @@ class TinyMidiPCM {
+         },
+         onRenderEnd: ms => {
+             // renderEndSeconds = Math.floor(startTime + Math.floor(ms / 1000));
++            rendered = true; // custom (ios): see loop
+         },
+         bufferSize: 1024 * 100,
+         sampleRate
+@@ -201,6 +220,12 @@ class TinyMidiPCM {
+     tinyMidiPCM.setSoundfont(soundfontBuffer);
+ 
+     function flush() {
++        // custom (ios): see loop. (After a stop() flush no longer runs, and a start() clears rendered.)
++        if (loop && rendered && !samplesLength && lastTime - window.audioContext.currentTime < loopLeadTime) {
++            rendered = false;
++            tinyMidiPCM.replay();
++        }
++
+         if (!window.audioContext || !samplesLength) {
+             return;
+         }
+@@ -273,7 +298,7 @@ class TinyMidiPCM {
+             clearInterval(flushInterval);
+         }
+ 
+-        // currentMidiBuffer = null;
++        currentMidiBuffer = null; // custom (ios)
+         samples = new Float32Array();
+         samplesLength = 0;
+         playing = false;
+@@ -291,16 +316,34 @@ class TinyMidiPCM {
+         }
+     }
+ 
+-    function start(volume, midiBuffer) {
++    // custom (ios): loopSong, see loop
++    function start(volume, midiBuffer, loopSong) {
+         applyOutputVolumeDb(volume);
+-        // currentMidiBuffer = midiBuffer;
++        currentMidiBuffer = midiBuffer; // custom (ios)
+         // startTime = window.audioContext.currentTime;
+         lastTime = window.audioContext.currentTime;
+         flushInterval = setInterval(flush, flushTime);
+         playing = true; // custom (ios)
++        loop = loopSong; // custom (ios)
++        rendered = false; // custom (ios)
+         tinyMidiPCM.render(midiBuffer);
+     }
+ 
++    // custom (ios): the same song (every request of it delivers a new copy of its data)
++    function sameMidi(a, b) {
++        if (!a || !b || a.length !== b.length) {
++            return false;
++        }
++
++        for (let i = 0; i < a.length; i++) {
++            if (a[i] !== b[i]) {
++                return false;
++            }
++        }
++
++        return true;
++    }
++
+     function clearFadeTimer() {
+         if (fadeTimer) {
+             clearInterval(fadeTimer);
+@@ -324,7 +367,7 @@ class TinyMidiPCM {
+             fadeMidiBuffer = null;
+             clearFadeTimer();
+             stop();
+-            start(nextVolume, nextMidiBuffer);
++            start(nextVolume, nextMidiBuffer, true); // custom (ios): a song (see loop)
+             fade = -(nextVolume / fadeStepDb);
+         }
+     }
+@@ -361,6 +404,14 @@ class TinyMidiPCM {
+             return;
+         }
+ 
++        // custom (ios): the song that is playing (and looping) keeps playing when it is sent again. Only the music tab's
++        // Loop sends it again: once the server reckons the song has ended, its softtimer sends silence and the song in
++        // one tick (the client drops the silence when both arrive together, as it has asked for the song since), which
++        // faded out and restarted a song that has looped here already.
++        if (useFade && !fadeMidiBuffer && playing && loop && sameMidi(midiBuffer, currentMidiBuffer)) {
++            return;
++        }
++
+         midiFade = useFade;
+ 
+         if (useFade) {
+@@ -371,7 +422,7 @@ class TinyMidiPCM {
+             fadeMidiBuffer = null;
+             clearFadeTimer();
+             stop();
+-            start(volume, midiBuffer);
++            start(volume, midiBuffer, false); // custom (ios): a jingle (see loop)
+             fade = fadeResetStep;
+         }
+     };
