@@ -5,6 +5,11 @@ with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
 ## [Unreleased]
 
+- **Minimap zooms out further.** The minimap's zoom slider now goes out to half the 2004 zoom (it stopped at three
+  quarters), showing about 32 tiles around you; the 2004 zoom is now the middle of the groove. Past the edge of the area
+  the game has loaded, the map is black.
+- **Camera drag is slower.** Each Camera drag choice turns the camera more slowly: the new Normal is the old Slow, Slow
+  is slower still, and Fast is the old Normal. A phone that was on Slow is on Normal now, at the same speed.
 - **Battery.** The phone's battery level shows small and faint in the top left corner while you play (the status bar
   is hidden): red when low, green on the charger. It steps aside for windows and the keyboard, and the game's hover
   text moves just under it.

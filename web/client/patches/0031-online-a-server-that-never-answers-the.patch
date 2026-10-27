@@ -10,10 +10,10 @@ an IO error: the socket is closed and the form says "Error connecting to server.
 is already closed (the upstream case, and every offline one) goes the way it always did.
 
 diff --git a/src/client/Client.ts b/src/client/Client.ts
-index 92a0e8f..83ae163 100644
+index 0d90d36..5a79bcf 100644
 --- a/src/client/Client.ts
 +++ b/src/client/Client.ts
-@@ -2220,6 +2220,12 @@ export class Client extends GameShell {
+@@ -2221,6 +2221,12 @@ export class Client extends GameShell {
                  // IO error
                  this.loginMes1 = '';
                  this.loginMes2 = 'Error connecting to server.';

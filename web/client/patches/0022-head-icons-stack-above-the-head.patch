@@ -5,10 +5,10 @@ over that, a player's hint arrow over them all. Upstream (as 274 did) drew each 
 before, so a skulled player with a protection prayer had the prayer's icon on the face.
 
 diff --git a/src/client/Client.ts b/src/client/Client.ts
-index aa929a1..521d6ee 100644
+index 8d45228..a998c34 100644
 --- a/src/client/Client.ts
 +++ b/src/client/Client.ts
-@@ -4866,10 +4866,13 @@ export class Client extends GameShell {
+@@ -4867,10 +4867,13 @@ export class Client extends GameShell {
                      this.getOverlayPosEntity(entity, entity.height + 15);
  
                      if (this.projectX > -1) {

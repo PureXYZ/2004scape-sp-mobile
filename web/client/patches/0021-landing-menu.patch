@@ -12,10 +12,10 @@ from the long-press menu however long it stays open. The tooltip shows the kept 
 windows, tab, use or target mode or map drops it, and the tap acts on what is there then. Touch screens only.
 
 diff --git a/src/client/Client.ts b/src/client/Client.ts
-index 7716cfb..aa929a1 100644
+index a87dd04..8d45228 100644
 --- a/src/client/Client.ts
 +++ b/src/client/Client.ts
-@@ -566,6 +566,10 @@ export class Client extends GameShell {
+@@ -567,6 +567,10 @@ export class Client extends GameShell {
      private pendingContinue: number = -1; // custom (ios): a "Click here to continue" to press (see hudContinue)
      private hostMenus: boolean = false; // custom (ios): the host shows the open menu itself (see setHostMenus)
      private pendingMenuChoice: { serial: number; option: number } | null = null; // custom (ios): see hudMenuSelect
@@ -26,7 +26,7 @@ index 7716cfb..aa929a1 100644
      private menuParamB: Int32Array = new Int32Array(500);
      private menuParamC: Int32Array = new Int32Array(500);
      private menuAction: Int32Array = new Int32Array(500);
-@@ -2732,6 +2736,8 @@ export class Client extends GameShell {
+@@ -2733,6 +2737,8 @@ export class Client extends GameShell {
          this.menuOption[0] = 'Cancel';
          this.menuAction[0] = MiniMenuAction.CANCEL;
          this.menuNumEntries = 1;
@@ -35,7 +35,7 @@ index 7716cfb..aa929a1 100644
  
          if (this.pointerOutsideSurface) {
              // custom (ios): a drag that left its surface points into another area's virtual coordinates: no options there
-@@ -4472,8 +4478,24 @@ export class Client extends GameShell {
+@@ -4473,8 +4479,24 @@ export class Client extends GameShell {
          Model.mouseX = this.mouseX - this.viewportX; // custom (ios): viewport-local
          Model.mouseY = this.mouseY - this.viewportY;
  
@@ -60,7 +60,7 @@ index 7716cfb..aa929a1 100644
          this.world?.removeSprites();
          this.entityOverlays();
          this.coordArrow();
-@@ -5096,7 +5118,17 @@ export class Client extends GameShell {
+@@ -5097,7 +5119,17 @@ export class Client extends GameShell {
          this.getSpecialArea();
  
          if (!this.isMenuOpen) {
@@ -79,7 +79,7 @@ index 7716cfb..aa929a1 100644
              // custom (ios): on a touch screen the pointer only "hovers" while a finger is down, so the tooltip shows
              // what is under it then and is not left behind after the finger lifts. A use or target mode that a tap
              // selected keeps its prompt there ("Use Tinderbox with...", "Cast Wind Strike on...", never the option last
-@@ -9588,7 +9620,8 @@ export class Client extends GameShell {
+@@ -9590,7 +9622,8 @@ export class Client extends GameShell {
              }
          }
  
@@ -89,7 +89,7 @@ index 7716cfb..aa929a1 100644
              if (this.isMenuOpen) {
                  this.world?.updateMousePicking(b - this.viewportX, c - this.viewportY);
              } else {
-@@ -12056,6 +12089,15 @@ export class Client extends GameShell {
+@@ -12058,6 +12091,15 @@ export class Client extends GameShell {
      // custom (ios): taps wait for a frame drawn at the finger's position (see tapClick)
      private touchDownDrawCycle: number = 0;
      private pendingTap: { x: number; y: number; button: number } | null = null;
@@ -105,7 +105,7 @@ index 7716cfb..aa929a1 100644
      // custom (ios): drag-to-scroll (see beginTouchScroll): the scrolled layer or the chat history
      private touchScroll: IfType | 'chat' | null = null;
      private touchScrollY: number = 0;
-@@ -12690,6 +12732,12 @@ export class Client extends GameShell {
+@@ -12709,6 +12751,12 @@ export class Client extends GameShell {
              this.touchDownDrawCycle = Client.drawCycle;
              this.pendingTap = null;
  
@@ -118,7 +118,7 @@ index 7716cfb..aa929a1 100644
              this.touchScroll = null;
              // custom (ios): a touch stops a list that is still gliding. A tap on that list does nothing else, as on a
              // native list (it was meant to stop the list, and the row under the finger was still moving); a tap
-@@ -12838,6 +12886,50 @@ export class Client extends GameShell {
+@@ -12857,6 +12905,50 @@ export class Client extends GameShell {
          }
      }
  
@@ -169,7 +169,7 @@ index 7716cfb..aa929a1 100644
      // custom (ios): press `button` at (x, y) like a tap does; it is released after a client cycle has passed.
      // `finger`: a finger on the game made it (false: the host's tapAt), see fingerClick.
      private touchClick(x: number, y: number, button: number, finger: boolean = true): void {
-@@ -13174,6 +13266,7 @@ export class Client extends GameShell {
+@@ -13193,6 +13285,7 @@ export class Client extends GameShell {
          this.cancelLongPress();
          this.longPressFired = false;
          this.pendingTap = null;

@@ -8,10 +8,10 @@ player or NPC now takes the height of the entity drawn on its tile (tileOccupant
 of the model that is shown there.
 
 diff --git a/src/client/Client.ts b/src/client/Client.ts
-index 521d6ee..8f31463 100644
+index a998c34..e65862f 100644
 --- a/src/client/Client.ts
 +++ b/src/client/Client.ts
-@@ -496,6 +496,8 @@ export class Client extends GameShell {
+@@ -497,6 +497,8 @@ export class Client extends GameShell {
      private chats: (string | null)[] = new TypedArray1d(MAX_CHATS, null);
  
      private tileLastOccupiedCycle: Int32Array[] = new Int32Array2d(BuildArea.SIZE, BuildArea.SIZE);
@@ -20,7 +20,7 @@ index 521d6ee..8f31463 100644
      private sceneCycle: number = 0;
  
      private projectX: number = 0;
-@@ -4562,10 +4564,14 @@ export class Client extends GameShell {
+@@ -4563,10 +4565,14 @@ export class Client extends GameShell {
              if (!player.locModel || Client.loopCycle < player.locStartCycle || Client.loopCycle >= player.locStopCycle) {
                  if ((player.x & 0x7f) === 64 && (player.z & 0x7f) === 64) {
                      if (this.tileLastOccupiedCycle[stx][stz] == this.sceneCycle && i != -1) {
@@ -35,7 +35,7 @@ index 521d6ee..8f31463 100644
                  }
  
                  player.y = this.getAvH(player.x, player.z, this.minusedlevel);
-@@ -4596,10 +4602,12 @@ export class Client extends GameShell {
+@@ -4597,10 +4603,12 @@ export class Client extends GameShell {
  
              if (npc.size === 1 && (npc.x & 0x7f) === 64 && (npc.z & 0x7f) === 64) {
                  if (this.tileLastOccupiedCycle[x][z] === this.sceneCycle) {

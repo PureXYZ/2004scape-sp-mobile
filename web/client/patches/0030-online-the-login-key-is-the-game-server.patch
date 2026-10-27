@@ -8,7 +8,7 @@ and then the build-time key is used exactly as before: the same packet, byte for
 response 6 at login ("RuneScape has been updated!"), which the host words for a server.
 
 diff --git a/src/client/Client.ts b/src/client/Client.ts
-index ca8d402..92a0e8f 100644
+index 1eae4f7..0d90d36 100644
 --- a/src/client/Client.ts
 +++ b/src/client/Client.ts
 @@ -4,7 +4,7 @@ import { stopMidi, setMidiVolume, playMidi } from '#3rdparty/tinymidipcm.js';
@@ -20,7 +20,7 @@ index ca8d402..92a0e8f 100644
  import { MiniMenuAction } from '#/client/MiniMenuAction.js';
  import MobileKeyboard from '#/client/MobileKeyboard.js';
  import MouseTracking from '#/client/MouseTracking.js';
-@@ -1995,7 +1995,10 @@ export class Client extends GameShell {
+@@ -1996,7 +1996,10 @@ export class Client extends GameShell {
                  this.out.p4(1337); // uid
                  this.out.pjstr(username);
                  this.out.pjstr(password);

@@ -64,10 +64,10 @@ to 5-7 MB (Varrock West with 500 bots) more: two 3D frames, two triangle buffers
 signatures.
 
 diff --git a/src/client/Client.ts b/src/client/Client.ts
-index 00aa25b..ca8d402 100644
+index b469517..1eae4f7 100644
 --- a/src/client/Client.ts
 +++ b/src/client/Client.ts
-@@ -7507,6 +7507,7 @@ export class Client extends GameShell {
+@@ -7509,6 +7509,7 @@ export class Client extends GameShell {
              const layer: number = LOC_SHAPE_TO_LAYER[shape];
  
              if (x >= 0 && z >= 0 && x < BuildArea.SIZE && z < BuildArea.SIZE && this.world && this.groundh) {

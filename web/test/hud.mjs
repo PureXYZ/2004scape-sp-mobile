@@ -612,7 +612,8 @@ try {
     check('a tap on the minimap walks there', !same(afterMap, beforeMap), `${JSON.stringify(beforeMap)} → ${JSON.stringify(afterMap)}`);
 
     // the minimap's zoom slider: the knob dragged round the ring past + zooms the map in as far as it goes (kept in the
-    // settings), and back to the 2004 zoom it clicks into place; a tap on the map then follows the zoom
+    // settings), past - out as far as it goes (drawn from the half-size map), and back to the 2004 zoom it clicks into
+    // place; a tap on the map then follows the zoom
     const ring = await rectOf('#hud-map');
     const knob0 = await rectOf('#map-zoom');
     const groove = ring.w / 2 - 2; // (the ring is 4 px)
@@ -625,11 +626,16 @@ try {
     check('the minimap zoom slider: dragging the knob towards + zooms the map in (kept in the settings)', zoomedIn.client === 2 && zoomedIn.setting === 2 && zoomedIn.stored === 2 && knob1.cy < knob0.cy, JSON.stringify({ ...zoomedIn, knob: [knob0.cy, knob1.cy] }));
     const clicks = await evaluate(`(() => { const c = ${C}, q = c.localPlayer, tiles = [], tryMove = c.tryMove;
         c.tryMove = function (sx, sz, dx, dz) { tiles.push(Math.hypot(dx - (q.x >> 7), dz - (q.z >> 7))); return false; };
-        try { for (const z of [1, 2]) { c.setMinimapZoom(z); c.minimapState = 0; c.mouseClickButton = 1; c.mouseClickX = 550 + 25 + 73; c.mouseClickY = 4 + 4 + 75 + 32; c.minimapLoop(); } }
+        try { for (const z of [1, 2, 0.5]) { c.setMinimapZoom(z); c.minimapState = 0; c.mouseClickButton = 1; c.mouseClickX = 550 + 25 + 73; c.mouseClickY = 4 + 4 + 75 + 32; c.minimapLoop(); } }
         finally { c.tryMove = tryMove; c.mouseClickButton = 0; c.setMinimapZoom(window.lcHost.settings.minimapZoom); }
         return tiles; })()`);
-    check('...a tap on the zoomed map walks to where it shows (32 px: 8 tiles at the 2004 zoom, 4 at 2x)', clicks.length === 2 && Math.abs(clicks[0] - 8) <= 1 && Math.abs(clicks[1] - 4) <= 1, JSON.stringify(clicks));
+    check('...a tap on the zoomed map walks to where it shows (32 px: 8 tiles at the 2004 zoom, 4 at 2x, 16 at 0.5x)', clicks.length === 3 && Math.abs(clicks[0] - 8) <= 1 && Math.abs(clicks[1] - 4) <= 1 && Math.abs(clicks[2] - 16) <= 1, JSON.stringify(clicks));
+    await drag(knob1.cx, knob1.cy, ...onGroove(110));
+    await sleep(900);
+    const zoomedOut = await evaluate(`(() => { let stored = null; try { stored = JSON.parse(localStorage.getItem('lostcity.settings')).minimapZoom; } catch {} const half = ${C}.minimapHalf; return { client: ${C}.hudState().minimapZoom, stored, half: half ? [half.wi, half.hi] : null }; })()`);
     const k1 = await rectOf('#map-zoom');
+    await screenshot('minimap-zoomed-out');
+    check('...dragged past - it zooms out to half the 2004 zoom (kept), drawn from the half-size map', zoomedOut.client === 0.5 && zoomedOut.stored === 0.5 && zoomedOut.half?.join() === '256,256' && k1.cy > knob0.cy, JSON.stringify({ ...zoomedOut, knob: [knob0.cy, k1.cy] }));
     const detentAngle = (await evaluate(`(() => { const a = Math.atan2(${knob0.cy} - ${ring.cy}, ${knob0.cx} - ${ring.cx}); return a * 180 / Math.PI; })()`)) + 2;
     await drag(k1.cx, k1.cy, ...onGroove(detentAngle));
     await sleep(200);

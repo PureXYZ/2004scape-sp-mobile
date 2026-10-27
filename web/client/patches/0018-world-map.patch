@@ -15,10 +15,10 @@ shouldDrawItems/Npcs/Multimap/Freemap, which MobileMapView never turns on) are n
 hudPlayerTile() gives the world tile the local player stands on.
 
 diff --git a/src/client/Client.ts b/src/client/Client.ts
-index cd7f20c..555dbb1 100644
+index 50d4114..d2f0b65 100644
 --- a/src/client/Client.ts
 +++ b/src/client/Client.ts
-@@ -12177,6 +12177,15 @@ export class Client extends GameShell {
+@@ -12179,6 +12179,15 @@ export class Client extends GameShell {
          };
      }
  

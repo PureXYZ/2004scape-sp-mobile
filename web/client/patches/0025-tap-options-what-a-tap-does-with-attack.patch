@@ -1,7 +1,7 @@
 ios: tap options: what a tap does with Attack on NPCs and players
 
 diff --git a/src/client/Client.ts b/src/client/Client.ts
-index 0c476cc..20e120e 100644
+index e7b1401..f759785 100644
 --- a/src/client/Client.ts
 +++ b/src/client/Client.ts
 @@ -177,6 +177,9 @@ export interface HudDialogOption {
@@ -14,7 +14,7 @@ index 0c476cc..20e120e 100644
  // custom (ios): a button of an open interface with its clickable rect in virtual coordinates (see chatButtons)
  interface ButtonRect {
      com: IfType;
-@@ -9935,9 +9938,9 @@ export class Client extends GameShell {
+@@ -9937,9 +9940,9 @@ export class Client extends GameShell {
                          continue;
                      }
  
@@ -27,7 +27,7 @@ index 0c476cc..20e120e 100644
                      }
  
                      this.menuOption[this.menuNumEntries] = npc.op[i] + ' @yel@' + tooltip;
-@@ -10005,17 +10008,18 @@ export class Client extends GameShell {
+@@ -10007,17 +10010,18 @@ export class Client extends GameShell {
                      continue;
                  }
  
@@ -50,7 +50,7 @@ index 0c476cc..20e120e 100644
                  if (i === 0) {
                      this.menuAction[this.menuNumEntries] = priority + MiniMenuAction.OP_PLAYER1;
                  } else if (i === 1) {
-@@ -12147,6 +12151,8 @@ export class Client extends GameShell {
+@@ -12149,6 +12153,8 @@ export class Client extends GameShell {
      private cameraZoom: number = 1; // custom (ios): see setCameraZoom
      private minimapZoom: number = 1; // custom (ios): see setMinimapZoom
      private tapToDrop: boolean = false; // custom (ios): see setTapToDrop
@@ -59,7 +59,7 @@ index 0c476cc..20e120e 100644
      private depositModalId: number = -1; // custom (ios): see sideModalDeposits
      private depositModal: boolean = false;
      private surfaceLayout: SurfaceLayout | null = null;
-@@ -12526,6 +12532,30 @@ export class Client extends GameShell {
+@@ -12528,6 +12534,30 @@ export class Client extends GameShell {
          return this.tapToDrop;
      }
  

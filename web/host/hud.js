@@ -83,7 +83,7 @@
     const ZOOM_ARC = { out: 120, in: 192 }; // (192: the knob's box clear of the compass's)
     const ZOOM_ARC_MIN = 45;
     const KNOB = 22;
-    const MINIMAP_ZOOM = { min: 0.75, max: 2 }; // Client.ts MINIMAP_ZOOM_MIN..MAX (patch 0017); 1 = the 2004 zoom
+    const MINIMAP_ZOOM = { min: 0.5, max: 2 }; // Client.ts MINIMAP_ZOOM_MIN..MAX (patch 0017); 1 = the 2004 zoom
     const ZOOM_RANGE = Math.log(MINIMAP_ZOOM.max / MINIMAP_ZOOM.min);
     const ZOOM_DETENT = 0.04; // of the groove around the 2004 zoom, which snaps to it
     const ORB_H = 30;

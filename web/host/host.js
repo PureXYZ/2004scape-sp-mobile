@@ -92,7 +92,7 @@
         safeTop: 0,
         safeBottom: 0,
         longPressMs: 400,
-        cameraSensitivity: 1,
+        cameraSensitivity: 0.6, // Settings › Controls › Camera drag: Slow 0.35, Normal 0.6, Fast 1 (times patch 0004's turn per px)
         // Settings › Tap options (Client.setAttackOptions, patch 0025): what a tap does with an NPC's and a player's Attack:
         // 'tap' (always attacks), 'level' (2004: only when their level is not above yours), 'hold' (only in the long-press
         // menu), 'hidden' (no Attack option)
