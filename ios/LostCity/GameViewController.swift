@@ -414,6 +414,7 @@ final class GameViewController: UIViewController {
 
     private func makeBotChat() -> BotChatModel {
         let model = BotChatModel()
+        model.watchMemoryPressure()
         model.onReply = { [weak self] reply in
             self?.page.call("bots.lmReply", [reply])
         }

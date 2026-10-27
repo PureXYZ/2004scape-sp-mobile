@@ -322,6 +322,11 @@ async function bootMain(ctx) {
                 T.check("its answer, through the guard and the bot's style, is the bot's line", said().length > 0, ctx.says.slice(said0).filter(x => x.who === asked.username));
             }
         }
+        // (the page's notice: the on-device model resting while the phone is low on memory, host.js lm.notice)
+        page.post({ type: 'bots-lm-notice', lines: ['Bot chat notice, line one.', 'Bot chat notice, line two.', 'x'.repeat(100)] });
+        const noticed = await human.message(/^x+$/, 8000 * ctx.slow).catch(() => null);
+        const n1 = human.messages.lastIndexOf('Bot chat notice, line one.');
+        T.check("a notice's lines reach the human's chatbox as game messages, in order, each cut at 80 characters", n1 >= 0 && human.messages[n1 + 1] === 'Bot chat notice, line two.' && noticed?.length === 80, human.messages.slice(-4));
         T.check("the model's messages are the bots' own: the entry never hears them (no 'unknown message type')", page.logsMatching(/unknown message type 'bots-lm/, logs0).length === 0, page.logsMatching(/unknown message type/, logs0).map(l => l.text));
         // (the rules alone again for the rest of the session)
         page.post({ type: 'bots-lm-mode', mode: 'rules', local: true, online: false });

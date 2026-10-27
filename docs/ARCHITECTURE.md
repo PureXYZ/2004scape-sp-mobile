@@ -559,7 +559,13 @@ engine worker (engine-bots.js)           page (host.js lm)                      
   `bots-lm-*` message; native's model code stays idle (nothing is loaded until asked).
 - **page → engine, `bots-lm-mode`**: `{mode, local, online}`: the player's choice and what is there (`local`: a model in
   the app; `online`: a key saved), sent right after `booted` (before `start`) and whenever the choice or the status
-  changes. The engine asks only when the chosen backend, or its fallback, is there.
+  changes. The engine asks only when the chosen backend, or its fallback, is there. While the model in the app rests
+  for memory (the status's `local.rest`) `local` is false: the bots say their own lines and ask nothing.
+- **page → engine, `bots-lm-notice`**: `{lines}`: game messages for the humans in the world (at most 80 characters each),
+  from host.js `lm.notice`: while the bots talk with the model in the app (On-device, or Claude online with no key), the
+  player reads "Warning: low memory. The on-device chat model is off for 10+ minutes." and "Bots use scripted replies. Fewer bots (Settings > World) helps." once when a
+  rest starts (or on entering the world while one lasts, 2 s after), and "The on-device chat model is back on." when it ends, if
+  they were told it started in this world session.
 - **engine → page, `bots-lm`**: `{id, mode, local: {system, user}, online: {system, context, user}, maxChars,
   timeoutMs}`. `local` is the on-device prompt (the engine's `renderLocal`: the fine-tuned model's training format),
   `online` Claude's (a static 2004 guide, cached, then the bot's facts). The page answers at once, with null and
@@ -582,7 +588,8 @@ engine worker (engine-bots.js)           page (host.js lm)                      
   with the note `noteTokens` and `noteMs`: `generatedTokens`, `generateMs` and `generateTps` are then the reply's alone)
   or `usage` (Claude: `input`, `output`, `cacheRead`, `cacheWrite` tokens). The note itself never reaches the page.
 - **native → page, `LostCityHost.bots.lmStatus(status)`** and `window.LostCityNative.lm`: `{local: {available, loaded,
-  think, name?, bytes?, reason?, lastLoadMs?}, online: {keySet, hint?, valid?, problem?, model}}`. `think`: whether the on-device
+  think, name?, bytes?, reason?, lastLoadMs?, rest?}, online: {keySet, hint?, valid?, problem?, model}}`. `rest`:
+  `'memory'` while the on-device model rests because the phone ran short of memory (below). `think`: whether the on-device
   model writes its note, from its model.json template: `'never'` (also with no model that runs here), `'always'`, or
   `'option'` (the request's `think` decides: the page offers Think first only then). `reason`: `simulator` (no llama.cpp
   there), `no-model` (an app built without one). `lastLoadMs`: how long the model's last load took on this install,
@@ -599,7 +606,17 @@ no text, the network, 8 s) → the on-device model with what is left of the requ
 `online` without a key → the on-device model. `local` → the on-device model or null `'unavailable'`. A request whose
 `mode` is neither `local` nor `online` is answered `'unavailable'`. While iOS reports the phone's thermal state as
 serious or critical the on-device model does not run (`'busy'`: the bots say their own lines until it cools down; Claude
-online is not affected; the page's warm-up is skipped too). At most 3 requests run at a time (the model
+online is not affected; the page's warm-up is skipped too). After the phone ran short of memory the on-device model
+**rests** (`BotChatModel.memoryRest`, 10 minutes, then until iOS no longer reports memory pressure for the phone): on a
+memory warning (UIKit's, or iOS announcing memory pressure for the whole phone: a `DispatchSource` memory-pressure
+source at warning or critical), or when a load is refused for memory (too little left for the app, or the phone under
+memory pressure: `kern.memorystatus_vm_pressure_level` at 2 or more, or where the app may not read it the last level
+iOS announced). Meanwhile its requests answer `'unavailable'` at once, the warm-up is skipped, and the status says
+`local.rest: 'memory'`, so the page tells the engine there is no model in the app (`bots-lm-mode` local false) and the
+player in the chat (`bots-lm-notice`). A warning during a rest starts it again. Measured on an iPhone 13 mini with 1000
+bots (2026-10-27): with the model loaded again 12 s after a memory warning, the next warning came 26 s later and iOS
+ended the game's WebContent process 0.2 s after it (the page reloaded); before that iOS had ended WebKit's GPU process
+twice (the whole screen black for a moment). Claude online is not affected. At most 3 requests run at a time (the model
 generates one at a time on its own queue; the others wait); a fourth is answered `'busy'` at once. Each request has the
 page's `timeoutMs` (9 s) in all.
 

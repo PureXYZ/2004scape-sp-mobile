@@ -229,7 +229,10 @@ The structure is upstream's; the port added modules beside it rather than rewrit
     guards and styles it), or null and why: `timeout`, `busy`, `unavailable`, `refused`, `failed: …`. The page answers
     null `unavailable` at once with no native side or with Rules chosen.
   - `{type:'bots-lm-mode', mode, local, online}` (page → engine), after `booted` and before `start`, and on every change:
-    the player's choice and what is there. Until it comes, and with `rules`, the engine asks nothing.
+    the player's choice and what is there. Until it comes, and with `rules`, the engine asks nothing. (`local` is false
+    while the model in the app rests for memory.)
+  - `{type:'bots-lm-notice', lines}` (page → engine): game messages for every human in the world, cut at 80 characters
+    (`runtime/bots/page.ts`): the page's word that the model in the app rests for memory, and that it is back.
 
 ### 4.2 Bot library API (`#/engine/bot/*`, called by the glue)
 

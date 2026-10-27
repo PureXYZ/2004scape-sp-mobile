@@ -5,6 +5,14 @@ with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
 ## [Unreleased]
 
+- **Fixed: the screen could flash black, or the game restart, while chatting with the bots.** With many bots online
+  (1000 on an iPhone 13 mini) and the on-device chat model loaded, the phone ran short of memory: iOS ended WebKit's
+  drawing process (the whole screen black for a moment) or the game's own (the game reloaded). The chat model let go
+  on a memory warning but loaded again at the next line typed, 12 s later. Now, after a memory warning, the model
+  rests for 10 minutes, and after that until the phone is no longer short of memory; it also stays unloaded while the
+  phone already is. Meanwhile the bots use their scripted replies, and the chat says so: "Warning: low memory. The
+  on-device chat model is off for 10+ minutes." and "Bots use scripted replies. Fewer bots (Settings > World) helps.",
+  then "The on-device chat model is back on." when it is over. The same on Android. Claude online is not affected.
 - **Music keeps playing.** A song now starts again when it ends, with no gap, for as long as you stay where it plays
   (or keep it picked in the music tab). Before, each song played once and then the music stopped until you walked
   into an area with another song. Level-up and other jingles still play once, then the area's song comes back. The

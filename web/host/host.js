@@ -3733,6 +3733,12 @@
     // one with Metal's shaders still to prepare about 15 s); a chat start's warm-up is asked again after this at most
     const LM_QUICK_LOAD_MS = 5000;
     const LM_CHAT_WARM_MS = 10000;
+    // lm.notice: what the player reads in the chat when the model in the app rests for memory and when it is back (game
+    // messages: each within the chatbox's 459 px of the p12 font, which clips them; e2e.mjs measures them)
+    const LM_REST_LINES = Object.freeze(['Warning: low memory. The on-device chat model is off for 10+ minutes.', 'Bots use scripted replies. Fewer bots (Settings > World) helps.']);
+    const LM_BACK_LINES = Object.freeze(['The on-device chat model is back on.']);
+    // (a notice on entering the world waits a moment: the player is then in the engine's world)
+    const LM_NOTICE_LOGIN_MS = 2000;
 
     function lmStatusOf(raw) {
         const local = raw?.local ?? {};
@@ -3748,7 +3754,10 @@
                 // think decides: Settings › Bot chat › Think first)
                 think: ['never', 'always', 'option'].includes(local.think) ? local.think : 'never',
                 // how long its last load took on this install, app version and system version (ms), or null: none yet
-                lastLoadMs: Number(local.lastLoadMs) > 0 ? Number(local.lastLoadMs) : null
+                lastLoadMs: Number(local.lastLoadMs) > 0 ? Number(local.lastLoadMs) : null,
+                // 'memory': it rests, the phone having run short of memory (native's BotChatModel.memoryRest: 10 min,
+                // then until the phone is not under memory pressure); null: it does not
+                rest: local.rest === 'memory' ? 'memory' : null
             },
             online: {
                 keySet: online.keySet === true,
@@ -3763,6 +3772,8 @@
         status: lmStatusOf(window.LostCityNative?.lm),
         engineBots: false, // the engine runs the bots (engine-bots.js): the only one that asks
         chatWarmAt: -Infinity, // when a chat start last asked native to load the model (warm)
+        restTold: false, // the player was told in this world session that the model rests (lm.notice)
+        noticeTimer: 0,
         pending: new Map(), // id -> { sent, timer }: requests native has not answered yet
         testSeq: 0,
         tests: new Map(), // (negative ids) the Bot chat page's Test -> resolve
@@ -3779,7 +3790,45 @@
             if (!this.engineBots || !engine || engineState === 'dead' || engineState === 'stopped') {
                 return;
             }
-            engine.postMessage({ type: 'bots-lm-mode', mode: settings.botChat, local: this.status.local.available, online: this.status.online.keySet });
+            // (while the model in the app rests for memory the engine hears there is none: the rules' lines, no requests)
+            engine.postMessage({ type: 'bots-lm-mode', mode: settings.botChat, local: this.status.local.available && !this.status.local.rest, online: this.status.online.keySet });
+        },
+
+        // Whether the bots in this world talk with the model in the app (On-device, or Claude online with no key, which
+        // then answers with it), as warm() decides.
+        usesLocal() {
+            const mode = settings.botChat;
+            return isNative && this.engineBots && this.status.local.available && (mode === 'local' || (mode === 'online' && !this.status.online.keySet));
+        },
+
+        // The model in the app rests for memory (status local.rest) or is back: the player reads it once in the chat, as
+        // game messages through the engine (runtime/bots/page.ts), while in the world with bots that talk with it. The
+        // rest is told when it starts, or on entering the world while it lasts (after LM_NOTICE_LOGIN_MS); its end only
+        // to a player who was told it started in this world session.
+        notice(delay = 0) {
+            clearTimeout(this.noticeTimer);
+            if (delay > 0) {
+                this.noticeTimer = setTimeout(() => this.notice(), delay);
+                return;
+            }
+            const inWorld = this.usesLocal() && isInGame(client()) && engine && engineState !== 'dead' && engineState !== 'stopped';
+            let lines = null;
+            if (this.status.local.rest && !this.restTold && inWorld) {
+                this.restTold = true;
+                lines = LM_REST_LINES;
+            } else if (!this.status.local.rest && this.restTold) {
+                this.restTold = false;
+                lines = inWorld ? LM_BACK_LINES : null;
+            }
+            if (lines) {
+                engine.postMessage({ type: 'bots-lm-notice', lines: [...lines] });
+            }
+        },
+
+        // Leaving the world: a rest still on is told again at the next login.
+        leftWorld() {
+            clearTimeout(this.noticeTimer);
+            this.restTold = false;
         },
 
         // In the world with the bots and the model in the app chosen (or Claude online with no key, which then answers with
@@ -3793,7 +3842,7 @@
         warm(on) {
             const mode = settings.botChat;
             const uses = mode === 'local' || (mode === 'online' && !this.status.online.keySet);
-            if (!isNative || !this.engineBots || !this.status.local.available || !uses || !isInGame(client())) {
+            if (!isNative || !this.engineBots || !this.status.local.available || !uses || !isInGame(client()) || this.status.local.rest) {
                 return;
             }
             if (on === 'chat') {
@@ -3862,6 +3911,7 @@
         setStatus(raw) {
             this.status = lmStatusOf(raw);
             this.sendMode();
+            this.notice();
             botChat.render();
         },
 
@@ -4206,9 +4256,11 @@
             postNative({ type: 'status', phase });
             if (phase === 'ingame') {
                 lm.warm('world'); // (the first load after an install is the slow one: lm.warm)
+                lm.notice(LM_NOTICE_LOGIN_MS); // (a rest still on)
             }
             layout();
             if (phase === 'title') {
+                lm.leftWorld();
                 setSecondaryArmed(false);
                 void titleScreen.refresh();
             }

@@ -15,3 +15,7 @@ export function setModelChannel(fn: ((msg: ModelRequestMessage) => void) | null)
 export function onModelReply(msg: ModelReplyMessage): void {
     seen.replies.push(msg);
 }
+
+export function setModelOutcomeLog(_fn: ((line: string) => void) | null): void {
+    // (the stub's bots settle no replies: nothing to log)
+}

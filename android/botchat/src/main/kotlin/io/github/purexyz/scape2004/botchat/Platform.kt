@@ -12,6 +12,18 @@ fun interface MainPoster {
     fun post(block: () -> Unit)
 }
 
+/**
+ * Runs a block on the main thread after a delay; what it returns cancels it (iOS: `DispatchQueue.main.asyncAfter` with a
+ * `DispatchWorkItem`). The app gives the main looper's; [NONE] (the tests' default) never runs it.
+ */
+fun interface MainTimer {
+    fun after(delayMs: Long, block: () -> Unit): () -> Unit
+
+    companion object {
+        val NONE = MainTimer { _, _ -> {} }
+    }
+}
+
 /** iOS's thermal states, which the page's bench gate and BotChatModel's rule are written in (`serious` and up: too hot). */
 enum class ThermalLevel(val iosName: String) {
     NOMINAL("nominal"),

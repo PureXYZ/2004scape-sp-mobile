@@ -38,6 +38,26 @@ object DeviceStats {
         return (info.availMem - info.threshold).coerceAtLeast(0)
     }
 
+    /**
+     * The whole phone's memory pressure in iOS's words (kern.memorystatus_vm_pressure_level: 1 normal, 2 warning): 2 while
+     * the system counts memory as low (ActivityManager's lowMemory), else 1; null when it cannot be read.
+     */
+    fun pressureLevel(context: Context): Int? {
+        val manager = context.getSystemService(ActivityManager::class.java) ?: return null
+        val info = ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(info)
+        return if (info.lowMemory) 2 else 1
+    }
+
+    /** For a log line: "; phone: 812 MB free above the low-memory line" (iOS: DeviceStats.memorySummary). */
+    fun memorySummary(context: Context): String {
+        val manager = context.getSystemService(ActivityManager::class.java) ?: return ""
+        val info = ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(info)
+        val above = (info.availMem - info.threshold).coerceAtLeast(0) shr 20
+        return "; phone: $above MB free above the low-memory line${if (info.lowMemory) ", low" else ""}"
+    }
+
     /** {level 0-1, state charging|full|unplugged|unknown}, as UIDevice's battery. */
     fun battery(context: Context): Map<String, Any?> {
         val intent: Intent? = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))

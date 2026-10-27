@@ -19,10 +19,30 @@
 //                       The model's line (or null, and why); the bots guard it and say it, or the rules' line.
 //                   {type:'bots-lm-mode', mode, local, online}
 //                       The player's choice (Settings › Bot chat) and what is there; until it comes, the rules alone.
+//                   {type:'bots-lm-notice', lines}
+//                       Lines for the humans' chatboxes, as game messages (host.js lm.notice: the on-device model rests
+//                       while the phone is low on memory, and is back).
+import World from '#/engine/World.js';
+import type Player from '#/engine/entity/Player.js';
 import type { EngineMessage, Post } from '../host.js';
 import { onModelReply, setModelChannel, setModelMode, setModelOutcomeLog } from '#/engine/bot/port/BotModel.js';
 import type { ModelModeMessage, ModelReplyMessage } from '#/engine/bot/port/BotModelTypes.js';
 import { botStore } from './store.js';
+
+const isBot = (p: Player) => (p as Player & { is_bot?: boolean }).is_bot === true;
+
+/** The 2004 chatbox shows about 80 characters of a game message; a longer one is cut. */
+const NOTICE_MAX_CHARS = 80;
+
+/** A notice's lines to every human in the world, as game messages (written with the next tick's output). */
+function noticeToHumans(lines: unknown): void {
+    if (!Array.isArray(lines)) return;
+    const texts = lines.filter((l): l is string => typeof l === 'string' && l.length > 0).map(l => l.slice(0, NOTICE_MAX_CHARS));
+    for (const p of World.playerLoop.all()) {
+        if (isBot(p)) continue;
+        for (const text of texts) p.messageGame(text);
+    }
+}
 
 /** Why the bots asked for are off for this session, as the page hears it (host.js words it for the player). */
 export type BotsOffReason = 'store-unreadable' | 'store-corrupt' | 'mismatch' | 'failed';
@@ -96,6 +116,14 @@ export function onPageMessage(msg: unknown): boolean {
             else setModelMode(msg as ModelModeMessage);
         } catch (e) {
             console.error('[bots] a model message failed', e);
+        }
+        return true;
+    }
+    if (m?.type === 'bots-lm-notice') {
+        try {
+            noticeToHumans((msg as { lines?: unknown }).lines);
+        } catch (e) {
+            console.error('[bots] a model notice failed', e);
         }
         return true;
     }

@@ -15,6 +15,10 @@ import os
 ///   reply, when it is a model that offers the choice (`LocalModel.ThinkSupport`); also on Claude's fallback to it.
 ///   Claude online ignores it.
 /// - At most 3 requests at a time; more are answered 'busy' at once. Each has the page's `timeoutMs` (9 s) in all.
+/// - Memory: after a memory warning, iOS announcing memory pressure for the phone, or a load refused for memory (the app's
+///   own room, or the phone under pressure), the on-device model rests (`memoryRest`, 10 min, then until the phone is
+///   not under pressure): requests get 'unavailable' at once and the status says `local.rest: 'memory'`, so the page
+///   tells the engine there is no on-device model meanwhile, and the player in the chat.
 /// - The status (`LostCityHost.bots.lmStatus`, and `window.LostCityNative.lm` at document start): the on-device model
 ///   (in this build at all, its name and size, whether it is loaded, whether it writes the note: `think` 'never',
 ///   'always' or 'option', how long its last load took: `lastLoadMs`, `ModelLoadRecord`) and the Claude key (set, its
@@ -43,10 +47,27 @@ final class BotChatModel {
     /// reply every 5 s for 14 minutes, on USB power with 500 bots, reaches serious.
     var thermalState: () -> ProcessInfo.ThermalState = { ProcessInfo.processInfo.thermalState }
     private var tooHot: Bool { thermalState().rawValue >= ProcessInfo.ThermalState.serious.rawValue }
+    /// After the phone ran short of memory (a memory warning, iOS announcing memory pressure for the whole phone, or a
+    /// load refused for memory) the on-device model is freed and rests this long, and after that until the phone is not
+    /// under memory pressure (the engine says the bots' own lines meanwhile; the page tells the player in the chat).
+    /// Measured on an iPhone 13 mini with 1000 bots (2026-10-27): the model loaded again 12 s after a memory warning, the
+    /// next warning came 26 s later, and iOS ended the game's WebContent process 0.2 s after it.
+    static let memoryRest: TimeInterval = 10 * 60
+    /// The clock of the rest (a test's stand-in).
+    var now: () -> Date = { Date() }
+    /// iOS's memory pressure for the whole phone (1 normal, 2 warning, 4 critical), or nil where the app may not read it
+    /// (then the last change iOS announced counts, `watchMemoryPressure`); a test's stand-in.
+    var phonePressure: () -> Int? = { DeviceStats.memoryPressure }
+    /// Until when the on-device model rests (nil: it does not).
+    private(set) var restingUntil: Date?
+    private var restWork: DispatchWorkItem?
+    private var pressureSource: DispatchSourceMemoryPressure?
+    /// the last level iOS announced, and when
+    private var announced: (level: Int, at: Date)?
     /// nil until Claude answered or refused the key; false after a 401.
     private var keyValid: Bool?
     private var onlineProblem: String?
-    private var stats = (requests: 0, local: 0, online: 0, failed: 0, busy: 0, hot: 0)
+    private var stats = (requests: 0, local: 0, online: 0, failed: 0, busy: 0, hot: 0, memory: 0)
 
     init(local: LocalModel = LocalModel()) {
         self.local = local
@@ -69,6 +90,9 @@ final class BotChatModel {
         if let ms = loadRecord.lastLoadMs {
             localStatus["lastLoadMs"] = ms.rounded()
         }
+        if restingUntil != nil {
+            localStatus["rest"] = "memory"
+        }
         let hint = readKey().map { "…" + String($0.suffix(4)) }
         var onlineStatus: [String: Any] = ["keySet": hint != nil, "model": OnlineModel.model]
         if let hint { onlineStatus["hint"] = hint }
@@ -85,6 +109,8 @@ final class BotChatModel {
         if loaded, let ms = local.lastLoad?.first {
             loadRecord.record(ms)
         }
+        // (what the phone had then: the memory rest's thresholds are iOS's, this line shows where they stand)
+        Log.info("lm", "memory with the model \(loaded ? "in" : "out")\(DeviceStats.memorySummary)")
         statusChanged()
     }
 
@@ -120,13 +146,95 @@ final class BotChatModel {
     /// background, so that the first reply does not wait for it (about 1 s; the first load after an install, while Metal
     /// prepares its shaders, about 15 s on an iPhone 13 mini). The idle unload still applies.
     func warm() {
-        guard local.available, !tooHot else { return }
+        guard local.available, !tooHot, memoryRefusal() == nil else { return }
         local.warmUp()
     }
 
-    /// The reply being written stops and the model is freed at once.
-    func memoryWarning() {
-        local.release(reason: "memory warning")
+    /// The phone is short of memory (UIKit's memory warning, or iOS announcing memory pressure): the reply being written
+    /// stops, the model is freed at once, and it rests (`memoryRest`).
+    func memoryWarning(_ why: String = "memory warning") {
+        local.release(reason: why)
+        rest(why)
+    }
+
+    /// iOS's announcements of the whole phone's memory pressure: a warning or worse frees the model and starts its rest
+    /// (UIKit's memory warning may not come for it: that one is about the app's own share too). Called once, by the app.
+    func watchMemoryPressure() {
+        guard pressureSource == nil else { return }
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.normal, .warning, .critical], queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.pressureChanged() }
+        }
+        source.activate()
+        pressureSource = source
+    }
+
+    private func pressureChanged() {
+        guard let event = pressureSource?.data else { return }
+        let level = event.contains(.critical) ? 4 : event.contains(.warning) ? 2 : 1
+        announced = (level, now())
+        Log.info("lm", "iOS: the phone's memory pressure is \(DeviceStats.pressureName(level))\(DeviceStats.memorySummary)")
+        if level >= 2 {
+            memoryWarning("memory pressure \(DeviceStats.pressureName(level))")
+        }
+    }
+
+    /// The pressure now: iOS's own reading, else the last change it announced (for as long as a rest lasts: a warning with
+    /// no word since is not held against the phone for ever), else nil.
+    private var pressureNow: Int? {
+        if let level = phonePressure() { return level }
+        if let announced, now().timeIntervalSince(announced.at) < Self.memoryRest { return announced.level }
+        return nil
+    }
+
+    /// Why the on-device model may not load or run now, or nil: it rests, or it is not loaded and the phone is under
+    /// memory pressure (which starts a rest: the page tells the player once).
+    private func memoryRefusal() -> String? {
+        if restingUntil != nil { return "resting" }
+        if !local.isLoaded, let level = pressureNow, level >= 2 {
+            rest("not loaded: the phone's memory pressure is \(DeviceStats.pressureName(level))")
+            return "pressure"
+        }
+        return nil
+    }
+
+    private func rest(_ why: String) {
+        let first = restingUntil == nil
+        restingUntil = now().addingTimeInterval(Self.memoryRest)
+        Log.info("lm", "\(first ? "the on-device model rests" : "its rest starts again") for \(Int(Self.memoryRest / 60)) min (\(why))\(DeviceStats.memorySummary)")
+        scheduleRestEnd(after: Self.memoryRest)
+        if first {
+            statusChanged()
+        }
+    }
+
+    private func scheduleRestEnd(after seconds: TimeInterval) {
+        restWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.endRestIfRoom() }
+        }
+        restWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
+    /// The rest's time is up: the model may load again once the phone is not under memory pressure (looked at again every
+    /// minute until then). The page hears it in the status.
+    func endRestIfRoom() {
+        guard let until = restingUntil else { return }
+        let left = until.timeIntervalSince(now())
+        if left > 0 {
+            scheduleRestEnd(after: left)
+            return
+        }
+        if let level = pressureNow, level >= 2 {
+            scheduleRestEnd(after: 60)
+            return
+        }
+        restWork?.cancel()
+        restWork = nil
+        restingUntil = nil
+        Log.info("lm", "the on-device model may load again\(DeviceStats.memorySummary)")
+        statusChanged()
     }
 
     /// The app is inactive for a moment: the reply being written stops (no GPU work then); the model stays loaded.
@@ -205,6 +313,13 @@ final class BotChatModel {
                 reply(nil, source: nil, error: onlineError ?? "busy")
                 return
             }
+            if let refusal = self.memoryRefusal() {
+                self.inFlight -= 1
+                self.stats.memory += 1
+                Log.info("lm", "#\(id) the phone is short of memory (\(refusal)): no on-device reply")
+                reply(nil, source: nil, error: onlineError ?? "unavailable")
+                return
+            }
             self.local.generate(system: localPrompt["system"] as? String ?? "", user: localPrompt["user"] as? String ?? "", think: think, deadline: deadline) { result in
                 self.inFlight -= 1
                 switch result {
@@ -218,6 +333,9 @@ final class BotChatModel {
                 case .failure(let failure):
                     self.stats.failed += 1
                     Log.info("lm", "#\(id) local, think \(self.local.thinkSupport.writesNote(asked: think) ? "on" : "off"), failed: \(failure)\(onlineError.map { " (after Claude: \($0))" } ?? "")")
+                    if case .unavailable("memory") = failure {
+                        self.rest("not loaded: too little left for the app")
+                    }
                     reply(nil, source: nil, error: failure.description)  // (the last try's reason; Claude's is in the status)
                 }
             }
@@ -276,7 +394,7 @@ final class BotChatModel {
 
     /// For the phone spike's log.
     var counters: [String: Any] {
-        ["requests": stats.requests, "local": stats.local, "online": stats.online, "failed": stats.failed, "busy": stats.busy, "hot": stats.hot, "inFlight": inFlight]
+        ["requests": stats.requests, "local": stats.local, "online": stats.online, "failed": stats.failed, "busy": stats.busy, "hot": stats.hot, "memory": stats.memory, "inFlight": inFlight]
     }
 }
 
@@ -301,6 +419,48 @@ nonisolated enum DeviceStats {
         #else
         0
         #endif
+    }
+
+    /// iOS's memory pressure for the whole phone (`kern.memorystatus_vm_pressure_level`: 1 normal, 2 warning, 4 critical),
+    /// or nil where the system does not let the app read it (the Mac: nil, no check).
+    static var memoryPressure: Int? {
+        #if os(iOS)
+        sysctlInt("kern.memorystatus_vm_pressure_level")
+        #else
+        nil
+        #endif
+    }
+
+    /// The share of the phone's memory iOS counts as available (`kern.memorystatus_level`, %), or nil: for the log.
+    static var memoryFreePercent: Int? {
+        #if os(iOS)
+        sysctlInt("kern.memorystatus_level")
+        #else
+        nil
+        #endif
+    }
+
+    static func pressureName(_ level: Int) -> String {
+        level >= 4 ? "critical" : level >= 2 ? "warning" : "normal"
+    }
+
+    /// For a log line: "; phone: 23 % free, pressure normal; app: 1,830 MB left", what of it can be read.
+    static var memorySummary: String {
+        var parts: [String] = []
+        if let free = memoryFreePercent { parts.append("\(free) % free") }
+        if let level = memoryPressure { parts.append("pressure \(pressureName(level))") }
+        let phone = parts.isEmpty ? "" : "; phone: " + parts.joined(separator: ", ")
+        #if os(iOS)
+        return phone + "; app: \(availableMemory >> 20) MB left"
+        #else
+        return phone
+        #endif
+    }
+
+    private static func sysctlInt(_ name: String) -> Int? {
+        var value: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        return sysctlbyname(name, &value, &size, nil, 0) == 0 ? Int(value) : nil
     }
 
     static var thermalState: String { name(ProcessInfo.processInfo.thermalState) }

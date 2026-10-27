@@ -317,7 +317,8 @@ nonisolated final class LocalModel: @unchecked Sendable {
 
     /// Memory is short (a memory warning): the reply being written stops at its next token, the requests waiting fail at
     /// once (`.aborted`), and the model is freed right after them, not up to a reply's 9 s later. A request asked after
-    /// this loads it again if the app has room (`Options.minFreeToLoad`).
+    /// this loads it again if the app has room (`Options.minFreeToLoad`); BotChatModel holds requests off for a while
+    /// first (`BotChatModel.memoryRest`).
     func release(reason: String) {
         lock.withLock { epoch += 1 }
         unload(reason: reason)

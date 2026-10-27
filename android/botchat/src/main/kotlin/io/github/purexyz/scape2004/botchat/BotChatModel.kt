@@ -10,6 +10,10 @@
 // - `think` (Settings › Bot chat › Think first; absent: false): the on-device model writes its short note before the reply,
 //   when it is a model that offers the choice ([ThinkSupport]); also on Claude's fallback to it. Claude online ignores it.
 // - At most 3 requests at a time; more are answered 'busy' at once. Each has the page's `timeoutMs` (9 s) in all.
+// - Memory: after a memory warning (onTrimMemory), the system low on memory, or a load refused for memory, the on-device
+//   model rests ([MEMORY_REST_MS], 10 min, then until the system is not low on memory): requests get 'unavailable' at
+//   once and the status says `local.rest: 'memory'`, so the page tells the engine there is no on-device model meanwhile,
+//   and the player in the chat.
 // - The status (`LostCityHost.bots.lmStatus`, and `window.LostCityNative.lm` at document start): the on-device model (in
 //   this build at all, its name and size, whether it is loaded, whether it writes the note: `think` 'never', 'always' or
 //   'option', how long its last load took: `lastLoadMs`, [ModelLoadRecord]) and the Claude key (set, its last four
@@ -31,6 +35,19 @@ class BotChatModel(
     companion object {
         const val MAX_IN_FLIGHT = 3
         const val DEFAULT_TIMEOUT_MS = 9000
+
+        /**
+         * After the phone ran short of memory the on-device model is freed and rests this long, and after that until the
+         * system is not low on memory (the engine says the bots' own lines meanwhile; the page tells the player in the
+         * chat). Measured on an iPhone 13 mini with 1000 bots (2026-10-27): the model loaded again 12 s after a memory
+         * warning, the next warning came 26 s later, and iOS ended the game's WebContent process 0.2 s after it.
+         */
+        const val MEMORY_REST_MS = 10 * 60 * 1000L
+
+        /** Past the rest's time, while the system is still low on memory: looked at again this often. */
+        const val REST_RECHECK_MS = 60 * 1000L
+
+        fun pressureName(level: Int): String = if (level >= 4) "critical" else if (level >= 2) "warning" else "normal"
     }
 
     /** The Claude key, when a request needs it (the key store; a test's stand-in). */
@@ -54,6 +71,26 @@ class BotChatModel(
 
     private val tooHot: Boolean get() = thermal.level() >= ThermalLevel.SERIOUS
 
+    /** The clock of the rest, monotonic ms (a test's stand-in). */
+    var nowMs: () -> Long = { System.nanoTime() / 1_000_000 }
+
+    /**
+     * The whole phone's memory pressure as iOS words it (1 normal, 2 warning, 4 critical), or null: unknown. [Android
+     * differs] the app gives ActivityManager's lowMemory (2 when the system counts memory as low, else 1).
+     */
+    var phonePressure: () -> Int? = { null }
+
+    /** The rest's timer (the app gives the main looper's). */
+    var timer: MainTimer = MainTimer.NONE
+
+    /** For a log line, the system's memory ("; phone: ..."), or "" (the app gives ActivityManager's). */
+    var memorySummary: () -> String = { "" }
+
+    /** Until when (monotonic ms) the on-device model rests; null: it does not. */
+    var restingUntilMs: Long? = null
+        private set
+    private var cancelRestEnd: (() -> Unit)? = null
+
     private var inFlight = 0
 
     /** bumped when the page goes away ([pageReset]): a reply asked by an older page is dropped */
@@ -70,6 +107,7 @@ class BotChatModel(
         var failed = 0
         var busy = 0
         var hot = 0
+        var memory = 0
     }
 
     private val stats = Stats()
@@ -89,6 +127,7 @@ class BotChatModel(
             }
             local.unavailableReason?.let { localStatus["reason"] = it }
             loadRecord.lastLoadMs?.let { localStatus["lastLoadMs"] = Math.round(it).toDouble() }
+            if (restingUntilMs != null) localStatus["rest"] = "memory"
             val hint = ModelKeyStore.hint(readKey())
             val onlineStatus = linkedMapOf<String, Any?>("keySet" to (hint != null), "model" to OnlineModel.MODEL)
             hint?.let { onlineStatus["hint"] = it }
@@ -103,6 +142,8 @@ class BotChatModel(
 
     private fun loadedChanged(loaded: Boolean) {
         if (loaded) local.lastLoad?.firstOrNull()?.let { loadRecord.record(it) }
+        // (what the phone had then: the memory rest's thresholds are the system's, this line shows where they stand)
+        log.info("lm", "memory with the model ${if (loaded) "in" else "out"}${memorySummary()}")
         statusChanged()
     }
 
@@ -140,13 +181,64 @@ class BotChatModel(
      * background, so that the first reply does not wait for it. The idle unload still applies.
      */
     fun warm() {
-        if (!local.available || tooHot) return
+        if (!local.available || tooHot || memoryRefusal() != null) return
         local.warmUp()
     }
 
-    /** The reply being written stops and the model is freed at once. */
-    fun memoryWarning() {
-        local.release("memory warning")
+    /** The phone is short of memory (onTrimMemory): the reply being written stops, the model is freed at once, and it rests. */
+    fun memoryWarning(why: String = "memory warning") {
+        local.release(why)
+        rest(why)
+    }
+
+    /**
+     * Why the on-device model may not load or run now, or null: it rests, or it is not loaded and the system is low on
+     * memory (which starts a rest: the page tells the player once).
+     */
+    private fun memoryRefusal(): String? {
+        if (restingUntilMs != null) return "resting"
+        val level = phonePressure()
+        if (!local.isLoaded && level != null && level >= 2) {
+            rest("not loaded: the phone's memory pressure is ${pressureName(level)}")
+            return "pressure"
+        }
+        return null
+    }
+
+    private fun rest(why: String) {
+        val first = restingUntilMs == null
+        restingUntilMs = nowMs() + MEMORY_REST_MS
+        log.info("lm", "${if (first) "the on-device model rests" else "its rest starts again"} for ${MEMORY_REST_MS / 60_000} min ($why)${memorySummary()}")
+        scheduleRestEnd(MEMORY_REST_MS)
+        if (first) statusChanged()
+    }
+
+    private fun scheduleRestEnd(delayMs: Long) {
+        cancelRestEnd?.invoke()
+        cancelRestEnd = timer.after(delayMs) { endRestIfRoom() }
+    }
+
+    /**
+     * The rest's time is up: the model may load again once the system is not low on memory (looked at again every minute
+     * until then). The page hears it in the status.
+     */
+    fun endRestIfRoom() {
+        val until = restingUntilMs ?: return
+        val left = until - nowMs()
+        if (left > 0) {
+            scheduleRestEnd(left)
+            return
+        }
+        val level = phonePressure()
+        if (level != null && level >= 2) {
+            scheduleRestEnd(REST_RECHECK_MS)
+            return
+        }
+        cancelRestEnd?.invoke()
+        cancelRestEnd = null
+        restingUntilMs = null
+        log.info("lm", "the on-device model may load again${memorySummary()}")
+        statusChanged()
     }
 
     /** The app is inactive for a moment: the reply being written stops; the model stays loaded. */
@@ -228,6 +320,14 @@ class BotChatModel(
                 reply(null, null, onlineError ?: "busy")
                 return@runLocal
             }
+            val refusal = memoryRefusal()
+            if (refusal != null) {
+                inFlight -= 1
+                stats.memory += 1
+                log.info("lm", "#$id the phone is short of memory ($refusal): no on-device reply")
+                reply(null, null, onlineError ?: "unavailable")
+                return@runLocal
+            }
             local.generate(localPrompt["system"] as? String ?: "", localPrompt["user"] as? String ?: "", think, deadline) { result ->
                 inFlight -= 1
                 val output = result.getOrNull()
@@ -248,6 +348,7 @@ class BotChatModel(
                     stats.failed += 1
                     val after = onlineError?.let { " (after Claude: $it)" } ?: ""
                     log.info("lm", "#$id local, think ${if (local.thinkSupport.writesNote(think)) "on" else "off"}, failed: ${failure.description}$after")
+                    if (failure is LocalModel.Failure.Unavailable && failure.why == "memory") rest("not loaded: too little free memory")
                     reply(null, null, failure.description)  // (the last try's reason; Claude's is in the status)
                 }
             }
@@ -309,7 +410,7 @@ class BotChatModel(
     val counters: Map<String, Any?>
         get() = linkedMapOf(
             "requests" to stats.requests, "local" to stats.local, "online" to stats.online, "failed" to stats.failed,
-            "busy" to stats.busy, "hot" to stats.hot, "inFlight" to inFlight,
+            "busy" to stats.busy, "hot" to stats.hot, "memory" to stats.memory, "inFlight" to inFlight,
         )
 }
 

@@ -7,13 +7,23 @@ import android.os.Looper
 import android.util.Log
 import io.github.purexyz.scape2004.botchat.LogSink
 import io.github.purexyz.scape2004.botchat.MainPoster
+import io.github.purexyz.scape2004.botchat.MainTimer
 
-/** `DispatchQueue.main.async`: BotChatModel lives on the main thread, and every completion is posted there. */
-object MainThread : MainPoster {
+/**
+ * `DispatchQueue.main.async`: BotChatModel lives on the main thread, and every completion is posted there; and
+ * `asyncAfter`, for its rest's timer.
+ */
+object MainThread : MainPoster, MainTimer {
     private val handler = Handler(Looper.getMainLooper())
 
     override fun post(block: () -> Unit) {
         handler.post(block)
+    }
+
+    override fun after(delayMs: Long, block: () -> Unit): () -> Unit {
+        val runnable = Runnable(block)
+        handler.postDelayed(runnable, delayMs)
+        return { handler.removeCallbacks(runnable) }
     }
 }
 

@@ -272,6 +272,118 @@ class BotChatModelTest {
         assertEquals("local", replies.next()["source"])
     }
 
+    /** A rest's timer the test runs by hand: the last block scheduled, and its delay. */
+    private class HandTimer : MainTimer {
+        var block: (() -> Unit)? = null
+        var delayMs = -1L
+
+        override fun after(delayMs: Long, block: () -> Unit): () -> Unit {
+            this.block = block
+            this.delayMs = delayMs
+            return { if (this.block === block) this.block = null }
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun restOf(chat: BotChatModel): Any? = main.run { (chat.status["local"] as Map<String, Any?>)["rest"] }
+
+    @Test
+    fun aMemoryWarningRestsTheModelTenMinutesThenUntilThePressureIsNormal() {
+        val chat = model()
+        val timer = HandTimer()
+        var clock = 1_000_000L
+        var pressure: Int? = 1
+        main.run {
+            chat.nowMs = { clock }
+            chat.phonePressure = { pressure }
+            chat.timer = timer
+            chat.memoryWarning()
+        }
+        assertEquals("memory", restOf(chat))
+        assertEquals("memory", local(statuses.last())["rest"])  // (the page hears it at once)
+        assertEquals(BotChatModel.MEMORY_REST_MS, timer.delayMs)
+        assertTrue(log.has("[lm] the on-device model rests for 10 min (memory warning)"))
+        // resting: a request is refused at once, a warm-up loads nothing
+        main.run {
+            chat.warm()
+            chat.handle(request(1))
+        }
+        assertEquals("unavailable", replies.next()["error"])
+        assertTrue(log.has("[lm] #1 the phone is short of memory (resting): no on-device reply"))
+        Thread.sleep(100)
+        assertEquals(0, native.loads.get())
+        // the timer early (a clock behind): it waits for the rest of the time
+        clock += BotChatModel.MEMORY_REST_MS - 1000
+        main.run { timer.block!!() }
+        assertEquals("memory", restOf(chat))
+        assertEquals(1000L, timer.delayMs)
+        // past the time, the system still low on memory: again in a minute
+        clock += 2000
+        pressure = 2
+        main.run { timer.block!!() }
+        assertEquals("memory", restOf(chat))
+        assertEquals(BotChatModel.REST_RECHECK_MS, timer.delayMs)
+        // normal: over, and the page hears it
+        pressure = 1
+        main.run { timer.block!!() }
+        assertNull(restOf(chat))
+        assertFalse(local(statuses.last()).containsKey("rest"))
+        assertTrue(log.has("[lm] the on-device model may load again"))
+        main.run { chat.handle(request(2)) }
+        assertEquals("local", replies.next()["source"])
+        assertEquals(1, main.run { chat.counters["memory"] })
+    }
+
+    @Test
+    fun aLoadTheLowSystemRefusesStartsARest() {
+        val chat = model()
+        main.run {
+            chat.phonePressure = { 2 }
+            chat.timer = HandTimer()
+            chat.handle(request(1))
+        }
+        assertEquals("unavailable", replies.next()["error"])
+        assertEquals("memory", restOf(chat))
+        assertTrue(log.has("[lm] the on-device model rests for 10 min (not loaded: the phone's memory pressure is warning)"))
+        assertTrue(log.has("[lm] #1 the phone is short of memory (pressure): no on-device reply"))
+        assertEquals(0, native.loads.get())
+    }
+
+    @Test
+    fun aLoadRefusedForTooLittleMemoryStartsARest() {
+        val chat = main.run {
+            BotChatModel(LocalModel(fakeInfo(), native, main, log) { 100L shl 20 }, OnlineModel(main), MemoryKeyStore(), log).also {
+                it.onReply = { reply -> replies.queue.put(reply) }
+                it.timer = HandTimer()
+            }
+        }
+        main.run { chat.handle(request(1)) }
+        assertEquals("unavailable", replies.next()["error"])
+        main.drain()
+        assertEquals("memory", restOf(chat))
+        assertTrue(log.has("[lm] the on-device model rests for 10 min (not loaded: too little free memory)"))
+    }
+
+    @Test
+    fun aWarningDuringARestStartsItAgain() {
+        val chat = model()
+        val timer = HandTimer()
+        var clock = 0L
+        main.run {
+            chat.nowMs = { clock }
+            chat.timer = timer
+            chat.memoryWarning()
+        }
+        clock += 300_000
+        main.run { chat.memoryWarning("level 15") }
+        assertEquals(clock + BotChatModel.MEMORY_REST_MS, main.run { chat.restingUntilMs })
+        assertTrue(log.has("[lm] its rest starts again for 10 min (level 15)"))
+        assertEquals(1, statuses.count { local(it)["rest"] == "memory" })  // (the page heard the rest once)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun local(status: Map<String, Any?>) = status["local"] as Map<String, Any?>
+
     @Test
     fun onlineWithoutAKey() {
         val chat = model()

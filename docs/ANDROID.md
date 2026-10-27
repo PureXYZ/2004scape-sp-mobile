@@ -371,6 +371,7 @@ loop) in C++. Its checks are iOS's: `android/test/native/lm-harness.mjs` runs th
 | Stopping | at the next token | also inside a prompt batch (llama.cpp's abort callback: a pause or the deadline) |
 | Claude's 8 s | URLSession's request timeout | one limit on the whole call, the host lookup included (a watchdog disconnects and completes with a timeout; a lookup it cannot interrupt finishes later, dropped) |
 | Thermal | `ProcessInfo.thermalState` ≥ serious | `PowerManager.currentThermalStatus` ≥ `THERMAL_STATUS_SEVERE`; the log says `thermal status severe` |
+| Memory rest | UIKit's memory warning, a `DispatchSource` memory-pressure source (warning, critical), `kern.memorystatus_vm_pressure_level` ≥ 2 before a load; the timer `DispatchQueue.main.asyncAfter` | onTrimMemory's memory warning; ActivityManager's `lowMemory` as pressure 2 before a load (`DeviceStats.pressureLevel`); the timer the main looper's `postDelayed` (`MainThread`, `MainTimer`); the log's memory: `; phone: N MB free above the low-memory line` |
 | Key | Keychain generic password | AES-256-GCM AndroidKeyStore key `io.github.purexyz.scape2004.claude.api-key` wrapping `noBackupFilesDir/claude-key.bin` (`LCK1`, IV, ciphertext); log `the Keystore refused the Claude key (<Exception>)`; the file is removed only when it can never be read (wrong tag, bad format, Keystore key gone), any other read failure skips that read (as iOS) |
 | Load log | `… 99 on the GPU, 2 threads)` | `… 0 on the GPU, 2 threads, mmap)` or `…, read: not 32-byte aligned in the APK)` |
 | llama log | | debug output, not info: `repack: repack tensor` (one per weight at every load; iOS never repacks), `create_tensor: loading tensor` and `llama_graph_n_input_tensors:` (about 950 lines a load; iOS's filter still lets those two through) |
@@ -405,8 +406,9 @@ botChat.host = object : AndroidBotChat.Host {
   `lm-key-alert` → `botChat.debugAction`, replying through `window.__lcDebugReply`.
 - **App events.** `pause` → `pause()` (the reply being written stops), `stop` → `suspend()` (the model is freed:
   `local model unloaded (background)`, while the sound is muted), `resume` → `resume()`, the session's memory warning →
-  `memoryWarning()` (the reply being written stops, those waiting are dropped, the model is freed at once; a load
-  needs 1 GB free above the low-memory line, `DeviceStats.headroomBytes`), every page reset (load, reload, renderer crash) → `pageReset()` (`#N answered after the page
+  `memoryWarning()` (the reply being written stops, those waiting are dropped, the model is freed at once and rests
+  10 minutes, then until the system is not low on memory, as on iOS: `BotChatModel.MEMORY_REST_MS`; a load needs 1 GB
+  free above the low-memory line, `DeviceStats.headroomBytes`, and a refused one starts a rest too), every page reset (load, reload, renderer crash) → `pageReset()` (`#N answered after the page
   reloaded: dropped`). The warm-up is the page's: `{type:'lm-warm'}` when the player starts to chat with the bots on
   and the on-device model in use, or enters the world while no quick load is on record (the status's `lastLoadMs`,
   kept by `AndroidLoadRecord` in SharedPreferences `lostcity-lm` with the app's version and the system's build: here

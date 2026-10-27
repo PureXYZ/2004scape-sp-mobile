@@ -1141,6 +1141,44 @@ async function lmWarmChecks() {
     await clearLine();
     check('lm: with a quick load on record (lastLoadMs 1300 at document start), entering the world asks nothing, typing on the chat keyboard warms the model', onRecord === 1300 && atEntry === 0 && after.kind === 'chat' && after.line === 'yo' && afterChat === 1, JSON.stringify({ onRecord, atEntry, after, afterChat }));
     await loadedNow();
+    await lmRestChecks(chatKeyboard, clearLine, warms);
+}
+
+// The model in the app rests for memory (native's status local.rest: 'memory', BotChatModel.memoryRest): the engine hears
+// there is no model in the app meanwhile (the rules' lines, no requests), the player reads it once in the chat (game
+// messages through the engine: bots-lm-notice), nothing warms it up, and its end comes with "The on-device chat model is back on.". Each line fits the
+// chatbox (459 px of the p12 font: drawChat clips at 463, from x 4).
+async function lmRestChecks(chatKeyboard, clearLine, warms) {
+    const restStatus = rest => evaluate(`(() => { const s = window.__lmStub.status; s.local = { ...s.local, loaded: false, rest: ${JSON.stringify(rest)} }; if (!${JSON.stringify(rest)}) delete s.local.rest; window.LostCityHost.bots.lmStatus(JSON.parse(JSON.stringify(s))); })()`);
+    const notices = async () => (await lmStub()).toWorker.filter(m => m.type === 'bots-lm-notice').map(m => m.lines);
+    const gameLines = () => evaluate(`(window.__client?.hudChatLines?.(10) ?? []).filter(l => l.kind === 'game').map(l => l.text)`);
+    const n0 = (await notices()).length;
+    await restStatus('memory');
+    await sleep(1500);
+    const mode = await lastMode();
+    const told = (await notices()).slice(n0);
+    const shown = await gameLines();
+    await screenshot('lm-3-rest.png');
+    const warms0 = await warms();
+    const typed = await chatKeyboard('h', 'i');
+    await clearLine();
+    const warms1 = await warms();
+    await restStatus('memory'); // (the same rest again: not told twice)
+    await sleep(300);
+    const again = (await notices()).slice(n0).length;
+    check('lm: the model rests for memory: the engine hears no model in the app (local false), the player reads "Warning: low memory. The on-device chat model is off for 10+ minutes." and "Bots use scripted replies. Fewer bots (Settings > World) helps." in the chat once, typing warms nothing',
+        mode?.mode === 'local' && mode.local === false && told.length === 1 && JSON.stringify(told[0]) === JSON.stringify(['Warning: low memory. The on-device chat model is off for 10+ minutes.', 'Bots use scripted replies. Fewer bots (Settings > World) helps.'])
+        && shown[0] === 'Bots use scripted replies. Fewer bots (Settings > World) helps.' && shown[1] === 'Warning: low memory. The on-device chat model is off for 10+ minutes.' && typed.line === 'hi' && warms1 === warms0 && again === 1,
+        JSON.stringify({ mode, told, shown: shown.slice(0, 3), typed, warms0, warms1, again }));
+    const widths = await evaluate(`${JSON.stringify([...told[0] ?? []])}.map(line => window.__client?.p12?.stringWid?.(line) ?? -1)`);
+    await restStatus(null);
+    await sleep(1500);
+    const back = await lastMode();
+    const backWidth = await evaluate(`(() => { const line = (window.__client?.hudChatLines?.(1) ?? [])[0]?.text ?? ''; return window.__client?.p12?.stringWid?.(line) ?? -1; })()`);
+    check('lm: each notice line fits the chatbox (at most 459 px of the p12 font: the chat is clipped at 463 from x 4)', widths.length === 2 && widths.every(w => w > 0 && w <= 459) && backWidth > 0 && backWidth <= 459, JSON.stringify({ widths, backWidth }));
+    const toldBack = (await notices()).slice(n0);
+    const shownBack = await gameLines();
+    check('lm: the rest is over: the engine hears the model again (local true) and the player reads "The on-device chat model is back on."', back?.local === true && toldBack.length === 2 && JSON.stringify(toldBack[1]) === '["The on-device chat model is back on."]' && shownBack[0] === 'The on-device chat model is back on.', JSON.stringify({ back, toldBack, shownBack: shownBack.slice(0, 2) }));
 }
 
 class LmStubDone extends Error {}

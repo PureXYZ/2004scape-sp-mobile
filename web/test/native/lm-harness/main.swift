@@ -308,6 +308,71 @@ final class Harness {
             roomy.unload(reason: "harness: memory")
         }
 
+        // memory (2026-10-27): after a memory warning the model rests (BotChatModel.memoryRest, 10 min), then until the
+        // phone is not under memory pressure; a load the phone's pressure refuses starts a rest too (a clock and a
+        // pressure of the harness's own)
+        if hasLocal {
+            let chat = BotChatModel(local: LocalModel(info: modelInfo, availableMemory: { 2 << 30 }))
+            var clock = Date()
+            var pressure: Int? = 1
+            chat.now = { clock }
+            chat.phonePressure = { pressure }
+            var rests: [String?] = []
+            chat.onStatus = { status in rests.append((status["local"] as? [String: Any])?["rest"] as? String) }
+            var answers: [Int: [String: Any]] = [:]
+            chat.onReply = { reply in
+                if let id = reply["id"] as? Int { answers[id] = reply }
+            }
+            var restId = 9000
+            func restAsk() async -> [String: Any] {
+                restId += 1
+                let id = restId
+                chat.handle(["type": "lm", "id": id, "mode": "local", "local": local, "online": online, "maxChars": 80, "timeoutMs": 9000])
+                let asked = Date()
+                while answers[id] == nil, Date().timeIntervalSince(asked) < 15 {
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+                return answers.removeValue(forKey: id) ?? [:]
+            }
+            let restOf = { (chat.status["local"] as? [String: Any])?["rest"] as? String }
+
+            chat.memoryWarning()
+            let until = chat.restingUntil.map { $0.timeIntervalSince(clock) } ?? -1
+            check("a memory warning: the model rests 10 min (status local.rest 'memory', sent at once)", restOf() == "memory" && abs(until - 600) < 0.01 && rests.last == "memory", "until +\(Int(until)) s, statuses \(rests)")
+            let started = Date()
+            var reply = await restAsk()
+            check("resting: a request is answered 'unavailable' at once, nothing loaded", reply["error"] as? String == "unavailable" && reply["text"] is NSNull && Date().timeIntervalSince(started) < 0.5 && !chat.local.isLoaded, describe(reply))
+            chat.warm()
+            try? await Task.sleep(for: .milliseconds(500))
+            check("resting: a warm-up loads nothing", !chat.local.isLoaded)
+            clock += 599
+            chat.endRestIfRoom()
+            let early = restOf()
+            clock += 2
+            pressure = 2
+            chat.endRestIfRoom()
+            let underPressure = restOf()
+            pressure = 1
+            chat.endRestIfRoom()
+            check("the rest: still on at 9:59, and past 10 min while the phone's pressure is 'warning'; over once it is normal (status without rest)", early == "memory" && underPressure == "memory" && restOf() == nil && chat.restingUntil == nil && rests.last == .some(nil), "9:59 \(early ?? "-"), pressure \(underPressure ?? "-"), normal \(restOf() ?? "-"), statuses \(rests)")
+            reply = await restAsk()
+            check("after the rest a request loads the model and answers", reply["source"] as? String == "local" && chat.local.isLoaded, describe(reply))
+            pressure = 2
+            reply = await restAsk()
+            check("loaded, the phone under pressure: the model still answers (only a load is refused; iOS's announcement frees it)", reply["source"] as? String == "local" && restOf() == nil, describe(reply))
+            chat.local.unload(reason: "harness: rest")
+            while chat.local.isLoaded {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            reply = await restAsk()
+            check("not loaded, the phone's pressure 'warning': the load is refused ('unavailable') and the model rests", reply["error"] as? String == "unavailable" && !chat.local.isLoaded && restOf() == "memory", "\(describe(reply)), rest \(restOf() ?? "-")")
+            pressure = 1
+            clock += 300
+            chat.memoryWarning()
+            let again = chat.restingUntil.map { $0.timeIntervalSince(clock) } ?? -1
+            check("a warning during a rest starts it again (10 min from this one)", abs(again - 600) < 0.01 && restOf() == "memory", "until +\(Int(again)) s")
+        }
+
         // more than 3 at once: busy
         key = "sk-ant-test-slow-7777"
         let ids = (0 ..< 4).map { _ in send(mode: "online", fallback: false, timeoutMs: 2000) }

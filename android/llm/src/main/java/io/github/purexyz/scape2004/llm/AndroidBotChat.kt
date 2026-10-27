@@ -132,7 +132,7 @@ class AndroidBotChat private constructor(
     /** Activity.onResume (iOS didBecomeActive). */
     fun resume() = model.resume()
 
-    /** onTrimMemory / onLowMemory (iOS's memory warning): the model is freed. */
+    /** onTrimMemory / onLowMemory (iOS's memory warning): the model is freed, and rests (BotChatModel.MEMORY_REST_MS). */
     fun memoryWarning() = model.memoryWarning()
 
     /** Every page load and reload: answers still being written for the old page are dropped. */
@@ -288,6 +288,9 @@ class AndroidBotChat private constructor(
             val keyStore = AndroidModelKeyStore(app, log)
             val model = BotChatModel(local, OnlineModel(MainThread), keyStore, log)
             model.loadRecord = AndroidLoadRecord(app)
+            model.timer = MainThread
+            model.phonePressure = { DeviceStats.pressureLevel(app) }
+            model.memorySummary = { DeviceStats.memorySummary(app) }
             return AndroidBotChat(app, model, keyStore, ThermalGate(app), log, debug)
         }
     }
