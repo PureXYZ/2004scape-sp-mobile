@@ -1,0 +1,18 @@
+ios: XP drops: the client reports each stat's XP to the host (lcEvent 'stat')
+
+diff --git a/src/client/Client.ts b/src/client/Client.ts
+index 3f1680d..66ce3b5 100644
+--- a/src/client/Client.ts
++++ b/src/client/Client.ts
+@@ -7009,6 +7009,11 @@ export class Client extends GameShell {
+                     }
+                 }
+ 
++                // custom (ios): the HUD's XP counter and drops (hud.js): every stat's XP as the server sends it, the
++                // whole set at login and then each change; the host takes the first of each stat after 'ingame' as
++                // where it stands and shows the gain of every later one
++                lcEvent('stat', { stat, xp, level: this.statBaseLevel[stat] });
++
+                 this.ptype = -1;
+                 return true;
+             }

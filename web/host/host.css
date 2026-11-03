@@ -519,7 +519,8 @@ body.pixelated .surface {
     gap: 5px;
 }
 
-#hud-orbs > .orb.unavailable {
+#hud-orbs > .orb.unavailable,
+#hud-ui > #hud-xp.unavailable {
     pointer-events: none;
 }
 
@@ -548,6 +549,73 @@ body.pixelated .surface {
     50% {
         filter: brightness(1.4) drop-shadow(0 0 4px rgba(255, 0, 0, 0.8));
     }
+}
+
+/* The XP counter under the orbs (hud.js updateXp): the total of all skills on a stone plate like theirs, the Stats
+   tab's icon beside it (a tap opens that tab) */
+#hud-xp {
+    width: auto;
+    min-width: 34px;
+    padding: 0 6px 0 3px;
+    flex-direction: row;
+    gap: 3px;
+    border-width: 4px;
+    border-image-slice: 4 fill;
+    border-image-width: 4px;
+    white-space: nowrap;
+}
+
+#hud-xp .icon {
+    width: 16px;
+    height: 16px;
+}
+
+#xp-total {
+    font: 16px/16px var(--font-plain);
+}
+
+/* The lane the drops rise through into the counter (hud.js xpDrop): each drop a row per skill, its icon and the gain,
+   right-aligned; the lane clips them and fades them in at its bottom and out under the counter. Taps go through. */
+#hud-ui > #hud-xp-drops {
+    pointer-events: none;
+}
+
+#hud-xp-drops {
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+}
+
+#hud-xp-drops .xp-drop {
+    position: absolute;
+    right: 0;
+    top: 0;
+    will-change: transform;
+}
+
+#hud-xp-drops .xp-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 3px;
+    height: 22px;
+    padding-right: 3px;
+    font: 16px/16px var(--font-plain);
+    color: var(--white);
+    text-shadow: var(--shadow);
+    white-space: nowrap;
+}
+
+/* combined: the skills' icons side by side before the one sum */
+#hud-xp-drops .xp-row .xp-icons {
+    display: flex;
+    gap: 1px;
+}
+
+#hud-xp-drops .xp-row .icon {
+    width: 20px;
+    height: 20px;
+    filter: drop-shadow(1px 1px 0 #000);
 }
 
 /* the phone's battery in the top left corner (hud.js updateBattery): a pixel glyph filled to the charge and the
@@ -1772,7 +1840,7 @@ html.ui-snapped .overlay {
     touch-action: pan-y;
 }
 
-/* the Game Options tab's grey button, red for the category shown; 36 px tall, less on a screen too short for all eight
+/* the Game Options tab's grey button, red for the category shown; 36 px tall, less on a screen too short for all nine
    (the sheet's height is the HUD layer's, which on Android is not the viewport's: a media query cannot tell) */
 .settings-nav button {
     position: relative;
@@ -1954,6 +2022,17 @@ html.ui-snapped .overlay {
     }
 }
 
+/* a shorter layer (html.ui-short: under 370 HUD px, Display Zoom's 320 and Android's 360, which a media query cannot
+   tell): the nine categories tighter still, so that they fit without scrolling */
+html.ui-short .settings-nav {
+    gap: 3px;
+    padding: 6px 8px;
+}
+
+html.ui-short .settings-nav button {
+    min-height: 25px; /* (nine at 25 px, 3 px apart: 261 of the 268 px Display Zoom's 320 leaves them) */
+}
+
 /* a narrow screen (an iPhone SE with Display Zoom: 568 px wide): narrower categories and Bots' buttons, so that its
    eight choices still fit one row */
 @media (max-width: 600px) {
@@ -2067,8 +2146,13 @@ html.ui-short #section-world .data-row {
     color: #8c8c8c;
 }
 
+#section-xpdrops .xp-option.unused > span {
+    color: #8c8c8c;
+}
+
 #botchat-think.unused .seg,
-#botchat-ambient.unused .seg {
+#botchat-ambient.unused .seg,
+#section-xpdrops .xp-option.unused .seg {
     opacity: 0.5;
 }
 

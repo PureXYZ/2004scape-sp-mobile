@@ -159,7 +159,7 @@ const REQUIRED_SPRITES = [
     ...['backbase1', 'backbase2', 'backhmid1', 'backhmid2', 'backleft1', 'backleft2', 'backright1', 'backright2', 'backtop1'],
     ...['backvmid1', 'backvmid2', 'backvmid3'],
     ...['steelborder-3', 'steelborder2-1', 'sworddecor-3', 'miscgraphics-11', 'miscgraphics2-1', 'miscgraphics3-1', 'combatboxes-3'],
-    ...['scrollbar-1', 'mod_icons-1', 'headicons-8', 'staticons-17', 'cross-7']
+    ...['scrollbar-1', 'mod_icons-1', 'headicons-8', 'staticons-17', 'staticons2-0', 'cross-7']
 ];
 
 // #FF00FF is the transparency key (PixPack.ts); it becomes fully transparent black. All other pixels are opaque in

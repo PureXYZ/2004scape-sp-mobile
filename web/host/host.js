@@ -84,6 +84,9 @@
         fps: 50,
         smoothScaling: false, // Pixel: the world drawn with crisp 2004 pixels
         cameraButtons: false, // mobile layout: rotate / tilt buttons (dragging the world turns the camera too)
+        xpDrops: true, // mobile layout: the total XP under the orbs and each gain rising into it (hud.js updateXp)
+        xpDropSpeed: 40, // how fast a drop rises, HUD px a second: Slow 25, Normal 40, Fast 60 (hud.js xpDrop)
+        xpDropStyle: 'separate', // gains of one tick: 'separate' (a row per skill) or 'combined' (their icons, one sum)
         showControls: true, // classic layout: the side rails
         largeMenus: true, // the options menu for fingers (menu.js) instead of the drawn 2004 one
         // Settings › Display › Screen margins: Side, Top and Bottom (CSS px, readSafeArea): -1 None (the HUD up to
@@ -1384,12 +1387,16 @@
             setSecondaryArmed(false);
             return true;
         },
-        // 'ingame', 'menu-open', 'menu-close' (the client already gives haptic feedback for a long-press), 'action-label'.
+        // 'ingame', 'menu-open', 'menu-close' (the client already gives haptic feedback for a long-press), 'action-label',
+        // 'stat' (patch 0035: a stat's XP as the server sent it, for the HUD's XP counter and drops).
         onClientEvent(name, detail) {
             if (name === 'ingame') {
+                hud?.xpReset(); // (the stats that follow are where the character stands, not gains)
                 // switch between the title canvas and the HUD in the same frame as the client
                 layout();
                 menu?.hideLabel();
+            } else if (name === 'stat') {
+                hud?.stat(detail);
             } else if (name === 'action-label') {
                 menu?.label(detail);
             } else if (name === 'menu-open') {
@@ -3272,6 +3279,15 @@
         for (const row of document.querySelectorAll('.row[data-layout]')) {
             row.hidden = row.dataset.layout !== settings.layout;
         }
+        // XP drops: a category of the mobile layout's (the classic one has no HUD); its speed and style greyed out, their
+        // choices kept, while XP drops are off
+        document.getElementById('nav-xpdrops').hidden = settings.layout !== 'mobile';
+        for (const row of document.querySelectorAll('#section-xpdrops .xp-option')) {
+            row.classList.toggle('unused', settings.xpDrops === false);
+            for (const button of row.querySelectorAll('.seg button')) {
+                button.disabled = settings.xpDrops === false;
+            }
+        }
         // where the world is (Change: the worlds); online the settings of the world on this phone, the bots' chat and its
         // saved data are not this page's
         document.getElementById('world-playon-name').textContent = ONLINE ? `${SERVER.name} (${window.lcServerUrl.address(SERVER.url)})` : 'This phone';
@@ -3361,6 +3377,9 @@
     function showSettingsSection(name) {
         if (savedData.busy) {
             return; // (a delete, or the restart of Reset world or Delete everything, is under way)
+        }
+        if (document.getElementById(`nav-${name}`)?.hidden) {
+            name = 'display'; // (the last category shown is not offered now: XP drops in the classic layout)
         }
         const pane = document.getElementById('settings-pane');
         if (name !== settingsSection) {

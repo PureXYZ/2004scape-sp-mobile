@@ -186,6 +186,10 @@ export const STATES = {
     settings: async page => {
         await settingsSection(page, 'display');
     },
+    // XP drops: its three rows and the notes, without scrolling on every phone, Display Zoom's 320 too
+    'settings-xpdrops': async page => {
+        await settingsSection(page, 'xpdrops', 320);
+    },
     // World: its five rows and Restart, without scrolling on every phone, 360 HUD px tall and up (not on Display Zoom's 320)
     'settings-world': async page => {
         await settingsSection(page, 'world', 360);

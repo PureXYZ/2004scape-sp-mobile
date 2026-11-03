@@ -9,7 +9,7 @@
 //   an open panel, a tutorial game message beside it;
 //   after skipping the tutorial (::setvar, logout through the side panel, the characters list, log in again): the 13
 //   tabs and their panel, tap-to-drop (the chat bar's button: an item dropped by a tap, its menu by a long-press, the
-//   bank's inventory left alone), the action label (beside an item's slot and a red cross, fading out; a walk leaves it), the battery in the top left corner, the real Run, the compact chat lines, the chatbox toggle and history drag, the chat filters,
+//   bank's inventory left alone), the action label (beside an item's slot and a red cross, fading out; a walk leaves it), the battery in the top left corner, the XP counter and its drops (::~addxp; a row per skill, Off/On), the real Run, the compact chat lines, the chatbox toggle and history drag, the chat filters,
 //   the keyboard bar's charsets, the quest list drag and glide, the bank (window and side panel), the panel stepping
 //   aside for a dialogue or window, the World map (open, its data unpacked with libbzip2, drag, pinch, double-tap, Key,
 //   overview, underground, centre, close, Escape), the camera pad, hardware Space and Escape, a safe-area change, Settings
@@ -258,7 +258,7 @@ async function hudOverlaps() {
     return evaluate(`(() => {
         const box = sel => { const n = document.querySelector(sel); if (!n || n.closest('[hidden]') || !n.getClientRects().length) return null; const r = n.getBoundingClientRect(); return { sel, l: r.left, t: r.top, r: r.right, b: r.bottom }; };
         const map = box('#hud-map');
-        const rects = ['#btn-compass', '#map-zoom', '#zoom-mark-in', '#zoom-mark-out', '#btn-worldmap', '#hud-tabs', '#hud-panel', '#hud-chat-bar', '#hud-chat-lines', '#hud-chat-box', '#hud-dialog', '#hud-camera', '#hud-battery', ...[...document.querySelectorAll('#hud-orbs > button')].map(b => '#' + b.id)].map(box).filter(Boolean);
+        const rects = ['#btn-compass', '#map-zoom', '#zoom-mark-in', '#zoom-mark-out', '#btn-worldmap', '#hud-tabs', '#hud-panel', '#hud-chat-bar', '#hud-chat-lines', '#hud-chat-box', '#hud-dialog', '#hud-camera', '#hud-battery', '#hud-xp', '#hud-xp-drops', ...[...document.querySelectorAll('#hud-orbs > button')].map(b => '#' + b.id)].map(box).filter(Boolean);
         const groove = document.querySelector('#map-zoom-track .groove'), knob = box('#map-zoom');
         if (knob) {
             const svg = groove.ownerSVGElement, frame = svg.getBoundingClientRect(), k = frame.width / svg.width.baseVal.value, half = (knob.r - knob.l) / 2, length = groove.getTotalLength();
@@ -1073,6 +1073,8 @@ try {
     await sleep(200);
     check('with two characters the title lists them (Characters), and Escape closes the list', listShown && listed.length === 2 && !(await visible('#characters')), JSON.stringify(listed));
 
+    // every XP drop the HUD makes from here on (its label: "Attack +500, ...")
+    await evaluate(`(() => { window.__xpDrops = []; new MutationObserver(list => { for (const m of list) for (const n of m.addedNodes) if (n.classList?.contains('xp-drop')) window.__xpDrops.push(n.dataset.label); }).observe(document.getElementById('hud-xp-drops'), { childList: true }); })()`);
     const again = await relogin();
     check('the title offers "Continue as <name>", which logs in with one tap', again.ok, `${again.ms ?? '?'} ms`);
     await sleep(2500);
@@ -1137,6 +1139,82 @@ try {
     await setBattery(0.87, false);
     overlap = await hudOverlaps();
     check('with the battery: no HUD control overlaps another or runs off the screen', clean(overlap), JSON.stringify(overlap));
+
+    // ---- the XP counter under the orbs and its drops (Settings › Display › XP drops, on by default); the gains stay
+    // under a level (Attack to 70 XP, Strength 40, Hitpoints 1154 to 1184), so no level-up dialogue follows
+    const xpOf = `(() => { const n = document.getElementById('hud-xp'), r = n.getBoundingClientRect(), orbs = document.getElementById('hud-orbs').getBoundingClientRect(), xp = [...${C}.statXP];
+        return { shown: !n.hidden, text: document.getElementById('xp-total').textContent, total: xp.reduce((a, b) => a + b, 0), xp, rect: [r.left, r.top, r.right, r.bottom], orbsBottom: orbs.bottom,
+            drops: [...document.querySelectorAll('#hud-xp-drops .xp-drop')].map(d => ({ label: d.dataset.label, rows: [...d.querySelectorAll('.xp-row')].map(row => ({ stat: Number(row.dataset.stat), text: row.textContent, icon: row.querySelector('.icon').style.backgroundImage })) })) }; })()`;
+    let xp = await evaluate(xpOf);
+    check('the XP counter shows the total XP of all skills under the orbs, with no drops for the stats sent at login',
+        xp.shown && xp.text === xp.total.toLocaleString('en-US') && xp.total > 0 && xp.rect[1] >= xp.orbsBottom && (await evaluate('window.__xpDrops.length')) === 0,
+        JSON.stringify({ text: xp.text, total: xp.total, rect: xp.rect, orbsBottom: xp.orbsBottom, drops: await evaluate('window.__xpDrops') }));
+    const attackBefore = xp.xp[0];
+    await typeChat('::~addxp attack 40');
+    await waitFor(`document.querySelector('#hud-xp-drops .xp-drop') !== null`, 3000);
+    await sleep(500);
+    xp = await evaluate(xpOf);
+    const attackGain = xp.xp[0] - attackBefore;
+    check('a gain rises as a drop: the skill\'s icon and "+amount", and the counter adds it',
+        attackGain > 0 && xp.drops.length === 1 && xp.drops[0].rows.length === 1 && xp.drops[0].rows[0].stat === 0 && xp.drops[0].rows[0].text === `+${attackGain.toLocaleString('en-US')}` && /staticons-0\.png/.test(xp.drops[0].rows[0].icon) && xp.text === xp.total.toLocaleString('en-US'),
+        JSON.stringify({ attackGain, drops: xp.drops, text: xp.text, total: xp.total }));
+    await screenshot('xp-drop');
+    overlap = await hudOverlaps();
+    check('with the XP counter and its drops: no HUD control overlaps another or runs off the screen', clean(overlap), JSON.stringify(overlap));
+    await waitFor(`document.querySelector('#hud-xp-drops .xp-drop') === null`, 5000);
+    check('...and the drop is gone once it has risen into the counter', (await evaluate(xpOf)).drops.length === 0);
+    await evaluate('window.__xpDrops = []');
+    await typeChat('::~addxp strength 30\n::~addxp hitpoints 20');
+    await waitFor(`window.__xpDrops.length > 0 && document.querySelectorAll('#hud-xp-drops .xp-row').length >= 2`, 4000);
+    await sleep(300);
+    const together = await evaluate('window.__xpDrops');
+    check('two skills gaining together: a row each, Strength and Hitpoints', together.join(', ').includes('Strength +') && together.join(', ').includes('Hitpoints +'), JSON.stringify(together));
+    await screenshot('xp-drops-two');
+    // XP drop style Combined: one row, both skills' icons and the sum
+    const pickSetting = (key, value) => evaluate(`document.querySelector('.seg[data-setting="${key}"] button[data-value="${value}"]').click()`);
+    await waitFor(`document.querySelector('#hud-xp-drops .xp-drop') === null`, 6000);
+    await pickSetting('xpDropStyle', 'combined');
+    await evaluate('window.__xpDrops = []');
+    await typeChat('::~addxp strength 10\n::~addxp hitpoints 10');
+    await waitFor(`window.__xpDrops.length > 0`, 4000);
+    await sleep(300);
+    const combined = await evaluate(`[...document.querySelectorAll('#hud-xp-drops .xp-drop')].map(d => ({ label: d.dataset.label, rows: [...d.querySelectorAll('.xp-row')].map(r => ({ icons: [...r.querySelectorAll('.icon')].map(i => Number(i.dataset.stat)), text: r.textContent })) }))`);
+    check('XP drop style Combined: one row of both skills\' icons and their sum', combined.length === 1 && combined[0].rows.length === 1 && combined[0].rows[0].icons.join() === '2,3' && combined[0].rows[0].text === '+20', JSON.stringify(combined));
+    await screenshot('xp-drops-combined');
+    await pickSetting('xpDropStyle', 'separate');
+    // XP drop speed: a drop rises through the lane (and its own height) at 60 HUD px a second Fast, 25 Slow
+    const riseMs = async value => {
+        await waitFor(`document.querySelector('#hud-xp-drops .xp-drop') === null`, 8000);
+        await pickSetting('xpDropSpeed', value);
+        await typeChat('::~addxp attack 5');
+        await waitFor(`document.querySelector('#hud-xp-drops .xp-drop') !== null`, 3000);
+        return evaluate(`(() => { const d = document.querySelector('#hud-xp-drops .xp-drop'), lane = parseFloat(document.getElementById('hud-xp-drops').style.height); return { duration: d.getAnimations()[0].effect.getTiming().duration, lane, h: d.offsetHeight }; })()`);
+    };
+    const fast = await riseMs(60);
+    const slow = await riseMs(25);
+    await pickSetting('xpDropSpeed', 40);
+    check('XP drop speed: Fast rises at 60 HUD px a second, Slow at 25', Math.abs(fast.duration - ((fast.lane + 22) / 60) * 1000) < 1 && Math.abs(slow.duration - ((slow.lane + 22) / 25) * 1000) < 1, JSON.stringify({ fast, slow }));
+    await tapElement('#hud-xp');
+    await sleep(400);
+    check('a tap on the XP counter opens the Stats tab', (await visible('#hud-panel')) && (await hudState()).activeTab === 1);
+    await tapElement('#hud-xp');
+    await sleep(300);
+    check('...and again closes it', !(await visible('#hud-panel')));
+    await waitFor(`document.querySelector('#hud-xp-drops .xp-drop') === null`, 6000);
+    await evaluate(`document.querySelector('.seg[data-setting="xpDrops"] button[data-value="false"]').click()`);
+    await sleep(300);
+    await evaluate('window.__xpDrops = []');
+    await typeChat('::~addxp attack 20');
+    await sleep(600);
+    xp = await evaluate(xpOf);
+    const greyed = await evaluate(`[...document.querySelectorAll('#section-xpdrops .xp-option')].map(r => r.classList.contains('unused') && [...r.querySelectorAll('button')].every(b => b.disabled))`);
+    check('XP drops Off: its speed and style rows greyed out', greyed.length === 2 && greyed.every(Boolean), JSON.stringify(greyed));
+    check('XP drops Off: no counter and no drops', !xp.shown && (await evaluate('window.__xpDrops.length')) === 0 && !(await visible('#hud-xp-drops')), JSON.stringify({ shown: xp.shown, drops: await evaluate('window.__xpDrops') }));
+    await evaluate(`document.querySelector('.seg[data-setting="xpDrops"] button[data-value="true"]').click()`);
+    await sleep(300);
+    xp = await evaluate(xpOf);
+    check('...On again: the counter is back with the total, the gain made while Off in it', xp.shown && xp.text === xp.total.toLocaleString('en-US'), JSON.stringify({ shown: xp.shown, text: xp.text, total: xp.total }));
+    check('the settings follow the sheet (speed Normal, style Separate again; the options no longer greyed)', await evaluate(`window.lcHost.settings.xpDrops === true && window.lcHost.settings.xpDropSpeed === 40 && window.lcHost.settings.xpDropStyle === 'separate' && document.querySelector('.seg[data-setting="xpDrops"] button[data-value="true"]').classList.contains('on') && ![...document.querySelectorAll('#section-xpdrops .xp-option')].some(r => r.classList.contains('unused'))`));
 
     // ---- the real Run
     s = await hudState();
@@ -1728,17 +1806,22 @@ try {
     check('...Back returns to Settings on Display', !marginsBackTo.page && marginsBackTo.settings && !marginsBackTo.aside && same(marginsBackTo.on, ['display']), JSON.stringify(marginsBackTo));
 
     const sections = {};
-    for (const name of ['sound', 'controls', 'world']) {
+    for (const name of ['xpdrops', 'sound', 'controls', 'world']) {
         await tapElement(`#nav-${name}`);
         await sleep(100);
         sections[name] = await section(name);
     }
     const hold = await evaluate(`[...document.querySelectorAll('.seg[data-setting="longPressMs"] button.on')].map(b => b.textContent)`);
-    check('...Sound, Controls and World each shown alone, on screen without scrolling', Object.values(sections).every(s => s.shown && s.others === 1 && s.fits), JSON.stringify(sections));
+    check('...XP drops, Sound, Controls and World each shown alone, on screen without scrolling', Object.values(sections).every(s => s.shown && s.others === 1 && s.fits), JSON.stringify(sections));
     check('...and Hold for menu shows the stored 450 ms as Normal (400 ms)', same(hold, ['Normal']), JSON.stringify(hold));
     const restartRow = await evaluate(`(() => { const r = document.getElementById('settings-restart'); return { inWorld: !!r.closest('#section-world'), shown: r.offsetHeight > 0, save: document.getElementById('settings-save').offsetHeight > 0 }; })()`);
     check('...Restart in World; Save now in the header while in the world', restartRow.inWorld && restartRow.shown && restartRow.save, JSON.stringify(restartRow));
     await screenshot('settings-world');
+    await tapElement('#nav-xpdrops');
+    await sleep(100);
+    await screenshot('settings-xpdrops');
+    await tapElement('#nav-world');
+    await sleep(100);
 
     // ---- Settings › Bot chat (the bots' chat model, docs/ARCHITECTURE.md §7.1): a category, on screen without scrolling;
     // with no native app (Chrome) it says it is only in the iPhone app
@@ -1922,6 +2005,7 @@ try {
     await sleep(150);
     await tapElement('.seg[data-setting="layout"] button[data-value="classic"]');
     await sleep(600);
+    check('the classic layout has no XP drops category (no HUD to show them)', await evaluate(`document.getElementById('nav-xpdrops').hidden`));
     await tapElement('#settings-close');
     await sleep(500);
     const classic = await evaluate(`({ hud: document.getElementById('hud').hidden, behind: document.getElementById('canvas').classList.contains('behind'), viewport: [${C}.viewportX, ${C}.viewportWidth] })`);
@@ -1976,6 +2060,7 @@ try {
         await setScreen(screen.view, screen.safe, screen.dpr);
         const shown = await evaluate(`(() => { const g = document.getElementById('surface-game'), modes = document.getElementById('hud-chat-modes');
             return { zoom: Number(document.documentElement.style.getPropertyValue('--ui-zoom')), world: [g.width, g.height], panel: !document.getElementById('hud-panel').hidden, chat: !document.getElementById('hud-chat-box').hidden,
+                xp: !document.getElementById('hud-xp').hidden, xpLane: document.getElementById('hud-xp-drops').hidden ? 0 : Math.round(document.getElementById('hud-xp-drops').getBoundingClientRect().height),
                 labels: modes.hidden ? 'none' : modes.classList.contains('short') ? 'short' : 'long',
                 cut: modes.hidden ? [] : [...modes.querySelectorAll('.chat-mode')].filter(b => [...b.children].some(part => part.offsetWidth > b.clientWidth)).map(b => b.textContent) }; })()`);
         const open = await hudOverlaps();
@@ -1986,10 +2071,10 @@ try {
         const lifted = await evaluate(`(() => { const r = document.getElementById('hud-chat-box').getBoundingClientRect(); return [Math.round(r.top), Math.round(r.bottom)]; })()`);
         const typing = await hudOverlaps();
         await evaluate(`(() => { window.LostCityHost.keyboard.frame(0, 0); window.LostCityHost.keyboard.hide(); })()`);
-        const fits = Math.abs(shown.zoom - screen.zoom) < 1e-9 && shown.panel && shown.chat && clean(open) && shown.cut.length === 0 && (!screen.labels || shown.labels === screen.labels) && shown.world[0] * shown.world[1] <= 412000 && (!screen.world || same(shown.world, screen.world));
+        const fits = Math.abs(shown.zoom - screen.zoom) < 1e-9 && shown.panel && shown.chat && shown.xp && shown.xpLane >= 24 * screen.zoom - 0.5 && clean(open) && shown.cut.length === 0 && (!screen.labels || shown.labels === screen.labels) && shown.world[0] * shown.world[1] <= 412000 && (!screen.world || same(shown.world, screen.world));
         const above = lifted[1] <= screen.view.height - covered + 1 && lifted[0] >= screen.safe.top - 1 && clean(typing);
         const at = screen.dpr ? ` at ${screen.dpr}` : '';
-        check(`${screen.name} (${screen.view.width}x${screen.view.height}${at}): the HUD ×${+screen.zoom.toFixed(6)}${screen.world ? `, the world ${screen.world.join('x')}` : ''}, panel and chatbox open, then typing: nothing overlaps, no label cut off`, fits && above, JSON.stringify({ ...shown, open, lifted, typing }));
+        check(`${screen.name} (${screen.view.width}x${screen.view.height}${at}): the HUD ×${+screen.zoom.toFixed(6)}${screen.world ? `, the world ${screen.world.join('x')}` : ''}, panel, chatbox and XP counter open, then typing: nothing overlaps, no label cut off`, fits && above, JSON.stringify({ ...shown, open, lifted, typing }));
     }
     // a narrow desktop window (no phone or iPad): the world renders larger so a window fits beside the panel, but within a
     // bound (it asked for 4608x8192 here)

@@ -278,7 +278,7 @@ after them).
 | `server` | client patch 0030 (`lcLoginKey()`), the LocalOnDemand override (`lcServer()`) | **Online**: `{id, name, url, nodeId, members, rsa}` (`rsa`: `{n, e}` decimal strings, or null for the build-time key); null offline |
 | `openSocket(purpose)` | the LocalOnDemand override (`lcOpenSocket('ondemand')`) | **Online**: a `NativeSocket` to the server for OnDemand's remote files; null offline |
 | `platform` | client patch 0026 (`lcPlatform()`) | Which app the page runs in, as the engine's `init` is told: `LostCityNative.platform` (`'ios'`, `'android'`), or `'web'` without an app (desktop tests). On `'android'` a canvas gets its whole frame when any of its pixels changed; everywhere else the rect of the changed pixels (§6.1) |
-| `onClientEvent(name, detail)` | client patches (optional) | `('ingame', bool)` (the host switches between the title canvas and the HUD in the same frame), `('menu-open', {serial, area, options, pointerId, x, y, width, height})` (the host shows its large menu, §6.2, and plays the long-press haptic), `('menu-close')`, `('action-label', {text, x, y})` (patch 0020: the host shows what a tap did beside x, y, page px) |
+| `onClientEvent(name, detail)` | client patches (optional) | `('ingame', bool)` (the host switches between the title canvas and the HUD in the same frame), `('menu-open', {serial, area, options, pointerId, x, y, width, height})` (the host shows its large menu, §6.2, and plays the long-press haptic), `('menu-close')`, `('action-label', {text, x, y})` (patch 0020: the host shows what a tap did beside x, y, page px), `('stat', {stat, xp, level})` (patch 0035: each UPDATE_STAT, for the XP counter, §6.1) |
 
 Client fields the host touches at runtime (property names are preserved by esbuild; all listed in `HOST_FIELDS` in
 `web/client/build.mjs`, which fails the build if one disappears): `keyHeld[1..5]` (arrows, ctrl), `timeoutTimer`,
@@ -333,6 +333,17 @@ at 60 Hz the page's main frames went from 60 to 48 a second, their cost from 8.9
 - **Orbs** (top right, left of the compass): hitpoints and prayer (`hudState().hp/hpMax/prayer/prayerMax`, coloured by
   how much is left; a tap opens the Stats / Prayer tab), and **Run** (the word and the run energy; red while running;
   dimmed during a dialogue, `runAvailable`). Hidden while a window is open or while typing.
+- **XP counter and drops** (Settings › XP drops, a category of the mobile layout only: XP drops On (default) / Off;
+  Speed Slow 25 / Normal 40 (default) / Fast 60 HUD px/s; Style Separate (default) / Combined: one row of the skills'
+  icons and their sum; Speed and Style greyed out while Off): under the orbs,
+  left of the minimap's ring, the total XP of all skills on a stone plate like theirs with the Stats tab's icon (a tap
+  opens that tab); under it a lane (66 HUD px; shorter above the panel on a short screen or above a long list of
+  dialogue answers, away when they reach the plate) through which each gain rises into the plate at the chosen speed:
+  one drop per server tick, a row per skill (its 2004 `staticons` icon and "+amount"; or the combined row), clipped and faded at the lane's ends
+  (a drop waits unseen below the lane until the one before has room; past 8 waiting, gains add to the newest). From
+  patch 0035's `'stat'` events: the first of each stat after `'ingame'` is where the character stands (the login set,
+  no drops), a higher XP later a gain. Hidden with the orbs; gains made while hidden count in the total but get no drop.
+  Both right edges stay clear of the ring, the compass and the zoom slider along its whole groove.
 - **Battery** (top left corner; the status bar is hidden): a 14×8 pixel glyph filled to the charge and the percentage
   in the small font, faint white (70 % opacity), red at 20 % and below unplugged, green on the charger; taps go
   through. From native's `LostCityHost.battery(level, charging)` (§7); none until native reports a level (the

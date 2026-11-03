@@ -80,6 +80,11 @@
                 <button class="orb" id="orb-prayer" aria-label="Prayer"><span class="icon icon-prayer"></span><span class="orb-value" id="prayer-value"></span></button>
             </div>
 
+            <!-- under the orbs, left of the minimap: the total XP and, rising into it, each gain with its skill's icon
+                 (hud.js updateXp; Settings › Display › XP drops) -->
+            <button class="orb" id="hud-xp" aria-label="Total XP" hidden><span class="icon icon-xp"></span><span id="xp-total"></span></button>
+            <div id="hud-xp-drops" aria-hidden="true" hidden></div>
+
             <!-- top left: the phone's battery, quietly (native's LostCityHost.battery; the status bar is hidden) -->
             <div id="hud-battery" role="img" hidden><span class="battery-icon"><span id="battery-fill"></span></span><span id="battery-value"></span></div>
 
@@ -225,6 +230,7 @@
             <div class="settings-body">
                 <div class="settings-nav" role="tablist" aria-label="Categories">
                     <button role="tab" data-section="display" id="nav-display">Display</button>
+                    <button role="tab" data-section="xpdrops" id="nav-xpdrops">XP drops</button>
                     <button role="tab" data-section="sound" id="nav-sound">Sound</button>
                     <button role="tab" data-section="controls" id="nav-controls">Controls</button>
                     <button role="tab" data-section="tapoptions" id="nav-tapoptions">Tap options</button>
@@ -241,6 +247,15 @@
                         <div class="row" data-layout="mobile"><span>Camera buttons</span><div class="seg" data-setting="cameraButtons"><button data-value="true">Show</button><button data-value="false">Hide</button></div></div>
                         <div class="row" data-layout="classic"><span>Side buttons</span><div class="seg" data-setting="showControls"><button data-value="true">Show</button><button data-value="false">Hide</button></div></div>
                         <div class="row"><span>Screen margins</span><button class="data-btn plain" id="margins-open">Adjust</button></div>
+                    </div>
+
+                    <!-- the HUD's XP counter and drops (hud.js; the mobile layout only, so the category is too) -->
+                    <div class="settings-section" role="tabpanel" id="section-xpdrops" hidden>
+                        <div class="section-intro">Your total XP under the orbs, and each gain rising into it with its skill's icon.</div>
+                        <div class="row"><span>XP drops</span><div class="seg" data-setting="xpDrops"><button data-value="true">On</button><button data-value="false">Off</button></div></div>
+                        <div class="row xp-option"><span>Speed</span><div class="seg" data-setting="xpDropSpeed"><button data-value="25">Slow</button><button data-value="40">Normal</button><button data-value="60">Fast</button></div></div>
+                        <div class="row xp-option"><span>Style</span><div class="seg" data-setting="xpDropStyle"><button data-value="separate">Separate</button><button data-value="combined">Combined</button></div></div>
+                        <div class="section-note">Separate: a row for each skill. Combined: one row, their icons and the total.</div>
                     </div>
 
                     <div class="settings-section" role="tabpanel" id="section-sound" hidden>

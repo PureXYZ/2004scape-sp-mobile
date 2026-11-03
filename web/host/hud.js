@@ -11,6 +11,10 @@
 //     that tab's panel out beside the column, a tap on the open tab closes it. A side modal (bank, shop, trade...) opens the panel
 //     by itself at the right edge, and the minimap, orbs and column give way to it;
 //   - top left: the phone's battery (the status bar is hidden), small and faint, while nothing else needs the corner;
+//   - under the orbs, left of the minimap (Settings › Display › XP drops, on by default): the total XP of all skills
+//     on a stone plate like the orbs' (a tap opens the Stats tab), and each gain rising up into it as a row of the
+//     skill's 2004 icon and "+amount", one row per skill when several gain at once (or, XP drop style Combined, their
+//     icons side by side and one sum), at the XP drop speed chosen;
 //   - bottom left: the newest chat lines over the world above the tap-to-drop, keyboard and chat buttons; the full
 //     chatbox (and the 2004 chat filter buttons under it, online Report abuse too) opens on a tap, and by itself for a dialogue, the tutorial's
 //     instructions, an amount/name prompt or typed chat. Tap-to-drop is OSRS mobile's: while it is on (the button red),
@@ -102,6 +106,27 @@
     const BATTERY_H = 12; // the battery's row: its glyph and percentage (host.css #hud-battery)
     const BATTERY_CELL = 10; // the glyph's charge at 100 %, in whole HUD px
     const BATTERY_LOW = 20; // % and below, unplugged: red (the percentage shown: iOS's level is a Float, 0.2000000030)
+    // The XP counter and its drops (updateXp, xpDrop): the counter's plate under the orbs, and below it the lane the
+    // drops rise through into it, at a steady speed (so a row a tick at 50x XP still never overlaps the one before:
+    // one waits below the lane, unseen, until there is room), fading in at the lane's bottom and out under the plate
+    // (host.css #hud-xp-drops: a 10 px fade at each end).
+    const XP_H = 24;
+    const XP_ROW = 22; // a drop's row: the 20 px icon (as the orbs') and its number
+    const XP_RISE = 66; // the lane, when nothing below cuts it short (the panel on a short screen)
+    const XP_RISE_MIN = 24;
+    // HUD px a second, Settings › Display › XP drop speed: Slow 25, Normal 40, Fast 60 (a 22 px row every 0.6 s tick
+    // needs 37: at Slow a gain every tick queues up below the lane, and past XP_QUEUE adds to the newest waiting)
+    const XP_SPEED_DEFAULT = 40;
+    const XP_LANE_W = 132; // (the drops right-aligned in it: a combined drop of 3 skills' icons and a 5-digit sum fits)
+    const XP_GROUP_MS = 40; // the gains of one server tick arrive together: those within this make one drop
+    const XP_QUEUE = 8; // drops waiting below the lane at most; an older one waiting merges into the newest
+    // the stats' 2004 icons (Server/content stats.if), by the server's stat index (Skill.names)
+    const STAT_ICON = {
+        0: 'staticons-0', 1: 'staticons-2', 2: 'staticons-1', 3: 'staticons-6', 4: 'staticons-3', 5: 'staticons-4', 6: 'staticons-5',
+        7: 'staticons-15', 8: 'staticons-17', 9: 'staticons-11', 10: 'staticons-14', 11: 'staticons-16', 12: 'staticons-10',
+        13: 'staticons-13', 14: 'staticons-12', 15: 'staticons-8', 16: 'staticons-7', 17: 'staticons-9', 20: 'staticons2-0'
+    };
+    const STAT_NAME = ['Attack', 'Defence', 'Strength', 'Hitpoints', 'Ranged', 'Prayer', 'Magic', 'Cooking', 'Woodcutting', 'Fletching', 'Fishing', 'Firemaking', 'Crafting', 'Smithing', 'Mining', 'Herblore', 'Agility', 'Thieving', 'Slayer', '', 'Runecraft'];
 
     let api = null;
     const el = {};
@@ -129,6 +154,14 @@
         linesTimer: 0,
         orbsKey: '',
         batteryKey: '',
+        // the XP counter: each stat's XP since the character logged in (the first report of a stat is where it stands, a
+        // later higher one a gain), the gains of this tick waiting to be one drop, and the drops rising
+        xp: new Map(),
+        xpDirty: false, // a stat came since the counter was last written
+        xpPending: null, // Map stat -> gain
+        xpTimer: 0,
+        xpLane: null, // { rise } as place() left the lane, or null while the counter is hidden
+        xpDrops: [], // { node, t0, start, h } (start: px below the lane's top when made, at t0)
         zoomArc: null, // the zoom slider's groove as placed: { out, in, r } (degrees, HUD px)
         zoomDrag: null, // { id, offset }: the finger moving the knob
         zoomNotch: null, // where the knob last stopped with a click: 'min', 'max', 'detent'
@@ -141,7 +174,7 @@
 
     function init(hostApi) {
         api = hostApi;
-        for (const id of ['hud-dialog', 'hud-dialog-options', 'hud', 'hud-ui', 'surface-game', 'surface-map', 'surface-side', 'surface-chat', 'hud-map', 'hud-map-clip', 'btn-compass', 'btn-worldmap', 'hud-orbs', 'map-zoom', 'map-zoom-track', 'zoom-mark-in', 'zoom-mark-out', 'hud-tabs', 'hud-panel', 'btn-drop', 'hud-chat-box', 'hud-chat-bar', 'hud-chat-modes', 'hud-chat-lines', 'hud-camera', 'btn-chat-toggle', 'orb-hp', 'orb-prayer', 'hp-value', 'prayer-value', 'run-energy', 'hud-battery', 'battery-fill', 'battery-value']) {
+        for (const id of ['hud-dialog', 'hud-dialog-options', 'hud', 'hud-ui', 'surface-game', 'surface-map', 'surface-side', 'surface-chat', 'hud-map', 'hud-map-clip', 'btn-compass', 'btn-worldmap', 'hud-orbs', 'map-zoom', 'map-zoom-track', 'zoom-mark-in', 'zoom-mark-out', 'hud-tabs', 'hud-panel', 'btn-drop', 'hud-chat-box', 'hud-chat-bar', 'hud-chat-modes', 'hud-chat-lines', 'hud-camera', 'btn-chat-toggle', 'orb-hp', 'orb-prayer', 'hp-value', 'prayer-value', 'run-energy', 'hud-battery', 'battery-fill', 'battery-value', 'hud-xp', 'xp-total', 'hud-xp-drops']) {
             el[id] = document.getElementById(id);
         }
         el.rose = el['btn-compass'].querySelector('.compass-rose');
@@ -163,6 +196,8 @@
         api.bindTapButton(el['btn-worldmap'], () => api.openWorldMap?.());
         api.bindTapButton(el['orb-hp'], () => onTab(STATS_TAB));
         api.bindTapButton(el['orb-prayer'], () => onTab(PRAYER_TAB));
+        api.bindTapButton(el['hud-xp'], () => onTab(STATS_TAB));
+        el['hud-xp'].querySelector('.icon').style.backgroundImage = `url(ui/sprites/sideicons-${TAB_ICON[STATS_TAB]}.png)`;
         api.bindTapButton(el['btn-drop'], () => setTapDrop(!state.tapDrop));
         // a tap on the ring (not the map) must not reach the world under it
         el['hud-map'].addEventListener('pointerdown', event => event.preventDefault());
@@ -674,6 +709,32 @@
             g.zoomBoxes.push(knobBox(a));
         }
 
+        // The XP counter under the orbs and the lane its drops rise through under it, both right-aligned clear of the
+        // minimap's ring, its compass and its zoom slider (wherever the knob may be) at their height; the lane stops
+        // above the panel where the panel opens under it (a short screen).
+        const xpTop = g.orbs.y + ORB_H + GAP;
+        const laneTop = xpTop + XP_H;
+        let rise = XP_RISE;
+        let xpRight = g.orbs.right;
+        const xpClear = (bandTop, bandBottom) => {
+            let x = xpRight;
+            const dy = Math.max(0, bandTop - g.map.cy, g.map.cy - bandBottom);
+            if (dy < r) {
+                x = Math.min(x, g.map.cx - Math.sqrt(r * r - dy * dy) - GAP);
+            }
+            for (const box of [{ x: g.compass.x, y: g.compass.y, b: g.compass.y + COMPASS }, ...g.zoomBoxes]) {
+                if (box.y < bandBottom && box.b > bandTop) {
+                    x = Math.min(x, box.x - GAP);
+                }
+            }
+            return Math.floor(x);
+        };
+        if (show.panel && g.panel.y < laneTop + rise + GAP && g.panel.x + g.panel.w > xpRight - XP_LANE_W) {
+            rise = Math.max(XP_RISE_MIN, g.panel.y - GAP - laneTop);
+        }
+        xpRight = xpClear(xpTop, laneTop + rise);
+        g.xp = { right: xpRight, y: xpTop, laneTop, rise };
+
         // the battery in the top left corner
         g.battery = { x: left, y: top, bottom: top + BATTERY_H };
 
@@ -721,6 +782,8 @@
             orbs: !s.mainModal && !s.sideModal && !typing,
             // (with the orbs: out of the way of a window, and of the chatbox lifted above the keyboard)
             battery: api.battery?.() != null && !s.mainModal && !s.sideModal && !typing,
+            // (with the orbs too, once the server has sent the stats)
+            xp: api.settings.xpDrops !== false && state.xp.size > 0 && !s.mainModal && !s.sideModal && !typing,
             chat: chatShown && !(state.dialog && !typing),
             dialog: chatShown && !!state.dialog && !typing,
             // the chat filters only beside a chatbox the player opened or is typing in, not under a dialogue, prompt
@@ -843,6 +906,24 @@
             dialogTop = g.chat.y + g.chat.h - height;
             setBox(dialog, g.chat.x, dialogTop, Math.min(g.chat.w, g.coveredRight - GAP - g.chat.x), height);
         }
+
+        // The XP counter and its lane (a drop already rising keeps its place in it), shorter above a long list of
+        // answers, and away while those reach up to it.
+        let xpRise = g.xp.rise;
+        const dialogUnder = show.dialog && g.chat.x + Math.min(g.chat.w, g.coveredRight - GAP - g.chat.x) > g.xp.right - XP_LANE_W;
+        if (dialogUnder) {
+            xpRise = Math.min(xpRise, dialogTop - GAP - g.xp.laneTop);
+        }
+        const xpShown = show.xp && !(dialogUnder && dialogTop < g.xp.laneTop + GAP);
+        const laneShown = xpShown && xpRise >= XP_RISE_MIN;
+        el['hud-xp'].hidden = !xpShown;
+        el['hud-xp-drops'].hidden = !laneShown;
+        Object.assign(el['hud-xp'].style, { right: `${v.vw - g.xp.right}px`, top: `${g.xp.y}px`, height: `${XP_H}px` });
+        Object.assign(el['hud-xp-drops'].style, { right: `${v.vw - g.xp.right}px`, top: `${g.xp.laneTop}px`, width: `${XP_LANE_W}px`, height: `${xpRise}px` });
+        if (!laneShown) {
+            clearXpDrops(); // (the gains made while it is hidden are in the total; their drops are not shown later)
+        }
+        state.xpLane = laneShown ? { rise: xpRise } : null;
 
         // the battery, unless a long list of answers reaches up into the corner
         const battery = el['hud-battery'];
@@ -1138,6 +1219,8 @@
 
         updateOrbs(s);
         updateBattery();
+        updateXp();
+        setClass(el['hud-xp'], 'unavailable', !s.tabs[STATS_TAB]);
         if (s.cameraYaw !== state.yaw && typeof s.cameraYaw === 'number') {
             state.yaw = s.cameraYaw;
             el.rose.style.transform = `rotate(${(s.cameraYaw * 360) / 2048}deg)`;
@@ -1252,7 +1335,193 @@
         return node;
     }
 
+    // ------------------------------------------------------------------------------------------------ XP drops
+
+    // A stat's XP as the server sent it (client patch 0035): the whole set at login (where the character stands), then
+    // each change. A higher XP than before is a gain: the gains of one tick wait XP_GROUP_MS to become one drop.
+    function stat(detail) {
+        const index = detail?.stat;
+        const xp = detail?.xp;
+        if (!Number.isInteger(index) || !Number.isFinite(xp)) {
+            return;
+        }
+        const before = state.xp.get(index);
+        state.xp.set(index, xp);
+        state.xpDirty = true;
+        if (before === undefined) {
+            if (state.xp.size === 1 && state.active) {
+                update(); // (the counter shows from the first stat)
+            }
+        } else if (xp > before) {
+            state.xpPending ??= new Map();
+            state.xpPending.set(index, (state.xpPending.get(index) ?? 0) + (xp - before));
+            if (!state.xpTimer) {
+                state.xpTimer = setTimeout(flushXp, XP_GROUP_MS);
+            }
+        }
+        if (state.active) {
+            updateXp();
+        }
+    }
+
+    // a new session (logged in or out): the stats that follow are where the character stands
+    function xpReset() {
+        state.xp.clear();
+        state.xpPending = null;
+        clearTimeout(state.xpTimer);
+        state.xpTimer = 0;
+        state.xpDirty = false;
+        clearXpDrops();
+    }
+
+    // the counter's total (at a stat, and in the HUD's next frame for stats that came while it was not on screen)
+    function updateXp() {
+        if (!state.xpDirty) {
+            return;
+        }
+        state.xpDirty = false;
+        let total = 0;
+        for (const xp of state.xp.values()) {
+            total += xp;
+        }
+        const text = formatXp(total);
+        el['xp-total'].textContent = text;
+        el['hud-xp'].setAttribute('aria-label', `Total XP ${text}`);
+    }
+
+    function formatXp(n) {
+        return Math.floor(n).toLocaleString('en-US');
+    }
+
+    function flushXp() {
+        state.xpTimer = 0;
+        const gains = state.xpPending;
+        state.xpPending = null;
+        if (gains && state.active && state.xpLane && api.settings.xpDrops !== false) {
+            xpDrop(gains);
+        }
+    }
+
+    // One drop: a row per skill (icon and "+amount"), or combined one row of their icons and the sum, made below the lane's bottom, or lower while the one before has
+    // not yet risen clear of it (unseen until it reaches the lane), and rising at the chosen speed until it fades under the
+    // counter.
+    function xpDrop(gains) {
+        const lane = state.xpLane;
+        const now = performance.now();
+        state.xpDrops = state.xpDrops.filter(d => d.node.isConnected);
+        const ahead = state.xpDrops;
+        // a long queue (a burst of gains with the lane busy) adds to the newest drop still waiting instead
+        const waiting = ahead.filter(d => xpDropTop(d, now) > lane.rise);
+        if (waiting.length >= XP_QUEUE) {
+            const last = waiting[waiting.length - 1];
+            for (const [index, gain] of gains) {
+                last.gains.set(index, (last.gains.get(index) ?? 0) + gain);
+            }
+            last.rows = fillXpDrop(last.node, last.gains, last.combined);
+            animateXpDrop(last, xpDropTop(last, now), now); // (its height may have grown)
+            return;
+        }
+        const node = document.createElement('div');
+        node.className = 'xp-drop';
+        const combined = xpCombined();
+        const rows = fillXpDrop(node, gains, combined);
+        let start = lane.rise;
+        const prev = ahead[ahead.length - 1];
+        if (prev) {
+            start = Math.max(start, xpDropTop(prev, now) + prev.h + 2);
+        }
+        el['hud-xp-drops'].append(node);
+        const drop = { node, gains: new Map(gains), combined, rows, t0: now, start, h: 0, speed: xpSpeed(), animation: null };
+        animateXpDrop(drop, start, now);
+        state.xpDrops.push(drop);
+    }
+
+    // a drop's top, in px below the lane's top, at `now`
+    function xpDropTop(d, now) {
+        return d.start - d.speed * ((now - d.t0) / 1000);
+    }
+
+    function xpSpeed() {
+        const speed = api.settings.xpDropSpeed;
+        return Number.isFinite(speed) && speed > 0 ? speed : XP_SPEED_DEFAULT;
+    }
+
+    function xpCombined() {
+        return api.settings.xpDropStyle === 'combined';
+    }
+
+    // its top travels from `from` to -h at its speed: the lane clips it (fading over its ends, host.css), so it shows from
+    // the lane's bottom edge and slides into the counter row by row
+    function animateXpDrop(d, from, now) {
+        d.animation?.cancel();
+        d.h = d.rows * XP_ROW;
+        d.t0 = now;
+        d.start = from;
+        const frames = [{ transform: `translateY(${from}px)` }, { transform: `translateY(${-d.h}px)` }];
+        d.node.style.transform = `translateY(${from}px)`;
+        d.animation = d.node.animate(frames, { duration: ((from + d.h) / d.speed) * 1000, easing: 'linear', fill: 'forwards' });
+        d.animation.onfinish = () => d.node.remove();
+    }
+
+    // a drop's rows (each stat: its icon, data-stat, "+amount"; combined: one row of all the icons and the sum); returns
+    // how many rows
+    function fillXpDrop(node, gains, combined) {
+        node.textContent = '';
+        const icon = index => {
+            const node = document.createElement('span');
+            node.className = 'icon';
+            node.dataset.stat = String(index);
+            const sprite = STAT_ICON[index];
+            if (sprite) {
+                node.style.backgroundImage = `url(ui/sprites/${sprite}.png)`;
+            }
+            return node;
+        };
+        const row = () => {
+            const node = document.createElement('div');
+            node.className = 'xp-row';
+            return node;
+        };
+        const name = index => STAT_NAME[index] || 'XP';
+        if (combined) {
+            let sum = 0;
+            const icons = document.createElement('span');
+            icons.className = 'xp-icons';
+            for (const [index, gain] of gains) {
+                icons.append(icon(index));
+                sum += gain;
+            }
+            const line = row();
+            line.append(icons, span('xp-gain', `+${formatXp(sum)}`));
+            node.append(line);
+            node.dataset.label = `${[...gains.keys()].map(name).join(', ')} +${formatXp(sum)}`;
+            return 1;
+        }
+        const names = [];
+        for (const [index, gain] of gains) {
+            const line = row();
+            line.append(icon(index), span('xp-gain', `+${formatXp(gain)}`));
+            line.dataset.stat = String(index);
+            node.append(line);
+            names.push(`${name(index)} +${formatXp(gain)}`);
+        }
+        node.dataset.label = names.join(', ');
+        return gains.size;
+    }
+
+    function clearXpDrops() {
+        for (const d of state.xpDrops) {
+            d.node.remove();
+        }
+        state.xpDrops = [];
+        if (el['hud-xp-drops']) {
+            el['hud-xp-drops'].textContent = '';
+        }
+    }
+
     const hud = {
+        stat,
+        xpReset,
         layout,
         setEnabled,
         toggleRun,
