@@ -702,7 +702,8 @@ try {
     // the check is on the touchend.)
     check('...and its touchend is cancelled, so iOS sends no click through to the world below', same(cancelled.actions, ['Cancel']) && same(cancelled.touchEnds, [true]), JSON.stringify(cancelled));
 
-    // press-drag-release: hold, slide onto "Walk here" (the top option), lift there: the player walks
+    // no press-drag-release (patch 0036): hold, slide onto "Walk here" (the top option), lift there: nothing is picked
+    // and the menu stays open for a tap (a camera turn that rested first slid onto it and walked)
     const beforeSlide = await stablePosition();
     p = (await walkablePoint([[-2, 1], [2, 1], [-2, 2], [2, 2], [0, 2], [-3, 0], [3, 0], [-2, -1], [2, -1]])) ?? (await worldPoint(250, 120));
     await touch('touchStart', p.x, p.y);
@@ -716,10 +717,13 @@ try {
         }
     }
     const highlighted = await evaluate(`document.querySelector('#menu .menu-option.active')?.textContent ?? ''`);
+    const slideFrom = await evaluate('window.__actions.length');
     await touch('touchEnd');
-    await sleep(300);
-    const slid = await waitFor(`(() => { const c = ${C}; const q = c.localPlayer; return q && JSON.stringify([c.mapBuildBaseX + (q.x >> 7), c.mapBuildBaseZ + (q.z >> 7), c.minusedlevel]) !== ${JSON.stringify(JSON.stringify(beforeSlide))}; })()`, 5000);
-    check('press-drag-release: sliding onto "Walk here" highlights it and lifting there walks', topText === 'Walk here' && highlighted === 'Walk here' && slid.ok && !(await evaluate(`${C}.isMenuOpen`)), JSON.stringify({ topText, highlighted, walked: slid.ok }));
+    await sleep(1200);
+    const slid = { actions: await evaluate(`window.__actions.slice(${slideFrom})`), open: await evaluate(`${C}.isMenuOpen`), shown: await evaluate(`!document.getElementById('menu-layer').hidden`), moved: !same(await position(), beforeSlide) };
+    check('sliding onto "Walk here" neither highlights it nor picks it when lifted there; the menu stays open (patch 0036)', topText === 'Walk here' && highlighted === '' && slid.actions.length === 0 && slid.open && slid.shown && !slid.moved, JSON.stringify({ topText, highlighted, ...slid }));
+    await tapElement('#menu .menu-option:last-child'); // Cancel
+    await sleep(600);
     await stablePosition();
 
     // a tap beside the open menu closes it without acting
@@ -734,20 +738,27 @@ try {
     await sleep(600);
     check('a tap beside the menu closes it without acting', !(await evaluate(`${C}.isMenuOpen`)) && same(await position(), beforeBeside));
 
-    // the hold ring gives up exactly where the long-press does (more than 14 px along either axis): a finger that drifts
-    // 10 px both ways keeps both, and the menu opens
+    // the hold ring shows once the touch is no tap (250 ms, patch 0036) and gives up exactly where the long-press does
+    // (more than 14 px along either axis once the finger rested): a finger that drifts 10 px both ways after resting
+    // keeps both, and the menu opens
+    // (a 600 ms hold here, so a busy machine's delays cannot let the menu open, which hides the ring, before the checks)
     p = (await walkablePoint([[2, 0], [-2, 0], [0, 2], [0, -2], [2, 1], [-2, 1], [1, 2], [-1, 2]])) ?? (await worldPoint(250, 120));
+    const holdMs = await evaluate('window.lcHost.settings.longPressMs');
+    await evaluate('window.lcHost.settings.longPressMs = 600');
     await touch('touchStart', p.x, p.y);
-    await sleep(220);
+    await sleep(150);
+    const ringTap = await evaluate(`!document.getElementById('press-ring').hidden`);
+    await sleep(170);
     const ring0 = await evaluate(`!document.getElementById('press-ring').hidden`);
     await touch('touchMove', p.x + 10, p.y + 10);
     await sleep(60);
     const ring1 = await evaluate(`!document.getElementById('press-ring').hidden`);
-    await sleep(450);
+    await sleep(600);
     const held2 = await evaluate(`${C}.hudMenu()`);
     await touch('touchEnd');
     await sleep(200);
-    check('the hold ring stays on a finger that drifts 10 px both ways, and the menu then opens', ring0 && ring1 && held2 !== null, JSON.stringify({ ring0, ring1, menu: held2?.options }));
+    await evaluate(`window.lcHost.settings.longPressMs = ${holdMs}`);
+    check('the hold ring is not there while the touch can still tap (150 ms), shows after, stays on a finger that drifts 10 px both ways after resting, and the menu then opens', !ringTap && ring0 && ring1 && held2 !== null, JSON.stringify({ ringTap, ring0, ring1, menu: held2?.options }));
     // a pick and a close of that menu in the same client cycle (hud.js closes the menu of a surface it hides): the pick
     // still runs
     const picks = await evaluate('window.__actions.length');
@@ -846,7 +857,7 @@ try {
         const landed = await waitFor(`${C}.landing === 'held'`, 1000, 10);
         const kept = await evaluate(`${C}.menuOption[${C}.menuNumEntries - 1]`);
         await evaluate(`${C}.mainModalId = ${SMITHING}`);
-        await sleep(150);
+        await sleep(60); // a frame or two with the window (a tap lifts within 250 ms: patch 0036)
         await touch('touchEnd');
         await sleep(300);
         const covered = await evaluate(`window.__actions.slice(${from})`);

@@ -290,7 +290,10 @@ try {
         }
         actions = await logSince(mark, 'action');
         st = await c('({ open: c.isMenuOpen, panning: c.panning })');
-        check('long-press: sliding onto an option and lifting selects it (no camera pan)', actions.length === 1 && /cancel/i.test(actions[0].option) && !st.open, { actions: actions.map(a => a.option), st });
+        check('long-press: sliding onto an option and lifting picks nothing, the menu stays open (no camera pan; patch 0036)', actions.length === 0 && st.open && !st.panning, { actions: actions.map(a => a.option), st });
+        row = await menuRow(0);
+        await tap(row.gx, row.gy); // Cancel
+        await sleep(200);
 
         // 8. Host "right-click" mode: the next tap clicks with button 2
         await sleep(300);
@@ -402,6 +405,88 @@ try {
                 return { delta: (yawA - (await c('c.orbitCameraYaw'))) & 0x7ff, clicks: (await logSince(m0, 'click')).length };
             })();
             check('camera: an 18 px drag turns 18 * 4 = 72 units (nothing lost to the threshold), no click', short.delta === 72 && short.clicks === 0, short);
+
+            // patch 0036: only a short, still touch taps. A 10 px nudge early in a touch turns the camera (past 8 px)
+            const nudge = await (async () => {
+                const id4 = nextTouchId++;
+                const yawA = await c('c.orbitCameraYaw');
+                const m0 = await logLen();
+                await touch.start([{ x: p.x, y: p.y, id: id4 }]);
+                for (let i = 1; i <= 5; i++) {
+                    await touch.move([{ x: p.x + 2 * i, y: p.y, id: id4 }]);
+                    await sleep(10);
+                }
+                await touch.end([]);
+                await sleep(250);
+                return { delta: (yawA - (await c('c.orbitCameraYaw'))) & 0x7ff, clicks: (await logSince(m0, 'click')).length };
+            })();
+            check('camera: a quick 10 px nudge turns 40 units and never clicks (patch 0036)', nudge.delta === 40 && nudge.clicks === 0, nudge);
+            // a tap that wobbled 3 px stays a tap
+            const wobble = await (async () => {
+                const m0 = await logLen();
+                const id5 = nextTouchId++;
+                await touch.start([{ x: p.x, y: p.y, id: id5 }]);
+                await touch.move([{ x: p.x + 3, y: p.y + 2, id: id5 }]);
+                await sleep(40);
+                await touch.end([]);
+                await sleep(250);
+                return (await logSince(m0, 'click')).map(k => k.button);
+            })();
+            check('tap: a short touch that wobbled 3 px still clicks once (left)', wobble.join() === '1', wobble);
+            await sleep(600);
+            // a still hold let go before its menu opens (320 ms of 400) does nothing
+            const early = await (async () => {
+                const m0 = await logLen();
+                await touch.start([{ x: p.x, y: p.y, id: nextTouchId++ }]);
+                await sleep(320);
+                await touch.end([]);
+                await sleep(500);
+                return { clicks: (await logSince(m0, 'click')).map(k => k.button), open: await c('c.isMenuOpen') };
+            })();
+            check('tap: a hold let go before its menu opens does nothing (no left click, no menu; patch 0036)', early.clicks.length === 0 && !early.open, early);
+            // a flick whose last pointermove was within the slop, lifted 30 px away: the lift point counts (a camera turn
+            // by all of it), no tap where it lifted
+            const flick = await (async () => {
+                const m0 = await logLen();
+                const yawA = await c('c.orbitCameraYaw');
+                const id6 = nextTouchId++;
+                await touch.start([{ x: p.x, y: p.y, id: id6 }]);
+                await touch.move([{ x: p.x + 4, y: p.y, id: id6 }]);
+                await sleep(20);
+                const sent = await evaluate(`(() => {
+                    const c = window.__client;
+                    const init = { pointerId: c.canvasPointerId, pointerType: 'touch', isPrimary: true, bubbles: true, cancelable: true, clientX: ${p.x + 30}, clientY: ${p.y}, screenX: c.sx + 30, screenY: c.sy };
+                    document.getElementById('canvas').dispatchEvent(new PointerEvent('pointerup', init));
+                    return init.pointerId;
+                })()`);
+                await touch.cancel();
+                await sleep(250);
+                return { sent, delta: (yawA - (await c('c.orbitCameraYaw'))) & 0x7ff, clicks: (await logSince(m0, 'click')).length };
+            })();
+            check('camera: a flick lifted 30 px away after a 4 px pointermove turns 120 units, no click (patch 0036)', flick.sent >= 0 && flick.delta === 120 && flick.clicks === 0, flick);
+            // iOS sends mousedown/mouseup at a swipe's start point ~35 ms after the finger lifted (the walk after a camera
+            // turn in the iPhone trace): mouse button events within 1 s of a touch are dropped; later a mouse still clicks
+            const compat = await (async () => {
+                const press = `(() => { const cv = document.getElementById('canvas'); for (const type of ['mousedown', 'mouseup']) cv.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: ${p.x}, clientY: ${p.y} })); })()`;
+                const m0 = await logLen();
+                const id7 = nextTouchId++;
+                await touch.start([{ x: p.x, y: p.y, id: id7 }]);
+                for (let i = 1; i <= 6; i++) {
+                    await touch.move([{ x: p.x + 6 * i, y: p.y, id: id7 }]);
+                    await sleep(15);
+                }
+                await touch.end([]);
+                await sleep(35);
+                await evaluate(press);
+                await sleep(250);
+                const during = (await logSince(m0, 'click')).length;
+                await sleep(1100);
+                const m1 = await logLen();
+                await evaluate(press);
+                await sleep(250);
+                return { during, after: (await logSince(m1, 'click')).length };
+            })();
+            check('a mouse press 35 ms after a swipe (iOS compatibility events) is dropped; one a second later still clicks (patch 0036)', compat.during === 0 && compat.after === 1, compat);
         }
 
         // 10. pointercancel releases everything and never clicks
@@ -431,9 +516,10 @@ try {
             st = await c('({ panning: c.panning, button: c.mouseButton })');
             clicks = await logSince(mark, 'click');
             check('pointercancel: ends a camera pan without a click', panning === true && st.panning === false && clicks.length === 0, { panningBefore: panning, st, clicks });
-            // (c) drag emulation in the side panel (held left button)
+            // (c) drag emulation (held left button) on the chat history's scrollbar (patch 0036: only an item or a
+            // scrollbar takes a slide's press)
             mark = await logLen();
-            p = g2c(650, 330);
+            p = g2c(488, 380);
             const id3 = nextTouchId++;
             await touch.start([{ x: p.x, y: p.y, id: id3 }]);
             for (let i = 1; i <= 6; i++) {
@@ -445,7 +531,7 @@ try {
             await sleep(150);
             st = await c('({ dragging: c.dragging, button: c.mouseButton, next: c.nextMouseClickButton, objDragArea: c.objDragArea })');
             clicks = await logSince(mark, 'click');
-            check('pointercancel: releases a side-panel drag (button up, no click after the drag start)', dragging.dragging === true && dragging.button === 1 && !st.dragging && st.button === 0 && st.objDragArea === 0 && clicks.length === 1, { before: dragging, after: st, clicks: clicks.length });
+            check('pointercancel: releases a scrollbar drag (button up, no click after the drag start)', dragging.dragging === true && dragging.button === 1 && !st.dragging && st.button === 0 && st.objDragArea === 0 && clicks.length === 1, { before: dragging, after: st, clicks: clicks.length });
         }
 
         // 11. Chat input: tap shows, tap elsewhere hides; typing goes to chatInput
@@ -494,8 +580,23 @@ try {
             await sleep(800);
             // coins are in bank_side inv slot 0: [inv] x=16 y=8 (32x32 slots) in the side panel at 553,205
             const slot = { gx: 553 + 16 + 16, gy: 205 + 8 + 16 };
-            mark = await logLen();
             const p = g2c(slot.gx, slot.gy);
+            // patch 0036: a quick slide on an item never does its option (it deposited one: let go within 5 cycles)
+            {
+                mark = await logLen();
+                const id = nextTouchId++;
+                await touch.start([{ x: p.x, y: p.y, id }]);
+                for (let i = 1; i <= 4; i++) {
+                    await touch.move([{ x: p.x + 6 * i, y: p.y, id }]);
+                    await sleep(5);
+                }
+                const pressed = await c('c.objDragByFinger && c.mouseButton === 1'); // the slide pressed the item
+                await touch.end([]);
+                await sleep(400);
+                const acts = await logSince(mark, 'action');
+                check('a quick slide on an item presses it but does not do its option (patch 0036)', pressed && acts.length === 0, { pressed, actions: acts.map(a => a.option) });
+            }
+            mark = await logLen();
             await touch.start([{ x: p.x, y: p.y, id: nextTouchId++ }]);
             await sleep(700);
             const m = await c('({ open: c.isMenuOpen, area: c.menuArea, options: Array.from({ length: c.menuNumEntries }, (_, i) => c.menuOption[i]) })');
@@ -630,7 +731,11 @@ try {
             const listClicks = await logSince(mark, 'click');
             check('drag-to-scroll: vertical drag on the quest list scrolls it (content follows the finger)', list.during && list.during.scrollHeight > list.during.height && listAfter > 30 && listClicks.length === 0, { during: list.during, after: listAfter, clicks: listClicks.length });
             const hz = await vdrag(640, 400, 4, { dxCss: 30, probe: '({ dragging: window.__client.dragging, scroll: window.__client.touchScroll !== null, button: window.__client.mouseButton })' });
-            check('drag-to-scroll: a horizontal-first drag keeps the left-button drag emulation', hz.during.dragging && !hz.during.scroll && hz.during.button === 1, hz.during);
+            check('drag-to-scroll: a horizontal-first drag on the list (no item, no scrollbar) presses nothing (patch 0036)', hz.during.dragging && !hz.during.scroll && hz.during.button === 0 && hz.clicks.length === 0, { during: hz.during, clicks: hz.clicks.length });
+            // its scrollbar still takes the press (a drag on it moves the list)
+            const sbx = await c('(() => { for (let x = 680; x < 743; x++) { if (c.scrollbarAt(x, 400)) return x; } return -1; })()');
+            const sb = sbx < 0 ? null : await vdrag(sbx + 2, 400, 30, { probe: '({ dragging: window.__client.dragging, scroll: window.__client.touchScroll !== null, button: window.__client.mouseButton })' });
+            check('...a drag on its scrollbar still presses (left-button drag emulation)', sb !== null && sb.during.dragging && !sb.during.scroll && sb.during.button === 1, { sbx, during: sb?.during });
             for (let i = 0; i < 9; i++) {
                 await chat(`line ${i}`);
             }

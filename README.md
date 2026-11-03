@@ -81,7 +81,7 @@ chatbox).
 | Gesture | What it does |
 |---|---|
 | Tap | Left click: walk, talk, attack, take, use. What the tap did shows beside it for a moment |
-| Hold | The options menu (right click), in large rows beside your finger: slide onto an option and let go, or lift and tap it |
+| Hold | The options menu (right click), in large rows beside your finger: lift and tap an option. Let go before it opens and nothing happens |
 | Drag on the world | Turn and tilt the camera |
 | Pinch | Zoom the camera |
 | Drag on a list, the bank or the chat | Scroll it |

@@ -4,8 +4,9 @@
 // patch 0012) the client leaves the open menu to the host: this file shows it as a large menu in the same look (the
 // menu's brown, its black title bar, the bold font and colour tags) beside the finger, never under it, with the top
 // option level with the finger:
-//   - press-drag-release: the menu opens while the long-press is held; sliding onto an option highlights it and lifting
-//     there picks it. Lifting without having slid onto one leaves it open;
+//   - the menu opens while the long-press is held and stays open when that finger lifts, wherever it lifts: lifting
+//     never picks (sliding onto an option and lifting there did, so a camera turn that rested first picked the top
+//     option beside the finger: a missclick);
 //   - tap: a tap on an option picks it, a tap beside the menu closes it (like a click beside the 2004 menu).
 // Picks and closes go back to the client by the menu's serial (hudMenuSelect / hudMenuClose), so a late tap can never
 // pick from a menu that has meanwhile changed. Used in both layouts. Loaded after host.js, which calls
@@ -27,7 +28,6 @@
     const TITLE_H = 21;
     const GAP = 24; // between the finger and the menu's near edge
     const EDGE = 6; // to the edges of the safe area
-    const SLIDE = 8; // px a held finger must move before lifting it can pick
     const LABEL_MS = 1000; // the action label's fade (host.css action-label-fade)
 
     let api = null;
@@ -39,7 +39,7 @@
 
     const state = {
         serial: 0, // the menu shown, 0 = none
-        drag: null, // { pointerId, x0, y0, moved } the finger that opened the menu with a long-press, still down
+        drag: null, // { pointerId } the finger that opened the menu with a long-press, still down (its lift picks nothing)
         active: -1, // highlighted option
         tapRow: -1, // option a tap went down on
         downOnLayer: new Set() // pointers that went down beside the menu
@@ -133,7 +133,7 @@
         const named = Number.isInteger(detail.pointerId) ? detail.pointerId : [...pointers.keys()].at(-1) ?? -1;
         const heldId = named >= 0 && pointers.has(named) ? named : null;
         const anchor = heldId !== null ? pointers.get(heldId) : lastDown ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-        state.drag = heldId !== null ? { pointerId: heldId, x0: anchor.x, y0: anchor.y, moved: false } : null;
+        state.drag = heldId !== null ? { pointerId: heldId } : null;
 
         layer.hidden = false;
         place(anchor, options.length);
@@ -284,20 +284,6 @@
         if (pointers.has(event.pointerId)) {
             pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, type: event.pointerType });
         }
-        const drag = state.drag;
-        if (!state.serial || !drag || drag.pointerId !== event.pointerId) {
-            return;
-        }
-        if (!drag.moved && Math.hypot(event.clientX - drag.x0, event.clientY - drag.y0) >= SLIDE) {
-            drag.moved = true;
-        }
-        if (drag.moved) {
-            const index = optionAt(event.clientX, event.clientY);
-            if (index !== state.active && index !== -1) {
-                api.haptic('selection');
-            }
-            setActive(index);
-        }
     }
 
     function onPointerUp(event) {
@@ -306,16 +292,9 @@
             state.downOnLayer.delete(event.pointerId);
             return;
         }
-        const drag = state.drag;
-        if (drag?.pointerId === event.pointerId) {
-            // the long-press finger lifted: pick what it slid onto, else leave the menu open for a tap
+        if (state.drag?.pointerId === event.pointerId) {
+            // the long-press finger lifted: the menu stays open for a tap
             state.drag = null;
-            const index = drag.moved ? optionAt(event.clientX, event.clientY) : -1;
-            if (index !== -1) {
-                pick(index);
-            } else {
-                setActive(-1);
-            }
             return;
         }
         if (state.downOnLayer.delete(event.pointerId)) {

@@ -447,9 +447,11 @@ above the keyboard.
 
 ### 6.2 Touch on the host side (`web/host/menu.js`, `host.js`)
 
-The gestures themselves are the client's (patches 0012-0013, `web/client/README.md`): every touch is one of a tap, a
-long-press (held for `settings.longPressMs`, within `TOUCH_SLOP` = 14 px along either axis), a camera turn, an item or
-scrollbar drag, or a scroll, which glides on after the finger lifts; a tap on a list that is still gliding only stops
+The gestures themselves are the client's (patches 0012-0013 and 0036, `web/client/README.md`): every touch is one of a
+tap (lifted within 250 ms, having moved at most 8 px along either axis; anything else never clicks, and in game a hold
+lifted before its menu opened does nothing), a long-press (held for `settings.longPressMs`, within `TOUCH_SLOP` = 14 px
+along either axis), a camera turn (from 8 px within the first 250 ms, else from 14 px), an item or scrollbar drag (a
+slide from anywhere else on a panel presses nothing), or a scroll, which glides on after the finger lifts; a tap on a list that is still gliding only stops
 it. On touch an inventory slot takes its whole grid cell, and exactly one slot takes a point (where cells overlap, as in
 the worn equipment, the one whose icon is under the finger or nearest). The hover tooltip shows only while a finger is
 down, but a use or target mode that a tap selected keeps its prompt ("Use Tinderbox with...") until it ends. The host
@@ -457,9 +459,9 @@ adds:
 
 - **Options menu**: with `setHostMenus(true)` (Settings › Options menu: Large, the default, in both layouts) `menu.js`
   shows the client's menu as the 2004 menu with 40 px rows, beside the finger that long-pressed (`pointerId` from
-  'menu-open'; on the side with more room, the top option level with the finger, never under it). Press-drag-release:
-  sliding onto an option highlights it ('selection' haptic) and lifting there picks it ('light'); lifting elsewhere
-  leaves it open for a tap; a tap beside it closes it. It is scaled with the HUD on a large screen.
+  'menu-open'; on the side with more room, the top option level with the finger, never under it). It stays open when
+  the finger lifts, wherever it lifts (lifting never picks: a camera turn that rested first used to slide onto the top
+  option and pick it); a tap on an option picks it ('light'), a tap beside it closes it. It is scaled with the HUD on a large screen.
 - **Settings**: a stone sheet in the safe area (`#settings`), its categories down the left as the Game Options tab's
   buttons (Display, Sound, Controls, Tap options, World, Bot chat, Saved data, About; `host.js` `showSettingsSection`)
   and the chosen one's rows on the right, each category scrolling on its own if it must (Saved data's list). Display ›

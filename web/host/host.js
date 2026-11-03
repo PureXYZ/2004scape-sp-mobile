@@ -3054,6 +3054,7 @@
     // ------------------------------------------------------------------------------------------------ gestures
 
     const TOUCH_SLOP = 14; // the client's (patch 0012): a finger that moved further along either axis is no long-press
+    const TAP_MAX_MS = 250; // the client's (patch 0036): a touch held longer is no tap; lifted before its menu, nothing
 
     // Is this pointer event on the world: the HUD's world surface, or the classic canvas's viewport (game 4..516, 4..338)?
     function onWorld(event) {
@@ -3198,9 +3199,10 @@
     }
 
     // A ring that fills under a finger held still on the game (world, panel, chat) until the long-press opens the
-    // options menu, so a hold shows that it is working. It appears only after a short hold, so taps and drags never
-    // show it, and it gives up exactly when the client's long-press does (exceedsGrabThreshold: more than TOUCH_SLOP
-    // along either axis, in the screen coordinates the client reads).
+    // options menu, so a hold shows that it is working. It appears when the touch stops being a tap (TAP_MAX_MS: from
+    // then on, lifting before the menu opens does nothing), so taps and drags never show it, and it gives up exactly
+    // when the client's long-press does (exceedsGrabThreshold: more than TOUCH_SLOP along either axis, in the screen
+    // coordinates the client reads, or the finger turned the camera, dragged or scrolled: touchMoving).
     const pressRing = {
         el: null,
         timer: 0,
@@ -3213,8 +3215,13 @@
             this.el = document.getElementById('press-ring');
             window.addEventListener('pointerdown', event => this.start(event), true);
             window.addEventListener('pointermove', event => {
-                if (event.pointerId === this.pointerId && (Math.abs((event.screenX | 0) - this.screenX) > TOUCH_SLOP || Math.abs((event.screenY | 0) - this.screenY) > TOUCH_SLOP)) {
+                if (event.pointerId !== this.pointerId) {
+                    return;
+                }
+                if (Math.abs((event.screenX | 0) - this.screenX) > TOUCH_SLOP || Math.abs((event.screenY | 0) - this.screenY) > TOUCH_SLOP) {
                     this.cancel();
+                } else if (!this.el.hidden && client()?.hudState?.().touchMoving === true) {
+                    this.cancel(); // the camera turned (it starts at 8 px early in a touch), or a drag or scroll began
                 }
             }, true);
             for (const type of ['pointerup', 'pointercancel']) {
@@ -3237,7 +3244,7 @@
             this.y = event.clientY;
             this.screenX = event.screenX | 0;
             this.screenY = event.screenY | 0;
-            const delay = 140;
+            const delay = TAP_MAX_MS;
             this.timer = setTimeout(() => {
                 if (client()?.hudState?.().longPressable === false) {
                     return; // nothing to choose there (the minimap, bare stone): a hold is just a tap

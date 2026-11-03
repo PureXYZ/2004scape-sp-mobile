@@ -185,7 +185,8 @@ Checks:
 - **Long-press.**
   - Menu open *before* lift, right click only, no client haptic, `menu-open` event with the finger's `pointerId`.
   - Release keeps the menu open with no click.
-  - Tap an option; press-drag-release onto an option.
+  - Tap an option; a slide onto an option and lifting there picks nothing (patch 0036).
+  - A hold lifted before the menu opens does nothing (patch 0036).
 - **Right-click mode.** One-shot; its `menu-open` has `pointerId` -1.
 - **Camera.**
   - 40 px → exactly 160 yaw; unchanged while the finger rests; 80 px back → 320.
