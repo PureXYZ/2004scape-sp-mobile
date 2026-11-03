@@ -31,13 +31,37 @@
 //             replies to the human mode 'online' and no ambient; the outcome log line marked "(ambient)", no words
 //   off       Bots' own talk on Rules (and no model at all): no request, ambientWords false, no dice drawn; the same
 //             with the setting on but far from the human; the mod bot's lines never the model's
+// (bots ideas, round 5: I stage 2, the reactions to the human)
+//   golden    renderLocal of every situation of the round 2 model's data (phase7-data-r2: situations, eval, target; not
+//             published: PHASE7_DATA_R2 or --golden-data; skipped when absent)
+//             byte for byte as the engine rendered them before the reactions (test/data/model-golden-r2.json); a reply's prompt and the
+//             same situation as a reaction: only the task and the chat's end differ
+//   reaction  the reactions' switch on: a dance (port/BotWitness) and a level-up (port/BotReactions) near the human, each
+//             one ambient request ('reaction'), its prompt "Say one short chat line to {name}." and its chat ending
+//             "({name} is dancing)" / "({name} levelled woodcutting to N)" and the answer idea, said in the stub's words
+//             to the human (kind 'reaction')
+//   reactoff  the switch forced off (AMBIENT_REACTIONS ships true since r3): a dance and a level-up near the human with the model and Bots' own talk
+//             on: the rules' lines, no request, nothing told to the capture's listeners; ambientWords for a reaction
+//             false, no dice
+//   refusal   (round 5 ship) the guard's false refusals, the checker (model-data/checks.mjs) agreeing: a reaction may name
+//             the human's own combat ("lol lvl 14 in the wildy" at the ditch), any other number stays a claim ('level');
+//             a question about following ("why u follow me", "u following me?") is no promise, "follow me", "ill follow
+//             u", "come with me" are
+//   role      the guard keeps a reaction's role: a thanks ("ty", "thx", "np") or "wat u want" / "who is u" refused
+//             ('role'), a gz with the event's level passes; not without the ambient flag, nor for a thread's turn; a stub
+//             that thanks: the rules' line said
+//   first     a reaction (an emote) decided in the tick a thread's turn was asked goes first (the turn superseded: its rules' line);
+//             one a tick later waits ('inflight', 'pacing')
 //   errors    none
 //
-//   node --expose-gc web/engine/bots/test/model-ambient.test.mjs [--seed=5] [--only=guard,far,...]
+//   node --expose-gc web/engine/bots/test/model-ambient.test.mjs [--seed=5] [--only=guard,far,...] [--golden-data=DIR]
+import crypto from 'crypto';
+import fs from 'fs';
 import path from 'path';
 import { BOTS_DIR, importTs } from './lib/paths.mjs';
 import { prepareEngineClone, simWorldConfig, stubWorkerThreads } from './lib/clone.mjs';
 import { mulberry, scene } from './lib/dice.mjs';
+import { checkReply } from './model-data/checks.mjs';
 
 const args = Object.fromEntries(
     process.argv.slice(2).map(a => {
@@ -584,8 +608,274 @@ if (want('off')) {
     check("off: the player-mod bot's lines are never the model's", !mod.ok && mod.refusal === 'mod' && mod.draws === 0, mod);
 }
 
+// ======== (bots ideas, round 5: I stage 2) the reactions to the human ========
+
+const humanName = human.displayName || human.username;
+const WITNESS_OFF = { death: 0, drop: 0, human: 0, show: 0, gear: 0, level: 0, respond: 0, fight: 0 };
+/** the scene's spot clear of other bots (each within 14 tiles of it put back at Lumbridge's courtyard) */
+const clear = (x, z, keep) => {
+    for (const p of all) if (!keep.includes(p) && cheb(p, { x, z }) <= 14) place(p, 3222, 3218);
+};
+/**
+ * the stub's words and Bots' own talk on, the reactions' switch as asked; a place's voice cap off (port/BotVoice: the
+ * scenes' one spot fills its ledger, and a witness over its share says nothing: not what these scenes are about)
+ */
+function reactions(on, stub = 'stub', opts = {}) {
+    model(stub, opts);
+    A.setAmbientReactionsForTest(on);
+    lib.setVoiceCapForTest(true);
+}
+const lastLines = text => text.split('\n').slice(-2);
+/** port/BotWitness's minute between two reactions to a human, and port/BotReactions' between two gz, over */
+const HUMAN_GAP = 101;
+
+// ---- golden: the reply prompts as before, byte for byte ----
+if (want('golden')) {
+    scene(SEED, 'golden');
+    const P = lib.BotModelPromptNs;
+    const golden = JSON.parse(fs.readFileSync(path.join(BOTS_DIR, 'test/data/model-golden-r2.json'), 'utf8'));
+    const dir = path.resolve(String(args['golden-data'] ?? process.env.PHASE7_DATA_R2 ?? path.resolve(BOTS_DIR, 'test/data/no-golden-data')));
+    if (!fs.existsSync(path.join(dir, 'situations.jsonl'))) check(`golden: round 2's situations rendered as at ${golden.base} (skipped: no data at ${dir})`, true);
+    else {
+        const got = {};
+        for (const file of Object.keys(golden.files)) {
+            const h = crypto.createHash('sha256');
+            const rows = fs.readFileSync(path.join(dir, file), 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+            for (const r of rows) {
+                const p = P.renderLocal(r.situation);
+                h.update(`${r.id}\n${p.system}\n${p.user}\n`);
+            }
+            got[file] = { rows: rows.length, sha256: h.digest('hex') };
+        }
+        const same = Object.entries(golden.files).every(([f, g]) => got[f]?.rows === g.rows && got[f]?.sha256 === g.sha256);
+        check(`golden: renderLocal of round 2's ${Object.values(got).reduce((n, g) => n + g.rows, 0)} situations (situations, eval, target) byte for byte as at ${golden.base}`, same, { got, golden: golden.files });
+    }
+    // a reply's prompt, and the same situation as a reaction: the task and the chat's end only
+    const [b] = pair();
+    const s0 = P.situationOf({ bot: b, to: human, heard: 'gz', channel: 'public', via: 'named', greeted: false, intent: { id: 'thanks', text: 'ty' } });
+    const reply = P.renderLocal(s0);
+    const asReaction = P.renderLocal({ ...s0, heard: { ...s0.heard, text: '', via: 'reaction' }, hint: { intent: 'gz', text: 'gz' }, event: 'levelled woodcutting to 60' });
+    const tail = lastLines(asReaction.user);
+    const head = text => text.split('\n').slice(0, -2).join('\n');
+    check("golden: a reaction's prompt: \"Say one short chat line to {name}.\" for the reply's task, the rest of the system turn the same; its chat the same lines before, then the event and the idea (no line of the human's heard)", reply.system.includes(`Reply to ${humanName} in one short chat line.`) && asReaction.system === reply.system.replace(`Reply to ${humanName} in one short chat line.`, `Say one short chat line to ${humanName}.`) && head(asReaction.user) === head(reply.user) && lastLines(reply.user)[0] === `${humanName}: gz` && tail[0] === `(${humanName} levelled woodcutting to 60)` && tail[1] === '(answer idea: gz)', { system: asReaction.system.split('\n')[0], user: asReaction.user });
+}
+
+// ---- reaction: the switch on, a dance and a level-up in the stub's words ----
+if (want('reaction')) {
+    scene(SEED, 'reaction');
+    reactions(true);
+    const [b] = pair();
+    const spot = [base[0] + 3, base[1] + 34];
+    clear(spot[0], spot[1], [b]);
+    place(b, spot[0], spot[1]);
+    humanAt(0, 34);
+    tick(2);
+    settle(b);
+    lib.Witness.readyForTest(b);
+    lib.setWitnessRatesForTest({ ...WITNESS_OFF, human: 1 });
+    const log0 = ambientLog().length;
+    const sent0 = sent.length;
+    const from = said.length;
+    const reacted = lib.Witness.reactToHuman(human, 'react-dance', human.x, human.z, 0, 10, 'is dancing');
+    tick(30);
+    const msgs = sent.slice(sent0).filter(m => m.ambient);
+    const e = ambientLog().slice(log0).find(en => en.via === 'reaction');
+    const line = said.slice(from).find(l => l.kind === 'reaction' && l.to === human.username);
+    const tail = msgs[0] ? lastLines(msgs[0].local.user) : [];
+    check("reaction: a dance near the human: one ambient request ('reaction', local), said in the stub's words to the human (kind 'reaction')", reacted && msgs.length === 1 && msgs[0].mode === 'local' && e?.outcome === 'used' && line?.text === e.said && line.name === e.bot, { reacted, msgs: msgs.length, e: e && `${e.via} ${e.outcome} ${e.raw} -> ${e.said}`, line });
+    check("reaction: its prompt says \"Say one short chat line to {name}.\" and its chat ends \"({name} is dancing)\" and the answer idea", msgs[0] && msgs[0].local.system.includes(`Say one short chat line to ${humanName}.`) && !msgs[0].local.system.includes('Reply to') && tail[0] === `(${humanName} is dancing)` && /^\(answer idea: .+\)$/.test(tail[1] ?? ''), msgs[0] && { system: msgs[0].local.system.split('\n')[0], user: msgs[0].local.user });
+    lib.setWitnessRatesForTest(WITNESS_OFF);
+    // a level-up (port/BotReactions: gz, its chance forced)
+    tick(A.AMBIENT_GAP_TICKS);
+    settle(b);
+    const sent1 = sent.length;
+    const log1 = ambientLog().length;
+    const from1 = said.length;
+    const roll = lib.chatDice.roll;
+    lib.chatDice.roll = () => 0.01;
+    const was = human.baseLevels[8];
+    human.baseLevels[8] = was + 1;
+    tick(30);
+    lib.chatDice.roll = roll;
+    const gzMsg = sent.slice(sent1).find(m => m.ambient);
+    const gz = ambientLog().slice(log1).find(en => en.via === 'reaction');
+    const gzLine = said.slice(from1).find(l => l.kind === 'reaction' && l.to === human.username);
+    check(`reaction: a level-up (woodcutting ${was + 1}): its chat ends "(${humanName} levelled woodcutting to ${was + 1})", the rules' gz the idea, said in the stub's words`, gzMsg && lastLines(gzMsg.local.user)[0] === `(${humanName} levelled woodcutting to ${was + 1})` && lib.REACTION_LINES.gz.some(g => lastLines(gzMsg.local.user)[1] === `(answer idea: ${g.replace(' {name}', '')})`) && gz?.outcome === 'used' && gzLine?.text === gz.said, { user: gzMsg?.local.user, gz: gz && `${gz.outcome} ${gz.raw} -> ${gz.said}`, line: gzLine });
+    human.baseLevels[8] = was;
+    tick(5);
+    A.setAmbientReactionsForTest(null);
+}
+
+// ---- reactoff: the switch off (forced: AMBIENT_REACTIONS ships true): the rules', no request, no dice ----
+if (want('reactoff')) {
+    scene(SEED, 'reactoff');
+    reactions(false);
+    // (bots ideas, round 5 ship: the r3 model is pinned, so the switch ships on; the rest of this scene forces it off)
+    check('reactoff: AMBIENT_REACTIONS ships true (the round 3 model), forced off here', A.AMBIENT_REACTIONS === true && A.ambientReactions() === false);
+    const [b] = pair();
+    const spot = [base[0] + 3, base[1] + 34];
+    clear(spot[0], spot[1], [b]);
+    place(b, spot[0], spot[1]);
+    humanAt(0, 34);
+    tick(2);
+    settle(b);
+    lib.Witness.readyForTest(b);
+    const told = [];
+    const listener = req => told.push(req.kind);
+    A.ambientListeners.push(listener);
+    const log0 = ambientLog().length;
+    const sent0 = sent.length;
+    const from = said.length;
+    tick(HUMAN_GAP);
+    lib.setWitnessRatesForTest({ ...WITNESS_OFF, human: 1 });
+    const reacted = lib.Witness.reactToHuman(human, 'react-death', human.x, human.z, 0, 10);
+    tick(30);
+    lib.setWitnessRatesForTest(WITNESS_OFF);
+    tick(HUMAN_GAP);
+    const roll = lib.chatDice.roll;
+    lib.chatDice.roll = () => 0.01;
+    const was = human.baseLevels[14];
+    human.baseLevels[14] = was + 1;
+    tick(30);
+    lib.chatDice.roll = roll;
+    human.baseLevels[14] = was;
+    const lines = said.slice(from).filter(l => l.kind === 'reaction' && l.to === human.username);
+    A.ambientListeners.splice(A.ambientListeners.indexOf(listener), 1);
+    // (the world's own talk far off may count its skips meanwhile: no reaction is asked, logged or told)
+    const reactLog = ambientLog().slice(log0).filter(e => e.via === 'reaction');
+    check("reactoff: a death and a level-up near the human, the model and Bots' own talk on: the rules' lines said, no request, no reaction in the model's log, nothing told to the capture's listeners", reacted && lines.length >= 2 && sent.length === sent0 && reactLog.length === 0 && told.length === 0, { reacted, lines: lines.map(l => `${l.name}: ${l.text}`), sent: sent.length - sent0, reactLog: reactLog.length, told });
+    // ambientWords for a reaction with the switch off: false, no dice, no request
+    let draws = 0;
+    const real = Math.random;
+    Math.random = () => (draws++, real());
+    const ok = A.ambientWords({ kind: 'reaction', bot: b, partner: human, heard: '', hint: 'gz', ruleText: 'gz', extra: 2, event: 'levelled mining to 40', react: 'gz' }, { to: human, kind: 'reaction' });
+    Math.random = real;
+    check('reactoff: ambientWords for a reaction with the switch off: false, no dice drawn, no request', ok === false && draws === 0 && sent.length === sent0, { ok, draws });
+}
+
+// ---- role: a reaction keeps its role ----
+if (want('role')) {
+    scene(SEED, 'role');
+    const [b, c] = pair();
+    const P = lib.BotModelPromptNs;
+    const s = { ...P.situationOf({ bot: b, to: human, heard: '', channel: 'public', via: 'reaction', greeted: false, intent: { id: 'gz', text: 'gz' } }), event: 'levelled woodcutting to 60' };
+    const amb = { ambient: true };
+    const refused = ['ty lol', 'thx! 40 now', 'thanks m8', 'np', 'wat u want', 'what do u want lol', 'who is u lol', 'who r u'].map(t => [t, G.guardReply(t, s, amb)]);
+    const passed = ['gz', 'gz on 60 wc', 'nice 60 wc', 'gratz lol'].map(t => [t, G.guardReply(t, s, amb)]);
+    check("role: a reaction that thanks or asks the human what it wants or who it is is refused ('role')", refused.every(([, r]) => r.ok === false && r.reason === 'role'), refused.map(([t, r]) => `${t}: ${r.ok ? 'ok' : r.reason}`));
+    check("role: a gz with the event's level passes (\"gz on 60 wc\": the event's numbers are what it saw)", passed.every(([, r]) => r.ok), passed.map(([t, r]) => `${t}: ${r.ok ? 'ok' : r.reason}`));
+    const plain = G.guardReply('ty lol', s, {});
+    const st = P.situationOf({ bot: b, to: c, heard: 'gz on 50 str', channel: 'public', via: 'thread', greeted: false, intent: { id: 'thread', text: 'ty' } });
+    const turn = G.guardReply('ty lol', st, amb);
+    check("role: not without the ambient flag, nor for a thread's turn (a bot thanking a bot)", plain.ok && turn.ok, { plain, turn });
+    check("role: 'role' is a GUARD_REASON", G.GUARD_REASONS.includes('role'));
+    // a stub that thanks: refused, the rules' line said
+    reactions(true, (sit, msg) => (msg.ambient && sit.event ? 'thx lol' : 'ok'));
+    const spot = [base[0] + 3, base[1] + 34];
+    clear(spot[0], spot[1], [b]);
+    place(b, spot[0], spot[1]);
+    humanAt(0, 34);
+    tick(Math.max(A.AMBIENT_GAP_TICKS, HUMAN_GAP));
+    settle(b);
+    lib.Witness.readyForTest(b);
+    lib.setWitnessRatesForTest({ ...WITNESS_OFF, human: 1 });
+    const log0 = ambientLog().length;
+    const from = said.length;
+    const reacted = lib.Witness.reactToHuman(human, 'react-kill', human.x, human.z, 0, 10, 'killed a hill giant');
+    tick(30);
+    lib.setWitnessRatesForTest(WITNESS_OFF);
+    const e = ambientLog().slice(log0).find(en => en.via === 'reaction');
+    const line = said.slice(from).find(l => l.kind === 'reaction' && l.to === human.username);
+    check("role: a stub that thanks for a reaction: refused ('guard', 'role'), the rules' line said", reacted && e?.outcome === 'guard' && e.reason === 'role' && line?.text && line.text !== 'thx lol' && e.ruleText === line.text, { reacted, e: e && `${e.outcome} ${e.reason} ${e.raw}`, line: line?.text, rules: e?.ruleText });
+    A.setAmbientReactionsForTest(null);
+}
+
+// ---- refusal: (bots ideas, round 5 ship) the guard's false refusals, the checker agreeing ----
+if (want('refusal')) {
+    scene(SEED, 'refusal');
+    const [b, c] = pair();
+    const P = lib.BotModelPromptNs;
+    const amb = { ambient: true };
+    const at = (via, to, event, hint) => ({ ...P.situationOf({ bot: b, to, heard: '', channel: 'public', via, greeted: false, intent: { id: via === 'reaction' ? 'wildy' : 'thread', text: hint } }), ...(event ? { event } : {}) });
+    const ditch = at('reaction', human, 'crossed the wilderness ditch', 'careful');
+    // (a combat level for the human that none of the bot's own numbers is, and another one nobody has)
+    const own = new Set([ditch.facts.combat, ditch.facts.total, ...Object.values(ditch.facts.levels), ...ditch.facts.hp]);
+    let cb = 14;
+    while (own.has(cb)) cb++;
+    let other = cb + 9;
+    while (own.has(other) || other === cb) other++;
+    const s = { ...ditch, human: { ...ditch.human, combat: cb } };
+    const both = t => ({ t, guard: G.guardReply(t, s, amb), check: checkReply(s, 'careful', t).failures.map(f => f.reason) });
+    const show = r => `${r.t}: ${r.guard.ok ? 'ok' : r.guard.reason} / [${r.check.join(',')}]`;
+    const named = [`lol lvl ${cb} in the wildy`, `${cb} cb in the wildy lol`, `careful ur only ${cb}`, `lvl ${cb}? u will die lol`].map(both);
+    check(`refusal: a reaction to the ditch may name the human's own combat (${cb}) though the event does not carry it: the guard and the checker pass it`, named.every(r => r.guard.ok && r.check.length === 0), named.map(show));
+    // (the review of the ship: the human's combat said of the bot itself is its claim)
+    const wrong = [`lol lvl ${other} in the wildy`, `${other} cb in the wildy lol`, `im lvl ${cb} too`, `lol im ${cb} cb`, `lol my cb is ${cb}`].map(both);
+    check(`refusal: any other number (${other}), or the human's combat said of the bot itself ("im lvl ${cb} too"), stays a claim: refused ('level'), by the checker too`, wrong.every(r => !r.guard.ok && r.guard.reason === 'level' && r.check.includes('level')), wrong.map(show));
+    // (not for a thread's turn: the partner's combat there is a claim of the bot's as before)
+    const st = { ...at('thread', c, null, 'nice'), human: { ...ditch.human, combat: cb } };
+    const turn = G.guardReply(`lol lvl ${cb}`, st, amb);
+    check(`refusal: not in a thread's turn: "lol lvl ${cb}" is the bot's claim there, refused ('level') as before`, !turn.ok && turn.reason === 'level', turn);
+    // following: a question is no promise, a promise is
+    const followed = at('reaction', human, 'has been following you for a while', 'u following me?');
+    const asks = ['why u follow me', 'y u following me', 'u following me?', 'why do u keep following me', 'why u follow me lol', 'lol u following me?', 'u following me lol?', 'u follow me or what?'].map(t => ({ t, guard: G.guardReply(t, followed, amb), check: checkReply(followed, 'u following me?', t).failures.map(f => f.reason) }));
+    check('refusal: a question about following passes the guard and the checker (no promise)', asks.every(r => r.guard.ok && !r.check.includes('promise')), asks.map(show));
+    // (the review of the ship: a promise after the question, with one "?" at the end, keeps its refusal)
+    const promises = ['follow me', 'ill follow u', 'come with me', 'can u follow me?', 'follow me lol', 'u follow me and ill give u 1k?', 'you following me to the bank, ill trade u there?', 'u follow me to varrock ill meet u there ok?', 'hey u follow me, come with me ok?', 'u following me lol omw to bank?'].map(t => ({ t, guard: G.guardReply(t, followed, amb), check: checkReply(followed, 'u following me?', t).failures.map(f => f.reason) }));
+    check("refusal: a real promise stays refused ('promise'), by the checker too", promises.every(r => !r.guard.ok && r.guard.reason === 'promise' && r.check.includes('promise')), promises.map(show));
+    // (and outside the ambient talk: a reply to the human's "why u follow me" is no promise either; "follow me" is)
+    const reply = P.situationOf({ bot: b, to: human, heard: 'stop following me', channel: 'public', via: 'named', greeted: false, intent: null });
+    check('refusal: a reply asking "why u follow me" passes, "follow me" does not', G.guardReply('why u follow me lol', reply).ok && G.guardReply('follow me lol', reply).reason === 'promise');
+}
+
+// ---- first: a reaction goes first ----
+if (want('first')) {
+    scene(SEED, 'first');
+    reactions(true, 'stub', { gap: A.AMBIENT_GAP_TICKS, latencyTicks: 6 });
+    const [a, b] = pair();
+    const spot = [base[0] + 3, base[1] + 34];
+    clear(spot[0], spot[1], [a, b]);
+    place(a, spot[0], spot[1]);
+    place(b, spot[0] + 2, spot[1]);
+    humanAt(0, 34);
+    tick(Math.max(A.AMBIENT_GAP_TICKS, HUMAN_GAP));
+    settle(a, b);
+    lib.Witness.readyForTest(a);
+    lib.Witness.readyForTest(b);
+    lib.setWitnessRatesForTest({ ...WITNESS_OFF, human: 1 });
+    const log0 = ambientLog().length;
+    const from = said.length;
+    const turn = ask(a, b, 'cutting willows');
+    // (an emote other than the dance: each kind has its own gap, the dance's was the reaction scene's)
+    const reacted = lib.Witness.reactToHuman(human, 'react-emote', human.x, human.z, 0, 10, 'cheered');
+    tick(30);
+    const entries = ambientLog().slice(log0);
+    const t = entries.find(en => en.via === 'thread');
+    const r = entries.find(en => en.via === 'reaction');
+    const turnLine = said.slice(from).find(l => l.name === a.username && l.to === b.username);
+    check("first: a reaction in the tick a thread's turn was asked goes first: the turn superseded (its rules' line said), the reaction asked and said", turn.ok && reacted && t?.outcome === 'superseded' && turnLine?.text === 'cutting willows' && r?.outcome === 'used', { turn: turn.ok, reacted, t: t?.outcome, turnLine: turnLine?.text, r: r && `${r.outcome} -> ${r.said}` });
+    // a tick later: the reaction waits its 20 s
+    tick(A.AMBIENT_GAP_TICKS + HUMAN_GAP);
+    settle(a, b);
+    lib.Witness.readyForTest(a);
+    lib.Witness.readyForTest(b);
+    const log1 = ambientLog().length;
+    const waited = () => (BM.modelStats.ambient.skipped.pacing ?? 0) + (BM.modelStats.ambient.skipped.inflight ?? 0);
+    const waited0 = waited();
+    const turn2 = ask(a, b, 'nice');
+    tick(1);
+    const reacted2 = lib.Witness.reactToHuman(human, 'react-death', human.x, human.z, 0, 10);
+    tick(30);
+    lib.setWitnessRatesForTest(WITNESS_OFF);
+    const entries2 = ambientLog().slice(log1);
+    check("first: a reaction a tick after a thread's turn was asked waits ('inflight' while the turn's request is out, else 'pacing'): the turn the model's, the reaction the rules'", turn2.ok && reacted2 && entries2.length === 1 && entries2[0].via === 'thread' && waited() - waited0 >= 1, { turn2: turn2.ok, reacted2, entries: entries2.map(e => `${e.via} ${e.outcome}`), waited: waited() - waited0 });
+    A.setAmbientReactionsForTest(null);
+}
+
 BM.resetModelForTest();
 A.setAmbientRatesForTest();
+A.setAmbientReactionsForTest(null);
+lib.setVoiceCapForTest(false);
 check('no errors', errors.length === 0 && lib.botErrorCount() === 0, errors.slice(0, 3).join(' | '));
 const failed = checks.filter(c => !c.ok);
 for (const c of checks) out(`${c.ok ? 'ok  ' : 'FAIL'} ${c.name}${c.ok || !c.detail ? '' : `: ${c.detail}`}`);

@@ -290,7 +290,7 @@ The structure is upstream's; the port added modules beside it rather than rewrit
 | PvP | `BotPkGear`, `BotPkTactics`, `BotPkFight`, `BotPkPj`, `BotPkTeam` |
 | Set pieces | `BotSetPieces` (the interface), `BotSetPieceIndex`, `BotDirector` (about one event an hour), `BotClanWalk`, `BotTrains`, `BotParty`, `BotScams`, `BotDuel`, `BotArena`, `BotModBot`, `BotScreens`, `BotPieceLines` |
 | Chat | `BotChat` (addressing, replies, the marketplace, "come here"), `BotAnswers`, `BotChatter` (unprompted lines), `BotLines` (what fits where; the repetition registry), `BotStyle`, `BotSlots`, `BotThreads`, `BotStage`, `BotWitness`, `BotReactions`, `BotVoice` (one voice's share of a place), `BotSay` (everything said goes through the word filter), `BotFilter` (the filter, remembered), `BotSpoke`, `BotEmote`, `BotActivity`, `BotPlaces`, `BotFollow`, `ComeHereTask` |
-| The chat model | `BotModel` (which replies a model words, the pending reply and its fallbacks), `BotModelPrompt`, `BotModelGuard`, `BotModelHistory`, `BotModelTypes`, `BotModelAmbient` (the bots' own talk near the human: bots ideas, round 4) |
+| The chat model | `BotModel` (which replies a model words, the pending reply and its fallbacks), `BotModelPrompt`, `BotModelGuard`, `BotModelHistory`, `BotModelTypes`, `BotModelAmbient` (the bots' own talk near the human: bots ideas, round 4; round 5: the reactions to the human, on with the r3 model) |
 
 ## 4. Contracts
 
@@ -534,7 +534,8 @@ reply, and the rules' own line is the fallback.
   and place, `port/BotActivity` and `port/BotPlaces`; its levels, prices, directions from where the asker stands, quests
   for the asker's level, …) and its persona. Upstream's replies are used where they fit.
 - **On-device**: the fine-tuned Qwen3.5-0.8B (Q4_K_M GGUF, about 530 MB) run by llama.cpp in the app (Metal on iOS,
-  the CPU on Android). How it was made: [web/engine/bots/test/model-data/README.md](../web/engine/bots/test/model-data/README.md).
+  the CPU on Android); since 2026-11 the round 3 model (r3: `models/bots-2004.json`, `bots-2004-r3-q4km.gguf`, its
+  release `model-v2` not published yet), trained on the replies and on the bots' own talk and reactions. How it was made: [web/engine/bots/test/model-data/README.md](../web/engine/bots/test/model-data/README.md).
 - **Claude online**: Claude Haiku through the Messages API with the player's own key. Each request carries a static
   2004 guide (cached) and the bot's facts and the chat near it.
 
@@ -582,7 +583,29 @@ human can see, as it words their replies; the rules still decide who talks, when
   answer to another bot's question or named line (`port/BotChat.botAnswer`, via `'botanswer'`). The openers, the
   closer, the "ty" acks, the question back and the counter turn that answers it stay the rules'; so do the player-mod
   bot's lines and everything else (PK talk, trades and adverts, set pieces, rude lines, clique banter's own lines).
-  Stage 2 (reactions to the human, after a retrain of the model) is not built.
+- **Stage 2, reactions to the human** (bots ideas, round 5; **on since the round 3 model ships**: `AMBIENT_REACTIONS`
+  in `port/BotModelAmbient` is true, and like the rest of the bots' own talk they go to the model only with Bots' own
+  talk on Model: with Rules, the default, nothing is asked and no die is drawn; set false, no reaction reaches the
+  module). The reactions of `port/BotReactions` (gz on a level-up, a wave's hello, "u following me?",
+  a word to one standing next to it; (round 5 ship) a bot's hello and its "u following me?" once while it and the human
+  stay within 15 tiles, again only after 10 minutes out of sight or 90 minutes on) and `port/BotWitness`'s to the human (its death, its kill, a dance or another emote,
+  the Wilderness, its gear, its level passing) go through the same gates as the bots' own talk (via `'reaction'`), each
+  with its event in plain words (`Situation.event`: "levelled woodcutting to 60", "got killed by a pker in the
+  wilderness", "is wearing a dragon med helm", "walked past you, combat 95"), the rules' line the hint and the fallback,
+  at the rules' timing. Their prompt is renderLocal's reaction branch ("Say one short chat line to {name}." and the chat
+  ending "({name} {event})" before the answer idea; every other prompt is as before, byte for byte). A reaction decided
+  in the tick a line of the bots' own talk was asked goes first (that line falls back to the rules', at its rules'
+  time). The guard keeps a reaction's role (`'role'`: no "ty", "thx", "np", no "wat u want" or "who is u", unless the
+  rules' line has it); the counter and numbers checks are the turns'. (Round 5 ship) A reaction may name the human's
+  own combat level although its event does not ("lol lvl 14 in the wildy" to a combat-14 player at the ditch: the bot
+  sees it; any other number is a claim as before), and a question about following ("why u follow me", "u following
+  me?") is no promise anywhere ("follow me", "ill follow u", "come with me" still are; the checker,
+  `test/model-data/checks.mjs`, agrees). The round 2 model read only 35-48 % of reactions
+  right; r3 (round 3's data: `web/engine/bots/test/model-data/README.md` "Round 3") passes the guard on all 80
+  held-out reactions (r2 83.8 %) and 91.3 % of 80 bot turns (r2 75 %), a blind judge scored its new lines 3.02 of 5
+  for 2004 feel (r2 2.27, the rules 3.51) with 92 % of facts right, about even with the rules (52-62, 46 ties), and
+  its replies to the player are as r2's (99.7 % guard). `humanlike --model=... --ambient` measures them
+  (`--reactions=false`: without).
 - **When** (every check before anything is drawn: with Rules, or near no human, nothing of it draws a die): the
   speaker within 15 tiles of a human on its floor; the on-device model there (`ambientAvailable`: never Claude, even
   with Claude online, and never Think first); no request in flight (a reply to the human never waits behind one; (round
@@ -795,7 +818,9 @@ human and legs as before far from it, lanes, overshoots, the exemptions, the typ
 guard's ambient checks, a thread far from the human asks nothing, near it one request per turn after the opener, a
 bot's answer, the 20 s pace and a request in flight, a reply to the human going first, (round 4 fixes) the replies'
 cap without the ambient request and a line to the human giving it up, a dropped counter, a silent model, Claude online
-(still local), and no dice when off) stages theme I's stage 1, whose LM metrics (LM1-LM8: requests
+(still local), and no dice when off; round 5: the golden check of round 2's reply prompts, a reaction's prompt with its
+event, the reactions' switch off with no request or die, a reaction's role, a reaction going first) stages theme I's
+stages 1 and 2, whose LM metrics (LM1-LM8: requests
 an hour, the share in the model's words, guard refusals, replies to the human asked while one was in flight, counters
 kept, fallbacks, H7 against the same run without the model: `--lm7-base`, lateness against the rules' time) the
 runner prints apart with MD1-MD6 under `--model=... --ambient`. The

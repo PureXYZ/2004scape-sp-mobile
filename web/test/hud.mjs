@@ -1765,7 +1765,7 @@ try {
         return { shown: !!row && !row.hidden && row.offsetHeight > 0, choices: row ? [...row.querySelectorAll('.seg button')].map(b => b.textContent) : [], on: row ? [...row.querySelectorAll('.seg button.on')].map(b => b.textContent) : [],
             hint: row?.querySelector('.data-detail')?.textContent ?? '', row: r ? [r.left, r.top, r.right, r.bottom].map(Math.round) : null, fits: s.scrollHeight <= s.clientHeight + 1, setting: window.LostCityHost.settings.botAmbient,
             unused: !!row?.classList.contains('unused'), disabled: row ? [...row.querySelectorAll('.seg button')].map(b => b.disabled) : [], oneLine: row ? row.querySelector('.data-name').getBoundingClientRect().height < 30 : false }; })()`);
-    const lmStatus = think => evaluate(`window.LostCityHost.bots.lmStatus({ local: { available: true, loaded: false, name: '2004 chat (Qwen3.5 0.8B + LoRA)', bytes: 529297472, think: ${JSON.stringify(think)} }, online: { keySet: true, hint: '…a1b2', valid: true } })`);
+    const lmStatus = think => evaluate(`window.LostCityHost.bots.lmStatus({ local: { available: true, loaded: false, name: '2004 chat (Qwen3.5 0.8B + LoRA)', bytes: 529297920, think: ${JSON.stringify(think)} }, online: { keySet: true, hint: '…a1b2', valid: true } })`);
     const noThink = await thinkRow();
     check('...Think first hidden: the status says the model never writes its note (no native here)', !noThink.shown && typeof noThink.setting === 'boolean', JSON.stringify(noThink));
     await lmStatus('option');
@@ -1777,7 +1777,7 @@ try {
     const think = await thinkRow();
     await screenshot('botchat-think');
     const ambientUsed = await ambientRow();
-    check("...(bots ideas, round 4) On-device: Bots' own talk in use, Rules / Model (Rules, its default), its hint, its name on one line, in the safe area", ambientUsed.shown && !ambientUsed.unused && same(ambientUsed.choices, ['Rules', 'Model']) && same(ambientUsed.on, ['Rules']) && ambientUsed.setting === 'rules' && ambientUsed.hint === 'Talk between bots near you' && same(ambientUsed.disabled, [false, false]) && ambientUsed.oneLine && ambientUsed.row[0] >= SAFE.left && ambientUsed.row[2] <= VIEW.width - SAFE.right && (ambientUsed.fits || VIEW.height / ZOOM < 375), JSON.stringify(ambientUsed));
+    check("...(bots ideas, round 4) On-device: Bots' own talk in use, Rules / Model (Rules, its default), its hint, its name on one line, in the safe area", ambientUsed.shown && !ambientUsed.unused && same(ambientUsed.choices, ['Rules', 'Model']) && same(ambientUsed.on, ['Rules']) && ambientUsed.setting === 'rules' && ambientUsed.hint === 'Reactions to you and talk between bots near you' && same(ambientUsed.disabled, [false, false]) && ambientUsed.oneLine && ambientUsed.row[0] >= SAFE.left && ambientUsed.row[2] <= VIEW.width - SAFE.right && (ambientUsed.fits || VIEW.height / ZOOM < 375), JSON.stringify(ambientUsed));
     // (on screen without scrolling at an iPhone's 375 HUD px and up; Android's 2.625 phones have 360 (the pixel snap):
     // there the page with Think first may scroll a few px, as on iOS with Display Zoom. (Bots ideas, round 4 fixes) Since
     // the page's rows are tighter on a layer under 370 HUD px it fits there too: gallery.mjs's botchat checks it from 320)

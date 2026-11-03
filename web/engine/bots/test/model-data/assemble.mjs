@@ -22,7 +22,14 @@
 //                                            Q4_K_M quantization; never the eval set)
 //      <out>/manifest.json                   counts, the valid ids, the replies' sha256
 //
-//   node web/engine/bots/test/model-data/assemble.mjs [--data=<phase7-data>] [--out=<phase7-data>/lm] [--valid-every=20]
+// (bots ideas, round 5: I stage 2, the r3 data: select-r3.mjs) The new kinds (a row with `ambient`: a reaction to the human,
+// a bot's turn in the bots' own talk) are plain-only: their reply without a note in every mode (ambient lines never ask
+// for Think first), --plain-repeat times (default 1) beside round 2's rows; their own valid share (1 in 20, as each round's);
+// their target splits ('target-react', 'target-turn': never trained on, never in valid) as <out>/target-react-prompts.jsonl
+// and target-turn-prompts.jsonl (with `group` and `reference`) and target-react-writers.json, target-turn-writers.json.
+// Their replies: replies/batch-r3-react-NN.jsonl and batch-r3-turn-NN.jsonl beside round 2's batch-NN.jsonl.
+//
+//   node web/engine/bots/test/model-data/assemble.mjs [--data=<phase7-data>] [--out=<phase7-data>/lm] [--valid-every=20] [--plain-repeat=1]
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -48,6 +55,12 @@ const VALID_EVERY = Number(args['valid-every'] ?? 20);
 // one model replies at once or writes its note first, as the prompt asks (Qwen3.5's own thinking switch); the valid set too
 const BOTH = args.both === 'true';
 const NOTES = args.notes ? new Map(fs.readFileSync(path.resolve(args.notes), 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l)).map(r => [r.id, r.note])) : null;
+// (bots ideas, round 5: I stage 2) each plain-only row (the new kinds) this many times in train
+const PLAIN_REPEAT = Math.max(1, Number(args['plain-repeat'] ?? 1));
+/** a row of the new kinds (select-r3.mjs): plain-only */
+const plainOnly = r => typeof r.ambient === 'string';
+/** the r3 target splits */
+const AMBIENT_TARGETS = ['target-react', 'target-turn'];
 
 const readJsonl = file =>
     fs
@@ -61,7 +74,7 @@ const replies = new Map();
 const repliesHash = crypto.createHash('sha256');
 const replyFiles = fs
     .readdirSync(path.join(DATA, 'replies'))
-    .filter(f => /^batch-\d\d\.jsonl$/.test(f))
+    .filter(f => /^batch-(\d\d|r3-(react|turn)-\d\d)\.jsonl$/.test(f))
     .sort();
 for (const f of replyFiles) {
     const text = fs.readFileSync(path.join(DATA, 'replies', f), 'utf8');
@@ -75,11 +88,12 @@ for (const f of replyFiles) {
 const train = situations.filter(r => r.split === 'train');
 const evalRows = situations.filter(r => r.split === 'eval');
 const targetRows = situations.filter(r => r.split === 'target');
-const unknownSplit = situations.filter(r => !['train', 'eval', 'target'].includes(r.split));
+const ambientTargets = Object.fromEntries(AMBIENT_TARGETS.map(split => [split, situations.filter(r => r.split === split)]));
+const unknownSplit = situations.filter(r => !['train', 'eval', 'target', ...AMBIENT_TARGETS].includes(r.split));
 if (unknownSplit.length) throw new Error(`assemble: unknown split ${unknownSplit[0].split} (${unknownSplit[0].id})`);
 const missing = train.filter(r => typeof replies.get(r.id) !== 'string' || !replies.get(r.id).trim());
 if (missing.length) throw new Error(`assemble: ${missing.length} train situations have no reply (${missing.slice(0, 5).map(r => r.id).join(', ')} ...)`);
-const replyable = new Set([...train, ...targetRows].map(r => r.id));
+const replyable = new Set([...train, ...targetRows, ...Object.values(ambientTargets).flat()].map(r => r.id));
 const stray = [...replies.keys()].filter(id => !replyable.has(id));
 if (stray.length) throw new Error(`assemble: replies for ids that are not train or target situations: ${stray.slice(0, 5).join(', ')}`);
 const targetMissing = targetRows.filter(r => typeof replies.get(r.id) !== 'string' || !replies.get(r.id).trim());
@@ -105,6 +119,15 @@ const out = { train: [], valid: [] };
 const calibration = [];
 for (const r of train) {
     const p = lib.renderLocal(r.situation);
+    // ---- (bots ideas, round 5: I stage 2) a row of the new kinds: its reply alone, in every mode ----
+    if (plainOnly(r)) {
+        if (!validIds.has(r.id)) calibration.push(chatExample(p.system, p.user, replies.get(r.id)));
+        const row = JSON.stringify({ messages: [{ role: 'system', content: p.system }, { role: 'user', content: p.user }, { role: 'assistant', content: replies.get(r.id).trim() }] });
+        if (validIds.has(r.id)) out.valid.push(row);
+        else for (let k = 0; k < PLAIN_REPEAT; k++) out.train.push(row);
+        continue;
+    }
+    // ---- end of I stage 2's block ----
     const note = NOTES ? NOTES.get(r.id) : null;
     if (NOTES && typeof note !== 'string') throw new Error(`assemble: ${r.id} has no note`);
     if (!validIds.has(r.id)) calibration.push(NOTES ? chatExampleThink(p.system, p.user, note, replies.get(r.id)) : chatExample(p.system, p.user, replies.get(r.id)));
@@ -136,6 +159,16 @@ if (targetRows.length) {
     fs.writeFileSync(path.join(OUT, 'target-writers.json'), JSON.stringify(Object.fromEntries(targetRows.filter(r => replies.get(r.id)?.trim()).map(r => [r.id, replies.get(r.id).trim()])), null, 1) + '\n');
 }
 
+// ---- (bots ideas, round 5: I stage 2) the r3 target splits: never trained on, never in valid ----
+for (const split of AMBIENT_TARGETS) {
+    for (const f of [`${split}-prompts.jsonl`, `${split}-writers.json`]) if (fs.existsSync(path.join(OUT, f))) fs.rmSync(path.join(OUT, f));
+    const rows = ambientTargets[split];
+    if (!rows.length) continue;
+    fs.writeFileSync(path.join(OUT, `${split}-prompts.jsonl`), rows.map(r => JSON.stringify({ ...JSON.parse(promptRow(r)), group: r.group ?? null, event: r.event ?? null, reference: replies.get(r.id)?.trim() || null })).join('\n') + '\n');
+    fs.writeFileSync(path.join(OUT, `${split}-writers.json`), JSON.stringify(Object.fromEntries(rows.filter(r => replies.get(r.id)?.trim()).map(r => [r.id, replies.get(r.id).trim()])), null, 1) + '\n');
+}
+// ---- end of I stage 2's block ----
+
 const byVia = rows => rows.reduce((m, r) => ((m[r.situation.heard.via] = (m[r.situation.heard.via] ?? 0) + 1), m), {});
 const manifest = {
     made: 'web/engine/bots/test/model-data/assemble.mjs',
@@ -149,5 +182,11 @@ const manifest = {
     eval: { count: evalOut.length, byVia: byVia(evalRows) }
 };
 if (targetRows.length) manifest.target = { count: targetRows.length, byVia: byVia(targetRows), withReference: targetRows.length - targetMissing.length };
+// (bots ideas, round 5: I stage 2) the new kinds: plain-only rows in train and valid, and their target splits
+{
+    const plain = train.filter(plainOnly);
+    if (plain.length) manifest.plainOnly = { repeat: PLAIN_REPEAT, train: plain.filter(r => !validIds.has(r.id)).length, valid: plain.filter(r => validIds.has(r.id)).length, byVia: byVia(plain) };
+    for (const split of AMBIENT_TARGETS) if (ambientTargets[split].length) manifest[split] = { count: ambientTargets[split].length, byVia: byVia(ambientTargets[split]), withReference: ambientTargets[split].filter(r => replies.get(r.id)?.trim()).length };
+}
 fs.writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-console.log(`assemble: train ${out.train.length}, valid ${out.valid.length}, eval ${evalOut.length}${targetRows.length ? `, target ${targetRows.length}` : ''} -> ${OUT}`);
+console.log(`assemble: train ${out.train.length}, valid ${out.valid.length}, eval ${evalOut.length}${targetRows.length ? `, target ${targetRows.length}` : ''}${AMBIENT_TARGETS.filter(t => ambientTargets[t].length).map(t => `, ${t} ${ambientTargets[t].length}`).join('')}${manifest.plainOnly ? ` (plain-only rows of the new kinds: train ${manifest.plainOnly.train} x${PLAIN_REPEAT}, valid ${manifest.plainOnly.valid})` : ''} -> ${OUT}`);

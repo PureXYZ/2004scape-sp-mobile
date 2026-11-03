@@ -6,6 +6,9 @@
 //   - its emote (the animation it plays this tick): a wave gets one bot's wave back now and then, sometimes a "hi";
 //   - what it follows (its interaction: the Follow option): a bot followed for 20 s says "u following me?";
 //   - who stands next to it (every 10 ticks): a bot it stood beside for 30 s says "hi" or "sup?" now and then;
+//   - (bots ideas, round 5 ship) a bot says hello to a human (next to it, or to its wave) once while they stay near each
+//     other, and asks "u following me?" once: again only after 10 minutes out of sight of each other, or 90 minutes on
+//     (a bank's bot came and went from its booth and greeted the human standing there every 15-20 minutes);
 //   - what it wears (every 50 ticks): rarely a bot within 6 tiles comments on a partyhat, a santa, full rune, dragon;
 //   - (the realism work, phase 5b, Track D) word of mouth: a set piece elsewhere (port/BotDirector, half its events), one
 //     bot near the human says its rumour once ("drop party at fally park!!"): talk only, nobody is sent anywhere.
@@ -18,6 +21,10 @@
 // language model may word it later), and opens the reply window (port/BotSpoke) so the human's answer reaches the bot.
 // Ticked by BotChat.tickTalk every tick a human is in the world; per human per tick it is a few comparisons, and the
 // scans over the bots run every 10 or 50 ticks.
+// (bots ideas, round 5: I stage 2) With port/BotModelAmbient's reactions' switch on (AMBIENT_REACTIONS: the round 3
+// model), a reaction near the human may be worded by the on-device model: its event in plain words ("levelled woodcutting
+// to 60", "waved at you", "has been following you for a while"), the rules' line its hint and its fallback, the rules'
+// timing (react); with it off, as before (no die more).
 import ObjType from '#/cache/config/ObjType.js';
 import SeqType from '#/cache/config/SeqType.js';
 import InvType from '#/cache/config/InvType.js';
@@ -42,11 +49,14 @@ import NpcType from '#/cache/config/NpcType.js';
 import { NpcStat } from '#/engine/entity/NpcStat.js';
 import { PlayerStat } from '#/engine/entity/PlayerStat.js';
 import { wildernessLevelAt } from '#/engine/bot/port/BotContent.js';
-import { reactToHuman } from '#/engine/bot/port/BotWitness.js';
+import { reactToHuman, withArticle } from '#/engine/bot/port/BotWitness.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 // ---- (bots ideas, round 2: D word) a rumour line's tag (port/BotArcsEvents: a type only) ----
 import type { ArcTag } from '#/engine/bot/port/BotArcsEvents.js';
 // ---- end of D's block ----
+// ---- (bots ideas, round 5: I stage 2) reactions in the model's words ----
+import { ambientReactions, ambientWords, type ReactionKind } from '#/engine/bot/port/BotModelAmbient.js';
+// ---- end of I stage 2's block ----
 
 /** gz to a human's level-up ({name}: theirs, said in about one in five by the persona's echo) */
 const GZ = ['gz', 'gz m8', 'gratz', 'grats', 'gz!', 'gj', 'nice', 'congrats', 'gz {name}', 'gratz {name}'];
@@ -71,6 +81,14 @@ const BOT_GAP = 600;
 const BOT_GEAR_GAP = 6000;
 /** a gear comment's chance at each look (every 50 ticks), once a bot is near and the gaps are over */
 const GEAR_CHANCE = 0.08;
+// ---- (bots ideas, round 5 ship) a hello and a "u following me?" once while near ----
+/** within this of the human on its floor (about the client's view) the two are near each other */
+const SEEN = 15;
+/** a bot may greet (or ask) the same human again after this long out of sight of it (10 minutes)... */
+const APART_TICKS = 1000;
+/** ...or this long after the last time (90 minutes) */
+const AGAIN_TICKS = 9000;
+// ---- end of the round 5 ship's block ----
 
 interface Watch {
     levels: Int32Array | null;
@@ -89,6 +107,15 @@ interface Watch {
     /** (variety round 2, S2) in the Wilderness at the last tick; what it fights (a kill: its Hitpoints at 0) */
     wild: boolean;
     fighting: Npc | Player | null;
+    /** (bots ideas, round 5 ship) the bots that said hello to it, and that asked why it follows: when, and when last near */
+    greeted: Map<Player, Met>;
+    asked: Map<Player, Met>;
+}
+
+/** (bots ideas, round 5 ship) a bot's hello (or question) to a human: when it said it, when the two were last near */
+interface Met {
+    at: number;
+    near: number;
 }
 
 const watches = new WeakMap<Player, Watch>();
@@ -113,7 +140,7 @@ export function tickReactions(): void {
         if (human.slot === -1) continue;
         let w = watches.get(human);
         if (!w) {
-            w = { levels: null, lastGz: -Infinity, lastWave: -Infinity, following: null, followSince: 0, followSaid: false, hx: human.x, hz: human.z, still: now, nextTo: new Map(), lastNextTo: -Infinity, lastGear: -Infinity, wild: wildernessLevelAt(human.x, human.z) > 0, fighting: null };
+            w = { levels: null, lastGz: -Infinity, lastWave: -Infinity, following: null, followSince: 0, followSaid: false, hx: human.x, hz: human.z, still: now, nextTo: new Map(), lastNextTo: -Infinity, lastGear: -Infinity, wild: wildernessLevelAt(human.x, human.z) > 0, fighting: null, greeted: new Map(), asked: new Map() };
             watches.set(human, w);
         }
         levelUps(human, w, now);
@@ -123,7 +150,11 @@ export function tickReactions(): void {
         wilderness(human, w);
         kills(human, w);
         follows(human, w, now);
-        if (now % 10 === 0) standers(human, w, now);
+        if (now % 10 === 0) {
+            stillNear(human, w.greeted, now);
+            stillNear(human, w.asked, now);
+            standers(human, w, now);
+        }
         if (now % 50 === 25) gear(human, w, now);
     }
 }
@@ -133,15 +164,29 @@ function ready(bot: Player, now: number): boolean {
     return now - (botSaid.get(bot) ?? -Infinity) >= BOT_GAP;
 }
 
-/** the bot says the reaction (typed, after it notices), and the human's answer may reach it (the reply window) */
-function react(bot: Player, human: Player, intent: IntentResult, spoke: SpokeKind | null, now: number): void {
+/**
+ * the bot says the reaction (typed, after it notices), and the human's answer may reach it (the reply window). (Bots
+ * ideas, round 5: I stage 2) `react` and `event` (what the human did, in plain words): with the reactions' switch on, the
+ * model may word it near the human (port/BotModelAmbient), the rules' line its hint and fallback, at the same timing
+ */
+function react(bot: Player, human: Player, intent: IntentResult, spoke: SpokeKind | null, now: number, kind: ReactionKind, event: string): void {
     const text = composeReply({ bot, to: human, heard: '', channel: 'public', via: 'reaction', greeted: false, intent });
     if (!text) return;
     botSaid.set(bot, now);
     // (variety round 2: the registry knows it, for the next bot's pickFresh)
     noteSaid(bot, intent.text, now);
-    sayTyped(bot, text, { to: human, kind: 'reaction', then: spoke ? () => noteSpoke(bot, spoke, World.currentTick, human) : undefined }, reactionTicks(botPersona(bot), 'notice'));
+    const line = { to: human, kind: 'reaction' as const, then: spoke ? () => noteSpoke(bot, spoke, World.currentTick, human) : undefined };
+    const extra = reactionTicks(botPersona(bot), 'notice');
+    // ---- (bots ideas, round 5: I stage 2) the model's words near the human, with the switch on ----
+    if (ambientReactions() && ambientWords({ kind: 'reaction', bot, partner: human, heard: '', hint: intent.text, ruleText: text, intent: intent.id, extra, event, react: kind }, line)) return;
+    // ---- end of I stage 2's block ----
+    sayTyped(bot, text, line, extra);
 }
+
+// ---- (bots ideas, round 5: I stage 2) the events in plain words ----
+/** 274's skills by stat index, as a level-up names them (18 and 19 are unused) */
+const SKILL_NAMES: readonly (string | null)[] = ['attack', 'defence', 'strength', 'hitpoints', 'ranged', 'prayer', 'magic', 'cooking', 'woodcutting', 'fletching', 'fishing', 'firemaking', 'crafting', 'smithing', 'mining', 'herblore', 'agility', 'thieving', null, null, 'runecraft'];
+// ---- end of I stage 2's block ----
 
 function pick<T>(list: readonly T[]): T {
     return list[Math.floor(Math.random() * list.length)];
@@ -169,12 +214,16 @@ function levelUps(human: Player, w: Watch, now: number): void {
         return;
     }
     let level = -1;
+    let skill = -1; // (bots ideas, round 5: I stage 2: the skill of the highest, for the event's words)
     for (let stat = 0; stat < levels.length; stat++) {
         const was = w.levels[stat];
         const is = levels[stat];
         if (is === was) continue;
         w.levels[stat] = is;
-        if (is > was && is - was <= 3) level = Math.max(level, is);
+        if (is > was && is - was <= 3 && is > level) {
+            level = is;
+            skill = stat;
+        }
     }
     if (level < 0 || now - w.lastGz < GZ_GAP) return;
     w.lastGz = now;
@@ -182,9 +231,9 @@ function levelUps(human: Player, w: Watch, now: number): void {
     let said = 0;
     for (const bot of botsFreeNear(human, 15)) {
         if (!ready(bot, now)) continue;
-        const chance = (0.1 + 0.4 * botPersona(bot).sociability) * (milestone ? 1.5 : 1) - (said > 0 ? 0.15 : 0);
+        const chance = testRates.gz ?? (0.1 + 0.4 * botPersona(bot).sociability) * (milestone ? 1.5 : 1) - (said > 0 ? 0.15 : 0);
         if (chatDice.roll() >= chance) continue;
-        react(bot, human, { id: 'gz', text: pick(GZ) }, null, now);
+        react(bot, human, { id: 'gz', text: pick(GZ) }, null, now, milestone ? 'milestone' : 'gz', `levelled ${SKILL_NAMES[skill] ?? 'a skill'} to ${level}`);
         if (++said >= 2) break;
     }
 }
@@ -199,13 +248,40 @@ function waves(human: Player, w: Watch, now: number): void {
     if (crowd.length === 0) return;
     const bot = crowd[0];
     const persona = botPersona(bot);
-    if (chatDice.roll() >= 0.25 + 0.4 * persona.sociability) return;
+    if (chatDice.roll() >= (testRates.wave ?? 0.25 + 0.4 * persona.sociability)) return;
     botSaid.set(bot, now);
     scheduleInTicks(1 + reactionTicks(persona, 'notice'), () => {
         if (BotManager.botFor(bot) !== null && !isAway(bot)) botEmote(bot, 'wave');
     });
-    if (Math.random() < 0.4) react(bot, human, { id: 'greeting', text: pickFresh(bot, WAVE_HELLO) }, 'social', now);
+    // ((bots ideas, round 5 ship) the hello once while near: a wave back only from one that said it lately)
+    if (Math.random() < (testRates.hello ?? 0.4) && mayMeet(w.greeted, bot, now)) {
+        met(w.greeted, bot, now);
+        react(bot, human, { id: 'greeting', text: pickFresh(bot, WAVE_HELLO) }, 'social', now, 'wave', 'waved at you');
+    }
 }
+
+// ---- (bots ideas, round 5 ship) a hello and a "u following me?" once while near ----
+/** may `bot` greet (or ask) the human again: never did, or the two were apart APART_TICKS, or AGAIN_TICKS passed */
+function mayMeet(seen: Map<Player, Met>, bot: Player, now: number): boolean {
+    const m = seen.get(bot);
+    return m === undefined || now - m.near >= APART_TICKS || now - m.at >= AGAIN_TICKS;
+}
+
+function met(seen: Map<Player, Met>, bot: Player, now: number): void {
+    seen.set(bot, { at: now, near: now });
+}
+
+/** (every 10 ticks) each bot that greeted the human and is still within SEEN of it: near now; one logged out, or free to again, forgotten */
+function stillNear(human: Player, seen: Map<Player, Met>, now: number): void {
+    for (const [bot, m] of seen) {
+        if (bot.slot === -1 || now - m.near >= APART_TICKS || now - m.at >= AGAIN_TICKS) {
+            seen.delete(bot);
+            continue;
+        }
+        if (bot.level === human.level && Math.max(Math.abs(bot.x - human.x), Math.abs(bot.z - human.z)) <= SEEN) m.near = now;
+    }
+}
+// ---- end of the round 5 ship's block ----
 
 // ── (the variety work, round 2, Track S2: P7, react-human) its doings ────────────────────────────────────────────
 
@@ -224,14 +300,24 @@ function seqs(): { dance: number; other: Set<number> } {
 function emotes(human: Player): void {
     if (human.animId === -1 || (human.masks & PlayerInfoProt.ANIM) === 0) return;
     const { dance, other } = seqs();
-    if (human.animId === dance) reactToHuman(human, 'react-dance', human.x, human.z, human.level);
-    else if (other.has(human.animId)) reactToHuman(human, 'react-emote', human.x, human.z, human.level);
+    // (bots ideas, round 5: I stage 2: the emote in plain words, for the model's event)
+    if (human.animId === dance) reactToHuman(human, 'react-dance', human.x, human.z, human.level, 10, 'is dancing');
+    else if (other.has(human.animId)) reactToHuman(human, 'react-emote', human.x, human.z, human.level, 10, emoteWords(human.animId));
+}
+
+/** (bots ideas, round 5: I stage 2) an emote other than the dance, in plain words (274's seq names) */
+function emoteWords(anim: number): string {
+    const name = SeqType.get(anim)?.debugname ?? '';
+    const words: Readonly<Record<string, string>> = { emote_cheer: 'cheered', emote_clap: 'clapped', emote_bow: 'bowed', emote_beckon: 'beckoned you over' };
+    const plain = /^emote_([a-z]+)$/.exec(name)?.[1];
+    return words[name] ?? (plain ? `did the ${plain} emote` : 'did an emote');
 }
 
 /** it steps over the ditch into the Wilderness: a bot near the edge now and then says "careful in the wildy" */
 function wilderness(human: Player, w: Watch): void {
     const wild = wildernessLevelAt(human.x, human.z) > 0;
-    if (wild && !w.wild && human.level === 0) reactToHuman(human, 'react-wild', human.x, human.z, human.level, 15);
+    // (bots ideas, round 5: I stage 2: over the ditch, or deeper in at once: a lever, a spell)
+    if (wild && !w.wild && human.level === 0) reactToHuman(human, 'react-wild', human.x, human.z, human.level, 15, wildernessLevelAt(human.x, human.z) === 1 && human.z <= 3525 ? 'crossed the wilderness ditch' : 'went into the wilderness');
     w.wild = wild;
 }
 
@@ -252,7 +338,8 @@ function kills(human: Player, w: Watch): void {
     // (the variety work, round 2, the fixes: B6: its kill only when it hit it, 274's hero points (the death script's
     // loot owner): a player it only followed or traded with, or a monster it talked to, that died of somebody else's
     // hits got "nice kill" too)
-    if (notable && hitBy(f, human)) reactToHuman(human, 'react-kill', human.x, human.z, human.level);
+    // (bots ideas, round 5: I stage 2: what it killed, in plain words)
+    if (notable && hitBy(f, human)) reactToHuman(human, 'react-kill', human.x, human.z, human.level, 10, f instanceof Player ? 'killed another player' : `killed ${withArticle((NpcType.get(f.type)?.name ?? 'monster').toLowerCase())}`);
 }
 
 /** (B6) `p` damaged `victim` lately (274's hero points, a player's and a monster's alike) */
@@ -277,8 +364,10 @@ function follows(human: Player, w: Watch, now: number): void {
     }
     if (w.followSaid || now - w.followSince < FOLLOWED_TICKS) return;
     w.followSaid = true;
-    if (BotManager.botFor(t) === null || isAway(t) || BotChat.inConversation(t) || !ready(t, now) || chatDice.roll() >= 0.7) return;
-    react(t, human, { id: 'followed', text: pick(FOLLOWED) }, 'question', now);
+    // ((bots ideas, round 5 ship) asked once while near: a human that follows it again, after a stop, is not asked again)
+    if (BotManager.botFor(t) === null || isAway(t) || BotChat.inConversation(t) || !ready(t, now) || !mayMeet(w.asked, t, now) || chatDice.roll() >= (testRates.followed ?? 0.7)) return;
+    met(w.asked, t, now);
+    react(t, human, { id: 'followed', text: pick(FOLLOWED) }, 'question', now, 'followed', 'has been following you for a while');
 }
 
 /** it stands still next to a bot (2 tiles) for 30 s: that bot says hi now and then (once a stand, a few minutes apart) */
@@ -304,10 +393,12 @@ function standers(human: Player, w: Watch, now: number): void {
         if (now - since < NEXT_TO_TICKS || now - w.still < NEXT_TO_TICKS) continue;
         // (once a stand: the bot does not say it again until the human moves)
         w.nextTo.set(bot, Infinity);
-        if (!ready(bot, now) || BotChat.inConversation(bot) || !botsFreeNear(human, 2).includes(bot)) continue;
-        if (chatDice.roll() >= 0.2 + 0.35 * botPersona(bot).sociability) continue;
+        // ((bots ideas, round 5 ship) and not one that said hello to it while near: its booth and back)
+        if (!ready(bot, now) || BotChat.inConversation(bot) || !mayMeet(w.greeted, bot, now) || !botsFreeNear(human, 2).includes(bot)) continue;
+        if (chatDice.roll() >= (testRates.nextTo ?? 0.2 + 0.35 * botPersona(bot).sociability)) continue;
         w.lastNextTo = now;
-        react(bot, human, { id: 'greeting', text: pickFresh(bot, NEXT_TO) }, 'social', now);
+        met(w.greeted, bot, now);
+        react(bot, human, { id: 'greeting', text: pickFresh(bot, NEXT_TO) }, 'social', now, 'nextto', 'has been standing next to you for a while');
         return;
     }
 }
@@ -318,20 +409,24 @@ function gear(human: Player, w: Watch, now: number): void {
     const lines = gearLines(human);
     if (lines.length === 0) return;
     const bot = botsFreeNear(human, 6).find(b => ready(b, now) && now - (gearSaid.get(b) ?? -Infinity) >= BOT_GEAR_GAP);
-    if (!bot || chatDice.roll() >= GEAR_CHANCE) return;
+    if (!bot || chatDice.roll() >= (testRates.gear ?? GEAR_CHANCE)) return;
     w.lastGear = now;
     gearSaid.set(bot, now);
-    react(bot, human, { id: 'gear', text: pickFresh(bot, lines) }, 'social', now);
+    react(bot, human, { id: 'gear', text: pickFresh(bot, lines) }, 'social', now, 'gear', `is wearing ${gearWords(human)}`);
 }
 
-/** what a human wears that a bot comments on (2004's: a partyhat, a santa, a mask, dragon, full rune), and what it says */
-const GEAR: [(has: (rx: RegExp) => boolean) => boolean, string[]][] = [
-    [has => has(/partyhat/), ['nice phat', 'omg a phat', 'nice phat lol', 'wow a phat']],
-    [has => has(/santa hat/), ['nice santa', 'nice hat', 'omg a santa']],
-    [has => has(/halloween mask/), ['nice mask', 'nice hween mask']],
-    [has => has(/^dragon (med helm|longsword|sq shield|dagger|battleaxe|mace)/), ['nice dragon', 'omg dragon', 'nice d gear']],
-    [has => has(/^rune full helm$/) && has(/^rune platebody$/) && has(/^rune platelegs$/), ['omg full rune', 'nice full rune', 'nice rune']],
-    [has => has(/^rune platebody$/), ['nice rune plate', 'nice plate']]
+/**
+ * what a human wears that a bot comments on (2004's: a partyhat, a santa, a mask, dragon, full rune), and what it says;
+ * (bots ideas, round 5: I stage 2) and the piece in plain words for the model's event: the first worn name it matches
+ * (null: the set's own words)
+ */
+const GEAR: [(has: (rx: RegExp) => boolean) => boolean, string[], RegExp | string][] = [
+    [has => has(/partyhat/), ['nice phat', 'omg a phat', 'nice phat lol', 'wow a phat'], /partyhat/],
+    [has => has(/santa hat/), ['nice santa', 'nice hat', 'omg a santa'], /santa hat/],
+    [has => has(/halloween mask/), ['nice mask', 'nice hween mask'], /halloween mask/],
+    [has => has(/^dragon (med helm|longsword|sq shield|dagger|battleaxe|mace)/), ['nice dragon', 'omg dragon', 'nice d gear'], /^dragon (med helm|longsword|sq shield|dagger|battleaxe|mace)/],
+    [has => has(/^rune full helm$/) && has(/^rune platebody$/) && has(/^rune platelegs$/), ['omg full rune', 'nice full rune', 'nice rune'], 'full rune'],
+    [has => has(/^rune platebody$/), ['nice rune plate', 'nice plate'], /^rune platebody$/]
 ];
 
 /** Every gear comment (for test/chat-filter.test.mjs). */
@@ -339,14 +434,30 @@ export const GEAR_LINES: readonly string[] = GEAR.flatMap(([, lines]) => lines);
 
 /** what a bot would say about what the human wears, or nothing */
 export function gearLines(human: Player): string[] {
+    const names = wornNamesOf(human);
+    const has = (rx: RegExp): boolean => names.some(n => rx.test(n));
+    return GEAR.find(([wears]) => wears(has))?.[1] ?? [];
+}
+
+function wornNamesOf(human: Player): string[] {
     const worn = human.getInventory(InvType.WORN);
     const names: string[] = [];
     for (let slot = 0; slot < (worn?.capacity ?? 0); slot++) {
         const item = worn?.get(slot);
         if (item) names.push((ObjType.get(item.id)?.name ?? '').toLowerCase());
     }
+    return names;
+}
+
+/** (bots ideas, round 5: I stage 2) what gearLines' comment is about, in plain words ("a blue partyhat", "full rune") */
+function gearWords(human: Player): string {
+    const names = wornNamesOf(human);
     const has = (rx: RegExp): boolean => names.some(n => rx.test(n));
-    return GEAR.find(([wears]) => wears(has))?.[1] ?? [];
+    const piece = GEAR.find(([wears]) => wears(has))?.[2];
+    if (piece === undefined) return 'something nice';
+    if (typeof piece === 'string') return piece;
+    const name = names.find(n => piece.test(n));
+    return name ? withArticle(name) : 'something nice';
 }
 
 /** (phase 5b) a rumour near the human only when it is farther than this from the set piece (it has not seen it) */
@@ -378,3 +489,16 @@ export function rumourNearHuman(text: string, excluded: (bot: Player) => boolean
     }
     return null;
 }
+
+// ---- (bots ideas, round 5: I stage 2) tests and the r3 data's staged world ----
+/** Tests only: each reaction's chance (gz, a wave back, its hello, followed, next to, gear); none: the game's. The dice are drawn as before. */
+const testRates: { gz?: number; wave?: number; hello?: number; followed?: number; nextTo?: number; gear?: number } = {};
+export function setReactionRatesForTest(rates: typeof testRates | null): void {
+    for (const k of Object.keys(testRates) as (keyof typeof testRates)[]) delete testRates[k];
+    Object.assign(testRates, rates ?? {});
+}
+/** Tests and the r3 data's staged world only: the human's watch forgotten (its gaps: gz, waves, next to, gear; its levels seen afresh) */
+export function forgetHumanForTest(human: Player): void {
+    watches.delete(human);
+}
+// ---- end of I stage 2's block ----

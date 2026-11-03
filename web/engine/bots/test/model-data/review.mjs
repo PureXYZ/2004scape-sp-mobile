@@ -258,7 +258,7 @@ async function blindBuild() {
         md.push(`## ${i + 1}`, brief(p.situation, false), '', `- **A**: \`${a}\``, `- **B**: \`${b}\``, '', 'Your pick: ', '');
     });
     out(args.md, md.join('\n'));
-    out(args.key, JSON.stringify({ note: 'model = the LoRA (the cache's models/bots-2004-q4km.gguf), rules = the rules\' own line, claude = written by the L-train agent to phase7-data/BRIEF.md', items: key }, null, 1) + '\n');
+    out(args.key, JSON.stringify({ note: 'model = the LoRA (the cache\'s models/bots-2004-q4km.gguf), rules = the rules\' own line, claude = written by the L-train agent to phase7-data/BRIEF.md', items: key }, null, 1) + '\n');
     console.log(`blind-build: ${order.length} -> ${args.md} (key ${args.key})`);
 }
 

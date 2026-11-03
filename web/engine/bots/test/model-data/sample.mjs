@@ -6,10 +6,15 @@
 // (the newcomers about Lumbridge). Each run's capture lands in <out>/<config>.jsonl and its report's summary in
 // <out>/<config>.log. At most --jobs runs at once (default 4: the Mac is shared).
 //
-//   node web/engine/bots/test/model-data/sample.mjs --out=DIR [--jobs=4] [--only=key,key] [--list] [--set=r1|r2] [--lines=FILE]
+//   node web/engine/bots/test/model-data/sample.mjs --out=DIR [--jobs=4] [--only=key,key] [--list] [--set=r1|r2|r3] [--lines=FILE]
 //
 // --set=r2: the retrain's runs (round 2, after the first blind test: CONFIGS_R2, new seeds and worlds); --lines: the
 // human's pool (default test/data/model-human-lines.json; round 2 uses human-lines.mjs --focus's weighted pool).
+// --set=r3 (the bots ideas work, round 5: theme I stage 2): CONFIGS_R3, new seeds 51-66, for the bots' own talk near the
+// human and the reactions to it (humanlike's --model-capture captures both since round 5): the human probing, standing at
+// the hubs' crowds (--tour=still --at=HUB), touring, working (cows and rocks: its level-ups at 10x) and dying (--die: pk
+// at Edgeville, npc) among them; the r2 spread of worlds (members and free, 1x and 10x, 100 and 250 bots, aged, new
+// characters). A config's args may set probe 0 and tour, at, work, die (humanlike's own options).
 //
 // Run it from the worktree's root (humanlike writes its scratch engine under build/tmp/bots).
 import { spawn } from 'child_process';
@@ -65,8 +70,30 @@ export const CONFIGS_R2 = [
     { key: 'r2-f250-x10-s46-talk', args: { bots: 250, members: false, xprate: 10, seed: 46, talk: 30 } }
 ];
 
+// ---- (bots ideas, round 5: I stage 2) the r3 runs: the bots' own talk and the reactions near the human ----
+/** the r3 retrain's runs: new seeds 51-66, the human among crowds (still at a hub, probing, touring, working, dying) */
+export const CONFIGS_R3 = [
+    { key: 'r3-m100-x10-s51-probe', args: { bots: 100, members: true, xprate: 10, seed: 51 } },
+    { key: 'r3-m250-x10-s52-still-vwb', args: { bots: 250, members: true, xprate: 10, seed: 52, probe: 0, tour: 'still', at: 'varrock_west_bank' } },
+    { key: 'r3-f250-x1-s53-still-fally', args: { bots: 250, members: false, xprate: 1, seed: 53, probe: 0, tour: 'still', at: 'falador_park' } },
+    { key: 'r3-m250-x1-s54-still-edge', args: { bots: 250, members: true, xprate: 1, seed: 54, probe: 0, tour: 'still', at: 'edgeville_bank' } },
+    { key: 'r3-f100-x10-s55-work', args: { bots: 100, members: false, xprate: 10, seed: 55, probe: 0, work: 600 } },
+    { key: 'r3-m100-x10-s56-work-aged', args: { bots: 100, members: true, xprate: 10, seed: 56, probe: 0, work: 600, ticks: 12000 } },
+    { key: 'r3-m250-x10-s57-die-pk', args: { bots: 250, members: true, xprate: 10, seed: 57, probe: 0, tour: 'still', at: 'edgeville_bank', die: 'pk:1500' } },
+    { key: 'r3-f250-x10-s58-die-npc', args: { bots: 250, members: false, xprate: 10, seed: 58, probe: 0, tour: 'still', at: 'lumbridge_courtyard', die: 'npc:1500' } },
+    { key: 'r3-m250-x1-s59-new-still', args: { bots: 250, members: true, xprate: 1, seed: 59, probe: 0, tour: 'still', at: 'lumbridge_courtyard', newchar: true } },
+    { key: 'r3-f100-x1-s60-aged-still', args: { bots: 100, members: false, xprate: 1, seed: 60, probe: 0, tour: 'still', at: 'draynor_bank', ticks: 12000 } },
+    { key: 'r3-m250-x10-s61-tour', args: { bots: 250, members: true, xprate: 10, seed: 61, probe: 0 } },
+    { key: 'r3-f250-x10-s62-tour-aged', args: { bots: 250, members: false, xprate: 10, seed: 62, probe: 0, ticks: 12000 } },
+    { key: 'r3-m100-x1-s63-probe-new', args: { bots: 100, members: true, xprate: 1, seed: 63, newchar: true } },
+    { key: 'r3-f250-x10-s64-still-square', args: { bots: 250, members: false, xprate: 10, seed: 64, probe: 0, tour: 'still', at: 'varrock_square' } },
+    { key: 'r3-m250-x1-s65-still-catherby', args: { bots: 250, members: true, xprate: 1, seed: 65, probe: 0, tour: 'still', at: 'catherby' } },
+    { key: 'r3-f250-x1-s66-probe', args: { bots: 250, members: false, xprate: 1, seed: 66 } }
+];
+// ---- end of I stage 2's block ----
+
 const args = Object.fromEntries(process.argv.slice(2).map(a => ((m => (m ? [m[1], m[2] ?? 'true'] : [a, 'true']))(a.match(/^--([^=]+)(?:=(.*))?$/)))));
-const SET = args.set === 'r2' ? CONFIGS_R2 : CONFIGS;
+const SET = args.set === 'r3' ? CONFIGS_R3 : args.set === 'r2' ? CONFIGS_R2 : CONFIGS;
 const LINES = args.lines ? path.resolve(args.lines) : POOL;
 if (args.list === 'true') {
     for (const c of SET) console.log(c.key, JSON.stringify(c.args));
@@ -85,6 +112,11 @@ function argv(c) {
     const a = { ticks: 6000, probe: 40, talk: 150, ...c.args };
     const list = [`--bots=${a.bots}`, `--ticks=${a.ticks}`, `--seed=${a.seed}`, `--members=${a.members}`, `--xprate=${a.xprate}`, `--probe=${a.probe}`, `--talk=${a.talk}`];
     if (a.newchar) list.push('--newchar');
+    // (bots ideas, round 5: I stage 2: the human still at a hub, working, dying)
+    if (a.tour) list.push(`--tour=${a.tour}`);
+    if (a.at) list.push(`--at=${a.at}`);
+    if (a.work) list.push(`--work=${a.work}`);
+    if (a.die) list.push(`--die=${a.die}`);
     list.push(`--probe-lines=${LINES}`, `--model-capture=${path.join(OUT, `${c.key}.jsonl`)}`, '--no-details', '--max-errors=50');
     return ['--expose-gc', HUMANLIKE, ...list];
 }

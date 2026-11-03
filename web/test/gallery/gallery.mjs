@@ -482,7 +482,7 @@ async function hudClean(page, filters) {
 
 // Scripts a state needs in the page before host.js (added for that state's load only; android: on an Android device,
 // after the Android app's script).
-const BOTCHAT_LM = `{ local: { available: true, loaded: false, name: '2004 chat (Qwen3.5 0.8B + LoRA)', bytes: 529297472, think: 'option' }, online: { keySet: true, hint: '\u2026a1b2', valid: true } }`;
+const BOTCHAT_LM = `{ local: { available: true, loaded: false, name: '2004 chat (Qwen3.5 0.8B + LoRA)', bytes: 529297920, think: 'option' }, online: { keySet: true, hint: '\u2026a1b2', valid: true } }`;
 // Online: the page plays on a server (its settings as native gives them), a stub native that answers the server box
 const SERVERS = [
     { id: 's-galhome1', name: 'Home server', url: 'http://192.168.1.20', nodeId: 10, members: true, rsa: null, added: 1 },

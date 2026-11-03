@@ -24,6 +24,11 @@
 // for it (best-skill).
 // The retrain's batches (phase7-data-r2, batch-20..25) carry split (train or target) and the current model's line
 // (modelReply, modelGuard): the checker ignores them, except to count the replies that keep the model's line as it is.
+// (bots ideas, round 5: I stage 2) The r3 batches (batch-r3-react-NN, batch-r3-turn-NN: a reaction to the human, a bot's
+// turn in the bots' own talk; checks.mjs ambientOf) are checked as the engine guards those lines (guardReply's ambient
+// checks: a turn keeps the rules' counter-question and numbers and asks none of its own ('counter', 'numbers'); a
+// reaction never thanks nor asks "wat u want" / "who is u" ('role')), and checks.mjs's reaction checks ('event': the
+// event's facts not contradicted); a turn that drops a number of the hint is a failure there, not a warning.
 // Exit 0 when nothing fails, 1 when something does, 2 on a usage error.
 //
 //   node web/engine/bots/test/model-data/check-replies.mjs <batch.jsonl> <replies.jsonl> [--quiet]
@@ -31,7 +36,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { importInEngine } from '../lib/clone.mjs';
-import { CHARSET, MAX, checkReply } from './checks.mjs';
+import { CHARSET, MAX, ambientOf, checkReply } from './checks.mjs';
 
 /** the skills' words (checks.mjs's, less combat and total, and less the verbs "mine", "fish", "cook") for the best-skill warning */
 const SKILL_NAMES = {
@@ -139,7 +144,8 @@ for (const [id, row] of seen) {
     if (reply.length > MAX) fail(id, 'length', `${reply.length} characters (at most ${MAX})`, reply);
     const lost = [...new Set([...reply].filter(ch => !CHARSET.test(ch.toLowerCase())))];
     if (lost.length) fail(id, 'charset', `the chat cannot carry ${lost.map(c => JSON.stringify(c)).join(' ')}`, reply);
-    const g = lib.guardReply(reply, s);
+    // (bots ideas, round 5: I stage 2: the new kinds with the guard's ambient checks, as the engine asks them)
+    const g = lib.guardReply(reply, s, ambientOf(s) ? { ambient: true } : {});
     if (!g.ok) fail(id, 'guard', g.reason, reply);
     else if (g.text !== reply.trim()) fail(id, 'guard', `changed to "${g.text}": write the line alone (no name in front, no quotes, one line)`, reply);
     const c = checkReply(s, item.ruleText, reply);

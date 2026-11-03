@@ -4005,10 +4005,10 @@
             for (const button of ambient.querySelectorAll('.seg button')) {
                 button.disabled = !ambientUsed;
             }
-            // (round 4 fixes: stage 1 words no reactions to the player; with stage 2's, the design's "Reactions to you and
-            // talk between bots near you")
+            // (round 4 fixes: stage 1 words no reactions to the player; (bots ideas, round 5 ship) with stage 2's, the
+            // design's "Reactions to you and talk between bots near you")
             document.getElementById('botchat-ambient-hint').textContent = ambientUsed
-                ? 'Talk between bots near you'
+                ? 'Reactions to you and talk between bots near you'
                 : !local.available ? (isNative ? 'Only with the on-device model.' : T.onlyInApp) : 'Only with a chat model (not Rules).';
             let key;
             if (!isNative) {

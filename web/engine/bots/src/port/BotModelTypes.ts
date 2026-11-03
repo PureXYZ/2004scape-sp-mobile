@@ -37,7 +37,8 @@ export type ModelSource = 'local' | 'online';
 /**
  * How a human's line reached the bot (port/BotChat ReplyRequest's `via`). (bots ideas, round 4: I model) 'thread' and
  * 'botanswer': no human's line but a bot's (port/BotModelAmbient: a thread's turn after the opener, a bot's answer to
- * another bot's question), the partner in the human's place.
+ * another bot's question), the partner in the human's place. (Bots ideas, round 5: I stage 2) 'reaction': no line at
+ * all, the bot's own word on what the human did (Situation.event).
  */
 export type ReplyVia = 'named' | 'window' | 'conversation' | 'crowd' | 'second' | 'private' | 'market' | 'reaction' | 'thread' | 'botanswer';
 
@@ -178,6 +179,15 @@ export interface Situation {
      * newest last: a model line that repeats one is refused (port/BotModelGuard). Absent in the foundation's captures.
      */
     said?: string[];
+    // ---- (bots ideas, round 5: I stage 2, reactions) ----
+    /**
+     * A reaction's event (port/BotModelAmbient, kind 'reaction'): what the human (the `human` slot) did, in plain words
+     * after its name ("levelled woodcutting to 60", "died next to you", "is wearing full rune", "crossed the wilderness
+     * ditch"). With it renderLocal says "Say one short chat line to {name}." and ends the chat with "({name} {event})"
+     * before the answer idea; absent (every reply, every line of the bots' own talk) the prompts are as before.
+     */
+    event?: string;
+    // ---- end of I stage 2's block ----
 }
 
 /**

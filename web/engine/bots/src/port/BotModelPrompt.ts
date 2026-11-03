@@ -6,6 +6,8 @@
 //
 // renderLocal's text IS THE TRAINING FORMAT of the fine-tuned model: change it
 // and the model is retrained (the training data keeps situations, so a retrain re-renders them: about an hour).
+// (Bots ideas, round 5: I stage 2) A reaction's branch (Situation.event: "Say one short chat line to {name}." and the
+// event before the answer idea) is new text: the round 3 model (r3) is trained on it; every other prompt is as before.
 //
 // Pure: no dice, no game effect (a sim runs the same with situations taken).
 import InvType from '#/cache/config/InvType.js';
@@ -293,17 +295,33 @@ function chatBlock(s: Situation): string {
     return lines.join('\n');
 }
 
+// ---- (bots ideas, round 5: I stage 2, reactions) ----
+/** a reaction's situation (Situation.event): the bot's own word on what the human did, no line of the human's to reply to */
+function isReaction(s: Situation): s is Situation & { event: string } {
+    return typeof s.event === 'string' && s.event.length > 0;
+}
+
+/** a reaction's chat: the lines before, then what the human did in brackets, then the rules' line as an idea */
+function reactionBlock(s: Situation & { event: string }): string {
+    const lines = s.history.map(line => chatLine(s, line));
+    lines.push(`(${s.human.name} ${s.event})`);
+    if (s.hint) lines.push(`(answer idea: ${s.hint.text})`);
+    return lines.join('\n');
+}
+// ---- end of I stage 2's block ----
+
 /**
  * The on-device model's prompt (THE TRAINING FORMAT, see the header): the setting, who the bot is and how it types,
- * its facts, then the chat with the human's line last and the rules' answer as an idea.
+ * its facts, then the chat with the human's line last and the rules' answer as an idea. (Bots ideas, round 5: I stage 2)
+ * A reaction (Situation.event) says "Say one short chat line to {name}." for the reply's task and ends its chat with the
+ * event, "({name} {event})", before the idea; every other prompt renders as before, byte for byte
+ * (test/model-ambient.test.mjs's golden check over round 2's situations).
  */
 export function renderLocal(s: Situation): LocalPrompt {
-    const system = [
-        `RuneScape, late 2004, ${s.world.members ? 'members' : 'free'} world. You are ${s.bot.name}, ${whoWords(s)}. Reply to ${s.human.name} in one short chat line.`,
-        `Voice: ${voiceWords(s)}.`,
-        factsBlock(s)
-    ].join('\n');
-    return { system, user: chatBlock(s) };
+    const reaction = isReaction(s);
+    const task = reaction ? `Say one short chat line to ${s.human.name}.` : `Reply to ${s.human.name} in one short chat line.`;
+    const system = [`RuneScape, late 2004, ${s.world.members ? 'members' : 'free'} world. You are ${s.bot.name}, ${whoWords(s)}. ${task}`, `Voice: ${voiceWords(s)}.`, factsBlock(s)].join('\n');
+    return { system, user: reaction ? reactionBlock(s) : chatBlock(s) };
 }
 
 /**

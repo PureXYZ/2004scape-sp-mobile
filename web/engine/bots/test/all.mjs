@@ -87,7 +87,7 @@ const STEPS = [
     ['the update buzz (the Rellekka visit, the rock crabs, the lighthouse; bots ideas round 3, theme G)', ['--expose-gc', test('buzz.test.mjs')]],
     ['movement (minimap hops, pauses, overshoots, lanes, route variants; bots ideas round 3, theme H)', ['--expose-gc', test('movement.test.mjs')]],
     ['talk moves (walk up to talk, stop to talk; bots ideas round 3, theme H)', ['--expose-gc', test('talkmoves.test.mjs')]],
-    ['the model for the bots\' own talk (thread turns and bots\' answers near the human, the stub; bots ideas round 4, theme I)', ['--expose-gc', test('model-ambient.test.mjs')]],
+    ['the model for the bots\' own talk (thread turns and bots\' answers near the human, the stub; bots ideas round 4, theme I; round 5: the reactions to the human, behind their switch)', ['--expose-gc', test('model-ambient.test.mjs')]],
     ...(FULL
         ? [
               ['coverage, members world', sim('--scenario=coverage', '--ticks=2500')],

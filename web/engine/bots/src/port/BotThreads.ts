@@ -12,7 +12,9 @@
 //     Halo 2, World of Warcraft, Castle Wars next month, Zezima, the lag, food, music, films, being tired, a friend
 //     hacked, a million gp, Dragon Slayer, the weather; each turn's line from the speaker's own state (its levels, task,
 //     home, age, clique's clan, last drop, next unlock, next tool);
-//   - a counter-question ("41 u?", "cutting willows, wbu") gets the asker's own answer from its state;
+//   - a counter-question ("41 u?", "cutting willows, wbu") gets the asker's own answer from its state; (bots ideas,
+//     round 5 ship) never one against its own line before it (no "its sunny here lol" after its "its raining here"), and
+//     "best skill?" answered with its highest skill, not its favourite;
 //   - each turn after the second may end it (a closer now and then, or silence), and it changes topic at most once (the
 //     next speaker opens another: "btw u members?");
 //   - pair memory for the session (both bots' logins: a new login is a new Player), bots only and nothing about a human:
@@ -274,6 +276,8 @@ export interface ThreadLine {
     /** the closer the thread ends with ("k cya", "gl") */
     closer?: boolean;
     // ---- end of I model's block ----
+    /** (bots ideas, round 5: I stage 2) its topic (data/threads.json's id; none for a closer): the r3 data's spread */
+    topic?: string;
 }
 
 interface Turn {
@@ -285,6 +289,8 @@ interface Turn {
     opener?: boolean;
     /** (bots ideas, round 4: I model) the closer the thread ends with */
     closer?: boolean;
+    /** (bots ideas, round 5: I stage 2) its topic */
+    topic?: string;
 }
 
 interface Drawn {
@@ -424,9 +430,9 @@ function howLong(id: string, level: number): Pool {
  * a thing of its own (what it does, its goal, where it lives ...): ask, b's answer with its counter, then a's own when
  * asked (a's line by `own`, the same value its 'same' pool), b's word now and then
  */
-function ownTopic(id: string, value: (s: Side) => string | null, opts: { sameWord?: boolean } = {}): Topic['draw'] {
+function ownTopic(id: string, value: (s: Side) => string | null, opts: { sameWord?: boolean; asked?: (s: Side, ask: string) => string | null } = {}): Topic['draw'] {
     return (a, b, depth, prev) => {
-        const vb = value(b);
+        let vb = value(b);
         if (vb === null) return null;
         const turns: Turn[] = [];
         const facts: Record<string, string | number> = { [b.bot.username]: vb };
@@ -442,11 +448,16 @@ function ownTopic(id: string, value: (s: Side) => string | null, opts: { sameWor
             return { turns, facts, followUp: true };
         }
         const ask = line(pool(id, 'ask'), {});
+        // (bots ideas, round 5 ship: what the question drawn asks for, when it is not the value: "best skill?" its highest,
+        // "prob str" from a bot with str 25 and wc 51 no more; no dice)
+        vb = (ask !== null ? opts.asked?.(b, ask) : null) ?? vb;
+        facts[b.bot.username] = vb;
         const ans = line(pool(id, 'answer'), { v: vb });
         if (!ask || !ans) return null;
         // (a question back only to one with an answer of its own: "just training mage, u?" to a bot doing nothing went
         // unanswered)
-        const va = value(a);
+        const va0 = value(a);
+        const va = va0 === null ? null : (opts.asked?.(a, ask) ?? va0);
         const first = answer(1, ans, va === null ? 0 : COUNTER_CHANCE);
         turns.push({ by: 0, text: ask, opener: true }, first);
         if (first.plain !== undefined && va !== null) {
@@ -490,7 +501,7 @@ function yesNoTopic(id: string, yes: (s: Side) => boolean, after: (a: boolean, b
  * quest's talk: each side's answer from 'yes' or 'no' by whether it did the quest, as its answers say (port/BotAnswers
  * saysQuestDone), the opener's own word from 'own' and, if it did, 'ownYes'; no dice of its own: the draws as before)
  */
-function chatTopic(id: string, done?: (s: Side) => boolean): Topic['draw'] {
+function chatTopic(id: string, done?: (s: Side) => boolean, agrees?: Agrees): Topic['draw'] {
     return (a, b, depth) => {
         const said = (s: Side): Pool => pool(id, done ? (done(s) ? 'yes' : 'no') : 'answer');
         const ask = line(pool(id, 'ask'), {});
@@ -505,7 +516,8 @@ function chatTopic(id: string, done?: (s: Side) => boolean): Topic['draw'] {
         } else {
             turns.push(answer(1, ans, 0.5));
             if (turns[1].plain !== undefined) {
-                const mine = line(said(a), {});
+                // (bots ideas, round 5 ship: never against its own opener)
+                const mine = line(agreeing(said(a), agrees, ask, turns[1].plain), {});
                 if (mine) turns.push({ by: 0, text: mine });
             }
         }
@@ -514,6 +526,39 @@ function chatTopic(id: string, done?: (s: Side) => boolean): Topic['draw'] {
         return { turns, facts: {}, followUp: false };
     };
 }
+
+// ---- (bots ideas, round 5 ship) a turn never says against the speaker's own line before it in the thread (the r3
+// writers' notes: "its sunny here lol" after its own "its raining here", "its so cold") ----
+/** does `line` (the speaker's next) agree with `own` (its line before), `heard` the other's line between them? */
+type Agrees = (line: string, own: string, heard: string) => boolean;
+
+/** a pool's lines that agree, or the pool itself when all do (its dice as before); none: [] */
+function agreeing(lines: Pool, agrees: Agrees | undefined, own: string, heard: string): Pool {
+    if (!agrees) return lines;
+    const ok = lines.filter(l => agrees(l, own, heard));
+    return ok.length === lines.length ? lines : ok;
+}
+
+/** what a line says of the weather: bad (snow, rain, cold) or good (sunny), snowing or not; null: nothing ("lucky", "lol") */
+function weatherOf(text: string): { good: boolean | null; snow: boolean | null } | null {
+    const t = text.toLowerCase();
+    if (/\bno snow\b/.test(t)) return { good: null, snow: false };
+    if (/\bsnow(ing|y)?\b/.test(t)) return { good: false, snow: true };
+    if (/\b(rain|raining|cold|brr+|freezing)\b/.test(t)) return { good: false, snow: null };
+    if (/\b(sunny|sun|hot|warm)\b/.test(t)) return { good: true, snow: false };
+    return null;
+}
+
+/** "its sunny here lol" against its "its raining here"; "same" says what the line it answers says */
+const weatherAgrees: Agrees = (text, own, heard) => {
+    const mine = weatherOf(own);
+    if (!mine) return true;
+    const same = (t: string): boolean => /^same\b/i.test(t.trim());
+    const says = same(text) ? (same(heard) ? mine : weatherOf(heard)) : weatherOf(text);
+    if (!says) return true;
+    return !((mine.good !== null && says.good !== null && mine.good !== says.good) || (mine.snow !== null && says.snow !== null && mine.snow !== says.snow));
+};
+// ---- end of the round 5 ship's block ----
 
 /**
  * the skill a level compare is about: the opener's task's (most of the time), else one of the list that one of the two
@@ -637,7 +682,8 @@ const TOPICS: Readonly<Record<string, Topic>> = {
         weight: 1,
         draw: yesNoTopic('clan', s => s.clan !== null, () => 'after', s => ({ clan: s.clan }))
     },
-    favskill: { weight: 1, draw: ownTopic('favskill', s => s.fav) },
+    // (bots ideas, round 5 ship: "best skill?", "whats the best skill" asked: its highest)
+    favskill: { weight: 1, draw: ownTopic('favskill', s => s.fav, { asked: (s, ask) => (/\bbest\b/.test(ask) ? s.best : null) }) },
     bank: {
         weight: 1,
         fits: (_a, b) => b.cb >= 10,
@@ -689,7 +735,7 @@ const TOPICS: Readonly<Record<string, Topic>> = {
     hacked: { weight: 1, once: true, draw: chatTopic('hacked') },
     dream: { weight: 1, draw: chatTopic('dream') },
     quest: { weight: 1, fits: (_a, b) => b.cb >= 25, draw: yesNoTopic('quest', s => s.cb >= 32 || s.owns('dragon', 0.2)) },
-    weather: { weight: 1, draw: chatTopic('weather') },
+    weather: { weight: 1, draw: chatTopic('weather', undefined, weatherAgrees) },
     // ---- (bots ideas, round 3: G period) theme G's topics: the
     // Games Room (members, 1) and a pet out (1.5, when either of the two has one: port/BotPeriod periodTalk.hasPetOut);
     // theme G off, neither fits (no weight, no dice: the draw as before). A topic replaces another in a thread: no
@@ -824,7 +870,8 @@ export function drawThread(a: Player, b: Player, depth: number): ThreadLine[] | 
         }
         mem.set(id, { tick: now, facts: { ...(prevMem?.facts ?? {}), ...drawn.facts } });
         topics.push(id);
-        for (const t of drawn.turns) turns.push(swapped ? { ...t, by: t.by === 0 ? 1 : 0 } : t);
+        // (bots ideas, round 5: I stage 2: each turn knows its topic, for the r3 data)
+        for (const t of drawn.turns) turns.push({ ...(swapped ? { ...t, by: t.by === 0 ? 1 : 0 } : t), topic: id } as Turn);
         not = id;
     }
     if (turns.length < 2) return null;
@@ -839,7 +886,7 @@ export function drawThread(a: Player, b: Player, depth: number): ThreadLine[] | 
     const kept = turns.slice(0, end);
     // (cut on a counter-question: its plain answer, a question nobody answers is no ending)
     const last = kept[kept.length - 1];
-    if (last.plain !== undefined) kept[kept.length - 1] = { by: last.by, text: last.plain };
+    if (last.plain !== undefined) kept[kept.length - 1] = { by: last.by, text: last.plain, topic: last.topic };
     if (end < turns.length && kept.length < depth && Math.random() < CLOSER_CHANCE) kept.push({ by: last.by === 0 ? 1 : 0, text: pick(DATA.closers), closer: true });
     for (let i = 0; i < kept.length; i++) {
         if (kept[i].plain === undefined) continue;
@@ -852,7 +899,7 @@ export function drawThread(a: Player, b: Player, depth: number): ThreadLine[] | 
     stats.depths.push(kept.length);
     if (stats.depths.length > 5000) stats.depths.shift();
     // (bots ideas, round 4: I model: the openers and the closer marked, the turns a model never words)
-    return kept.map(t => ({ speaker: t.by === 0 ? a : b, to: t.by === 0 ? b : a, text: t.text, ...(t.opener ? { opener: true } : {}), ...(t.closer ? { closer: true } : {}) }));
+    return kept.map(t => ({ speaker: t.by === 0 ? a : b, to: t.by === 0 ? b : a, text: t.text, ...(t.opener ? { opener: true } : {}), ...(t.closer ? { closer: true } : {}), ...(t.topic ? { topic: t.topic } : {}) }));
 }
 
 /**
@@ -1092,7 +1139,7 @@ function turn(r: Running, i: number): void {
     const said = (r.said ??= new Map());
     said.set(l.speaker, styled);
     const line = { to: l.to, kind: 'practice' as const, then: () => turn(r, i + 1) };
-    if (i > 0 && !l.opener && !l.closer && ambientWords({ kind: 'thread', bot: l.speaker, partner: l.to, heard: said.get(l.to) ?? r.lines[i - 1].text, hint: l.text, ruleText: styled, extra, onSaid: text => said.set(l.speaker, text) }, line)) return;
+    if (i > 0 && !l.opener && !l.closer && ambientWords({ kind: 'thread', bot: l.speaker, partner: l.to, heard: said.get(l.to) ?? r.lines[i - 1].text, hint: l.text, ruleText: styled, extra, onSaid: text => said.set(l.speaker, text), topic: l.topic, turn: i }, line)) return;
     // ---- end of I model's block ----
     sayTyped(l.speaker, styled, line, extra);
 }

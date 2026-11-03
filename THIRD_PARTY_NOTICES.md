@@ -118,8 +118,10 @@ The shipped binaries do not include ggml's optional Arm KleidiAI kernels.
 
 ## E. The on-device chat model (Qwen3.5-0.8B)
 
-The full apps ship `bots-2004-q4km.gguf`, which is also attached on its own to the GitHub release `model-v1` and to
-each release `v<version>`, with `licenses.txt` (this file and LICENSE, with the licence texts). It is a
+The full apps ship the chat model (`models/bots-2004.json` pins it: since 2026-11 the round 3 model,
+`bots-2004-r3-q4km.gguf`, for the GitHub release `model-v2`, not published yet; the first, `bots-2004-q4km.gguf`, is
+attached on its own to the release `model-v1`), and each release `v<version>` attaches it on its own too, with
+`licenses.txt` (this file and LICENSE, with the licence texts). It is a
 modified version of [Qwen/Qwen3.5-0.8B](https://huggingface.co/Qwen/Qwen3.5-0.8B) (revision
 `2fc06364715b967f1860aea9cf38778875588b17`), licensed under the Apache License 2.0, Copyright 2026 Alibaba Cloud.
 The Qwen repository has no NOTICE file.
@@ -127,10 +129,11 @@ The Qwen repository has no NOTICE file.
 Modification notice (Apache License 2.0, section 4(b)): this model was changed from the original for this project in 2026. A
 LoRA (rank 16) was fine-tuned on game chat lines, merged into the base weights, converted to GGUF with llama.cpp
 `b11297` and quantised to Q4_K_M with an importance matrix from the training text. The model is distributed under the
-Apache License 2.0; the GGUF's metadata names that licence. Its metadata also names "Qwen3.5 0.8B Base"
-(Qwen/Qwen3.5-0.8B-Base) as the base model: llama.cpp's converter copied that from the Qwen3.5-0.8B model card. The
-weights it was made from are Qwen/Qwen3.5-0.8B's, at the revision above; a model built after this one names that
-base model in its metadata, with this notice as its description (`web/engine/bots/test/model-data/gguf-metadata.json`).
+Apache License 2.0; the GGUF's metadata names that licence. The round 3 model's metadata names Qwen3.5 0.8B
+(Qwen/Qwen3.5-0.8B) as the base model, with this notice as its description
+(`web/engine/bots/test/model-data/gguf-metadata.json`). The first model's (`model-v1`) names "Qwen3.5 0.8B Base"
+(Qwen/Qwen3.5-0.8B-Base): llama.cpp's converter copied that from the Qwen3.5-0.8B model card; the weights it was made
+from are Qwen/Qwen3.5-0.8B's, at the revision above, too.
 
 The fine-tune's training replies were written with Claude (Anthropic) to a brief, for game situations made by the
 port's own simulator. The bots' corpus of late-2004 lines (`web/engine/bots/data/lines2004*.json`) was written with

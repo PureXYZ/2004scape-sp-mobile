@@ -87,6 +87,8 @@ export async function arenaModules(): Promise<{ arena: typeof import('#/engine/b
 // (realism phase 7, the language model) the seam (its listeners: --model-capture) and the situation of a reply
 export * as BotModelNs from '#/engine/bot/port/BotModel.js';
 export * as BotModelPromptNs from '#/engine/bot/port/BotModelPrompt.js';
+// (bots ideas, round 5: I stage 2) the bots' own talk and the reactions (their listeners: --model-capture; the switch: --reactions)
+export * as BotModelAmbientNs from '#/engine/bot/port/BotModelAmbient.js';
 
 // (variety round 1: each track's exports for the runner in a block of its own)
 // ---- Track F (fixes and movement) ----

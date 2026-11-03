@@ -12,12 +12,14 @@
 //   score  node eval.mjs score [--prompts=<eval-prompts.jsonl>] [--json=<report.json>] [--reference=<replies dir>] <name>=<file.jsonl> ...
 //          Scores each generated file and the rules' own lines (the prompts' ruleText) side by side; --reference adds
 //          the writers' replies' shape (as many of their training replies, evenly spread) as a yardstick.
+//          (bots ideas, round 5: I stage 2) A reaction's or a bot's turn's line (the r3 target splits) is guarded with
+//          the guard's ambient checks (counter, numbers, role) and checked with checks.mjs's event check.
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { importInEngine } from '../lib/clone.mjs';
 import { chatPrompt, chatPromptThink, splitThink } from './chatml.mjs';
-import { checkReply } from './checks.mjs';
+import { ambientOf, checkReply } from './checks.mjs';
 
 process.removeAllListeners('warning'); // (the engine's SQLite notice)
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -181,7 +183,8 @@ function scoreVariant(lib, prompts, rawById, meta = new Map()) {
             if (typeof m.genMs === 'number') genMs.push(m.genMs);
             if (typeof m.promptTokens === 'number') promptTokens.push(m.promptTokens);
         }
-        const g = lib.guardReply(String(raw), p.situation);
+        // (bots ideas, round 5: I stage 2: a reaction or a bot's turn with the guard's ambient checks, as the engine asks them)
+        const g = lib.guardReply(String(raw), p.situation, ambientOf(p.situation) ? { ambient: true } : {});
         if (!g.ok) {
             reasons[g.reason] = (reasons[g.reason] ?? 0) + 1;
             row.result = `guard: ${g.reason}`;
@@ -270,10 +273,11 @@ async function score() {
             .filter(f => /^batch-\d\d\.jsonl$/.test(f))
             .sort()
             .flatMap(f => readJsonl(path.join(dir, f)).map(r => r.reply));
+        // (bots ideas, round 5: I stage 2: the r3 batches' replies too, for the r3 target splits; the shape above is round 2's)
         const byId = new Map(
             fs
                 .readdirSync(dir)
-                .filter(f => /^batch-\d\d\.jsonl$/.test(f))
+                .filter(f => /^batch-(\d\d|r3-(react|turn)-\d\d)\.jsonl$/.test(f))
                 .flatMap(f => readJsonl(path.join(dir, f)).map(r => [r.id, r.reply]))
         );
         if (scored.every(p => byId.has(p.id))) {

@@ -24,6 +24,13 @@
 // to bots, the partner in the human's place) keeps what the next turn relies on: the rules' counter-question ("41 u?":
 // the next turn answers it) and every number of the rules' line (the next turn compares it); else refused. (Round 4
 // fixes, M6) Nor does it ask one the rules did not: the next turn is drawn already and would leave it unanswered.
+// (Bots ideas, round 5: I stage 2) A reaction to the human (the same flag, the situation's via 'reaction' and its event)
+// keeps its role instead: the bot reacts to what the human did, so a line that thanks ("ty", "thx", "np") or asks the
+// human what it wants or who it is ("wat u want", "who is u") is refused ('role'), unless the rules' line does the same;
+// the event's numbers and places count as the human's line's (it is what the bot saw: "gz on 60 wc" for a 60). (Round 5
+// ship) And the human's own combat level, which the bot sees too, even when the event does not carry it ("lol lvl 14 in
+// the wildy" to a combat-14 player at the ditch): any other number is a claim as before. A question about following
+// ("why u follow me", "u following me?") is no promise ("follow me", "ill follow u" are).
 // The persona's style (port/BotStyle) runs after it, as on the new 2004 lines. Pure: no dice and no game state beyond
 // what it is given (Track L's checker runs it over the writers' replies with the captured situations).
 import { MAX_LINE } from '#/engine/bot/port/BotSay.js';
@@ -45,13 +52,17 @@ export interface GuardOptions {
     /** the display names of the players in the world, for (e); absent: names are not checked */
     names?: Iterable<string>;
     // ---- (bots ideas, round 4: I model) ----
-    /** a line of the bots' own talk (port/BotModelAmbient): the rules' counter-question and numbers kept (and no counter-question of its own), too */
+    /**
+     * a line of the bots' own talk (port/BotModelAmbient): the rules' counter-question and numbers kept (and no
+     * counter-question of its own), too; (bots ideas, round 5: I stage 2) a reaction to the human (via 'reaction') keeps
+     * its role instead
+     */
     ambient?: boolean;
     // ---- end of I model's block ----
 }
 
 /** every reason a line is refused (the stats and the tests) */
-export const GUARD_REASONS = ['empty', 'charset', 'long', 'assistant', 'anachronism', 'confession', 'filter', 'markup', 'effect', 'promise', 'level', 'place', 'price', 'echo', 'repeat', 'name', 'counter', 'numbers'] as const;
+export const GUARD_REASONS = ['empty', 'charset', 'long', 'assistant', 'anachronism', 'confession', 'filter', 'markup', 'effect', 'promise', 'level', 'place', 'price', 'echo', 'repeat', 'name', 'counter', 'numbers', 'role'] as const;
 export type GuardReason = (typeof GUARD_REASONS)[number];
 
 /** the characters 274's chat codec carries (port/BotStyle's, lower-cased) */
@@ -241,6 +252,17 @@ function ambientProblem(text: string, hint: string): GuardReason | null {
     return null;
 }
 // ---- end of I model's block ----
+// ---- (bots ideas, round 5: I stage 2) a reaction's role: the bot reacts to the human, it is not the one reacted to ----
+/** a thanks or its answer: the shipped model's role flips ("ty i guess lol", "thx! 40 now" to its own gz, "np") */
+export const REACTION_THANKS_RX = /\b(ty|tyvm|tyty|thx|thnx|thanx|thanks|thank (u|you|ya)|np|no prob|no problem)\b/i;
+/** the human asked what it wants or who it is: the shipped model's "wat u want", "what do u want", "who is u lol" to a passer */
+export const REACTION_ASKS_RX = /\b(wh?at|wat|wut|wot)\s+(do\s+|d\s+)?(u|you|ya)\s+(want|wnt)\b|\bwho\s+(is|r|are|is this)\s+(u|you|ya)\b|\bwho\s+(u|you)\s*\?/i;
+/** (opts.ambient, a reaction) a thanks or a "wat u want" the rules' line has not ('role'); else null */
+function reactionProblem(text: string, hint: string): GuardReason | null {
+    for (const rx of [REACTION_THANKS_RX, REACTION_ASKS_RX]) if (rx.test(text) && !rx.test(hint)) return 'role';
+    return null;
+}
+// ---- end of I stage 2's block ----
 /** (the integration) slang that came long after 2004 (model lines only) */
 const MODERN_SLANG = /\b(rizz|rizzler|bruh|no cap|lowkey|highkey|ngl|fr fr|bussin|yeet|yeeted|pog|poggers|pogchamp|simp|simping|goated|gyatt|skibidi|sigma|sus|vibe check|deadass|on god|dg)\b/i;
 /** (Track E) a language model's markup: markdown ("**al kharid**", "__x__") and stage directions in asterisks ("*winks*"); backticks the chat cannot carry are dropped before */
@@ -268,6 +290,14 @@ const PROMISES: readonly RegExp[] = [
     /\b(u|you|we)\s+(wanna|want to)\s+(trade|team|duel|go|meet|train|pk|fight|quest|skill|hunt)\b/i,
     /\bfree (stuff|items?|armou?r|gp|coins|money|gear|food)\b/i
 ];
+/**
+ * (bots ideas, round 5 ship) a question about the human following the bot, which promises nothing: "why u follow me",
+ * "y u following me", "why do u keep following me", "u following me?" (at the line's start, a word before it at most);
+ * "can u follow me" asks it to, and "follow me" alone invites (both still promises). The checker's PROMISE skips it too
+ * (test/model-data/checks.mjs). Only the question itself, up to its "?" past a word or two ("lol", "or what"): "u follow
+ * me and ill give u 1k?" keeps its promise (the review of the ship)
+ */
+export const FOLLOWING_ASKED = /\b(?:why|y|wy|how come)\s+(?:do\s+|did\s+|r\s+|are\s+)?(?:u|you|ya)\s+(?:keep\s+|still\s+|always\s+)?follow(?:ing)?\s+me\b|^(?:(?!(?:can|could|will|would|wanna|pls|plz|please)\b)[a-z']+[,!.]?\s+)?(?:do\s+|did\s+|r\s+|are\s+)?(?:u|you|ya)\s+(?:keep\s+|still\s+)?follow(?:ing)?\s+me(?:\s+(?:or\s+what|or\s+sth|or\s+something|again|now|rn|too|lol|lmao|haha))*\s*\?/gi;
 
 // ---- (a') a yes the rules never gave (the review of the merge): to "r u a bot", to a beg they turned down ----
 /** the human asks whether the bot is a bot ("r u a bot", "bot?", "ur a macroer") */
@@ -301,6 +331,8 @@ const NOT_ITS_OWN: ReadonlySet<string> = new Set([
 ]);
 /** a hedge: "like 60 wc" may be within 3 */
 const HEDGES: ReadonlySet<string> = new Set(['like', 'about', 'around', 'almost', 'nearly', 'bout', 'roughly', 'abt', 'close', 'prob', 'probably']);
+/** (the review of the ship) words before a number that make it the bot's own ("im lvl 14 too", "lol my cb is 14") */
+const ITS_OWN: ReadonlySet<string> = new Set(['i', 'im', 'iam', 'my', 'me', 'mine', 'ive', 'myself']);
 /** the rules' intents that answer a level directly (their numbers are the facts) */
 const LEVEL_INTENTS: ReadonlySet<string> = new Set(['combat', 'skill', 'total', 'attack', 'strength', 'defence', 'hitpoints', 'ranged', 'prayer', 'magic', 'cooking', 'woodcutting', 'fletching', 'fishing', 'firemaking', 'crafting', 'smithing', 'mining', 'herblore', 'agility', 'thieving', 'runecraft']);
 
@@ -406,8 +438,9 @@ export function guardReply(raw: string | null | undefined, s: Situation | null, 
     const hint = s.hint?.text ?? '';
     // (f) an AFK or a logout the rules would not follow
     if (effectLine(text) && !effectLine(hint)) return refuse('effect');
-    // (a) a promise the rules did not make
-    if (PROMISES.some(rx => rx.test(text) && !rx.test(hint))) return refuse('promise');
+    // (a) a promise the rules did not make ((round 5 ship) a question about the human following it is none)
+    const promised = text.replace(FOLLOWING_ASKED, ' ');
+    if (PROMISES.some(rx => rx.test(promised) && !rx.test(hint))) return refuse('promise');
     // (a') a yes to "r u a bot" owns up; a yes to a beg the rules turned down promises (the review of the merge)
     if ((s.hint?.intent === 'bot' || ASKED_BOT.test(s.heard.text)) && AFFIRMATIVE.test(text) && !NEGATION.test(text)) return refuse('confession');
     if (s.hint && BEG_INTENTS.has(s.hint.intent) && GIVE_YES.test(text) && !NEGATION.test(text)) return refuse('promise');
@@ -422,8 +455,10 @@ export function guardReply(raw: string | null | undefined, s: Situation | null, 
     // (e) another player's name, not one the bot can know
     if (online && otherName(text, s, online)) return refuse('name');
     // ---- (bots ideas, round 4: I model) the bots' own talk: the rules' counter-question and numbers kept ----
+    // ---- (bots ideas, round 5: I stage 2) a reaction to the human: its role kept instead (the human answers it, no
+    // drawn next turn relies on a counter-question or a number) ----
     if (opts.ambient) {
-        const kept = ambientProblem(text, hint);
+        const kept = s.heard.via === 'reaction' ? reactionProblem(text, hint) : ambientProblem(text, hint);
         if (kept) return refuse(kept);
     }
     // ---- end of I model's block ----
@@ -452,7 +487,9 @@ function effectLine(text: string): boolean {
 function factProblem(text: string, s: Situation): GuardReason | null {
     const hint = s.hint?.text ?? '';
     const hintNumbers = numbersIn(hint);
-    const heardNumbers = numbersIn(s.heard.text);
+    // (bots ideas, round 5: I stage 2) a reaction's event is what the bot saw, as the human's line is what it heard
+    const seen = s.event ? `${s.heard.text} ${s.event}` : s.heard.text;
+    const heardNumbers = numbersIn(seen);
     const tokens = tokensOf(text);
     const claims = levelClaims(tokens);
     // a direct answer about levels keeps the hint's numbers (a number of its own, not next to a skill's name)
@@ -466,6 +503,9 @@ function factProblem(text: string, s: Situation): GuardReason | null {
     for (const claim of claims) {
         if (hintNumbers.has(claim.n) || heardNumbers.has(claim.n)) continue;
         const before = tokens.slice(Math.max(0, claim.at - 3), claim.at);
+        // (round 5 ship) a reaction's "lvl 14", "14 cb": the human's own combat, which the bot sees; not of itself ("im lvl
+        // 14 too" from a combat-60 bot: the review of the ship)
+        if (s.heard.via === 'reaction' && (claim.kind === 'combat' || claim.kind === 'level') && claim.n === s.human.combat && !before.some(w => ITS_OWN.has(w))) continue;
         if (before.some(w => NOT_ITS_OWN.has(w))) continue;
         const slack = claim.hedged || before.some(w => HEDGES.has(w)) || tokens[claim.end + 1] === 'ish' ? 3 : 0;
         if (!truthsFor(claim, s).some(v => Math.abs(v - claim.n) <= slack)) return 'level';
@@ -485,14 +525,14 @@ function factProblem(text: string, s: Situation): GuardReason | null {
     // way somewhere, must the reply keep to the places the situation has)
     const hintPlaces = placeKeys(hint);
     if (s.hint && (hintPlaces.size > 0 || STRICT_PLACE_INTENTS.has(s.hint.intent))) {
-        const ground = new Set<string>([...here, ...hintPlaces, ...placeKeys(s.heard.text), ...s.history.flatMap(l => [...placeKeys(l.text)])]);
+        const ground = new Set<string>([...here, ...hintPlaces, ...placeKeys(seen), ...s.history.flatMap(l => [...placeKeys(l.text)])]);
         if ([...placeKeys(text)].some(k => !ground.has(k))) return 'place';
     }
     // prices
     const priceTalk = s.hint?.intent === 'price';
     const asked = moneyIn(text, priceTalk);
     if (asked.length > 0) {
-        const known = [...moneyIn(hint, true), ...moneyIn(s.heard.text, true)];
+        const known = [...moneyIn(hint, true), ...moneyIn(seen, true)];
         for (const c of s.facts.carrying) if (c.startsWith('coins ')) known.push(...moneyIn(c.slice(6), true));
         for (const v of asked) if (!known.some(k => Math.abs(k - v) <= Math.max(1, k * 0.02))) return 'price';
     }

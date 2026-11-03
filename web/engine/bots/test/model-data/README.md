@@ -6,12 +6,16 @@ line is the fallback ([docs/BOTS.md](../../../../../docs/BOTS.md) §4.9). This f
 model: sampling training situations from the simulator, checking the written replies, assembling the training files,
 training the LoRA, merging, converting and quantizing it, and evaluating it.
 
-**The published model** is `bots-2004-q4km.gguf` on the GitHub release `model-v1`, pinned in
-[models/bots-2004.json](../../../../../models/bots-2004.json): 529,297,472 bytes, sha256
-`94ef25e02ce7badd1f1d8600bd191f1e8c172acebc59541ff3b54e504867b9c4`, chat template `qwen-chatml-hybrid` (one model
+**The shipped model** is round 3's (below), `bots-2004-r3-q4km.gguf`, pinned in
+[models/bots-2004.json](../../../../../models/bots-2004.json): 529,297,920 bytes, sha256
+`d92111c233a18f255eba66cba3ff46d02070f0d993cad8d308fa2ebb5765b63c`, chat template `qwen-chatml-hybrid` (one model
 trained in both modes: the request's `think`, Settings › Bot chat › Think first, decides whether it writes a short note
-before its reply). `ios/scripts/prepare-model.sh --download` and `android/scripts/prepare-model.sh --download` fetch
-and bundle it. It is a derivative of Qwen3.5-0.8B (Apache-2.0).
+before its reply). Its URL is the GitHub release `model-v2`, **not published yet**: until it is,
+`ios/scripts/prepare-model.sh` and `android/scripts/prepare-model.sh` bundle it from the cache
+(`$LC_CACHE_DIR/models/bots-2004-r3-q4km.gguf`) and `--download` fails. Round 2's model, `bots-2004-q4km.gguf` (529,297,472
+bytes, sha256 `94ef25e02ce7badd1f1d8600bd191f1e8c172acebc59541ff3b54e504867b9c4`), is published on the release
+`model-v1`; its new name keeps both in one cache for older checkouts. Both are derivatives of Qwen3.5-0.8B
+(Apache-2.0).
 
 **The training data is not published.** It is about 4,450 situations sampled from the bot simulator and about 3,800
 replies written for them in a 2004 player's voice by Claude (Anthropic) agents working to a written brief, plus the
@@ -48,10 +52,11 @@ notes from the written replies; nobody wrote them).
 | 11. Evaluate | `build-model.sh eval-base eval` (`eval.mjs gen` through a llama-server with native's sampling, `eval.mjs score`); `review.mjs` (a blind judge sheet, a blind A/B test) | `<data>/eval/` |
 
 `build-model.sh` runs steps 5-11 (`build-model.sh all`, or the steps by name: `assemble train merge convert quantize
-valid publish eval-base eval`, and `target` for a target split). Its header lists the environment it reads: `PHASE7_DATA`
-(required), `RUN`, `EPOCH`, `THINK=1` (the note variant), `BOTH=1` (with `THINK=1`: every example without and with its
-note, one model in both modes), `VALID_PLAIN=1`, `LM_DIR`, `OUT_DIR`, `NOTES`, `LORA_CONFIG`, `PORT`, `NAME`. Run the
-node tools from the repository root.
+valid publish eval-base eval`, `target` for a target split, and since round 3 `target-r3-base` and `target-r3`). Its
+header lists the environment it reads: `PHASE7_DATA` (required), `RUN`, `EPOCH`, `THINK=1` (the note variant), `BOTH=1`
+(with `THINK=1`: every example without and with its note, one model in both modes), `VALID_PLAIN=1`, `LM_DIR`,
+`OUT_DIR`, `NOTES`, `LORA_CONFIG`, `PORT`, `NAME`, and since round 3 `R2_GGUF` and `PLAIN_REPEAT`. Run the node tools
+from the repository root.
 
 The published model came from two rounds. The first trained on 3,000 situations (2,850 train, 150 valid; 300 held
 out). A blind test against the rules' lines and Claude-written lines showed its weak spots: it missed the question
@@ -60,6 +65,41 @@ more situations aimed at those (`human-lines.mjs --focus`, `sample.mjs --set=r2`
 facts 40 %, follow-ups 20 %, the long tail 20 %, ordinary lines 20 %; 150 kept as a `target` split, never trained on),
 and trained one model in both modes on 3,800 replies, each with and without its note (`lora-r2.yaml`, 2 epochs; the
 second was published). `fact-use.mjs` measures how many lines state the facts a reference reply states.
+
+### Round 3 (bots ideas round 5: reactions to the player and the bots' own talk; shipped)
+
+The published model words replies to the player. The bots ideas work (theme I) asks it for two more kinds of line,
+which `port/BotModelAmbient` sends it near the player behind Settings › Bot chat › Bots' own talk: **a bot's turn in the
+bots' own talk** (a thread's turn after its opener, a bot's answer to another bot: `heard.via` `'thread'` or
+`'botanswer'`, the partner bot in the human's place; stage 1, on main with the round 2 model) and **a reaction to the
+player** (gz on its level, a wave back, "u following me?", a word to one standing next to it, its death, its kill, a
+dance or another emote, the Wilderness, its gear, its level passing: via `'reaction'`; stage 2). A reaction has no line
+to reply to: renderLocal's reaction branch says "Say one short chat line to {name}." and ends the chat with the event in
+plain words, "({name} levelled woodcutting to 60)", before the answer idea (`Situation.event`); every reply prompt
+renders as before, byte for byte (`test/model-ambient.test.mjs`'s golden check over round 2's 4,900 situations). The
+round 2 model reads 35-48 % of reactions right (it thanks people for the gz it was to give, asks "wat u want"), so the
+reactions stayed the rules' until the round 3 model trained on them shipped (`AMBIENT_REACTIONS` true in
+`port/BotModelAmbient` since; with Bots' own talk on Model only).
+
+**r3** (2026-11-02): round 2's 7,600 rows plus 1,200 new lines written by hand (600 reactions, 600 bot-to-bot turns),
+2 epochs (`lora-r2.yaml`, `THINK=1 BOTH=1`), epoch 2 published. On the 80 held-out reactions the guard (with the ambient
+checks) passes 100 % of r3's lines (r2 83.8 %, the rules 100 %), on the 80 held-out turns 91.3 % (r2 75 %, the rules
+97.5 %); a blind judge over those 160 scored 2004 feel 3.02 of 5 (r2 2.27, the rules 3.51, the writers 4.26), facts
+right 92 % (r2 74 %), fits the moment 77 % (r2 48 %); paired, r3 beat r2 91-36 and drew with the rules (52-62, 46
+ties, p .4). Replies to the player, the 300 held out: guard 99.7 % plain / 99.3 % with the note (r2 100 / 99.3 %);
+judged (100) 4.19 of 5 with the note (r2 4.18). Live (llama-server, a 500-bot hub hour and a 250-bot work hour): 0
+errors, 19 lines asked and said, 0 refused.
+
+| Step | Tool | Out |
+|---|---|---|
+| Sample | `sample.mjs --set=r3` (seeds 51-66: the player probing, standing at the hubs' crowds, touring, working, dying); humanlike's `--model-capture` captures the new kinds too since round 5, with their kind, the rules' line, the event, the thread's topic and turn | `<raw>/*.jsonl` |
+| Stage | `stage-r3.mjs --out=FILE [--bots --members --xprate --seed --warm --events --only]`: the natural capture hears about 15 reactions and 10 bot-to-bot lines a 250-bot hour, so a staged world (the real 274 world as the game runs it: an aged store, every theme on) puts the player beside crowds and stages threads, the bots' own questions and the reaction events where the bots already are; every line is the rules' own, said by a bot of the world, captured as humanlike does | `<staged>/*.jsonl` |
+| Select | `select-r3.mjs select --raw=DIR,DIR --old=<r2 data> --data=<r3 data>`: the new kinds only, deduplicated, about 600 reactions over 10 groups and 600 turns by what they do (the answer to an opener, a turn that asks back, the answer to a "u?", a later turn, a bot's answer), spread over personas and worlds; 80 + 80 held out (splits `target-react`, `target-turn`); batches of about 75 (`batch-r3-react-NN`, `batch-r3-turn-NN`). `finish --gen=<the round 2 model's lines>`: the data folder, round 2's rows and files as they are plus the new rows | `r3-situations.jsonl`, `r3-prompts.jsonl`, `situations.jsonl`, `batches/`, `target-react.jsonl`, `target-turn.jsonl` |
+| Write | One line per situation, no note, to the round 3 brief; `check-replies.mjs <batch> <replies>` guards the new kinds as the engine does (a turn keeps the rules' counter-question and numbers and asks none of its own; a reaction never thanks nor asks "wat u want": `role`) and checks a reaction against its event (`event`) | `replies/batch-r3-*.jsonl` |
+| Assemble | `assemble.mjs` (`build-model.sh assemble`): the new kinds are plain-only rows (their reply without a note in every mode: the bots' own talk never asks for Think first) beside round 2's rows, `--plain-repeat` (`PLAIN_REPEAT`) times, with their own valid share; their target splits as `target-react-prompts.jsonl` and `target-turn-prompts.jsonl` | `lm/` |
+| Evaluate | `build-model.sh target-r3-base` (the round 2 model, `R2_GGUF`, on the two splits, plain, scored beside the rules' and the writers' lines: the baseline) and `target-r3` (an epoch's model beside it); `eval.mjs score` guards these with the ambient checks too | `eval/r2-on-target-r3/`, `$RUN/epoch<N>/target-*-report.json` |
+
+The data (round 2's 4,450 situations and 3,800 replies, and the new kinds) is not published, as before.
 
 ### Training notes
 
@@ -87,8 +127,10 @@ second was published). `fact-use.mjs` measures how many lines state the facts a 
 
 After a change to renderLocal's text, the replies or the settings: `build-model.sh assemble train`, then for each epoch
 `EPOCH=n build-model.sh merge convert quantize valid` and pick by the valid loss (in `train.log`) and the valid report,
-then `EPOCH=n build-model.sh publish eval-base eval`. A new model gets a new release tag and its size, sha256 and URL
-in `models/bots-2004.json`; then `prepare-model.sh --download` in each app.
+then `OUT_NAME=<its file name> EPOCH=n build-model.sh publish eval-base eval`. A new model gets a new file name, a new
+release tag and its size, sha256 and URL in `models/bots-2004.json` (publish names the file as the pin does unless
+OUT_NAME says otherwise, and never puts another model over a file of that name: older checkouts pin it); then
+`prepare-model.sh --download` in each app.
 
 ## Results
 

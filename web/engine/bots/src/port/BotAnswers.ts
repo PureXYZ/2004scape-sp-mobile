@@ -521,6 +521,11 @@ const REGION_ASKED: [RegExp, string][] = [
     [/\b(ireland|irish)\b/, 'ireland'], [/\b(nz|new zealand)\b/, 'new zealand'], [/\b(germany|german)\b/, 'germany'], [/\b(norway|norwegian)\b/, 'norway']
 ];
 
+/**
+ * (bots ideas, round 5 ship) a where or how question: where or how to train ("where did you level", "where do i level",
+ * "how do you level so fast"), not the level ("how high is", "how many", "how good is", "how are your levels" still ask it)
+ */
+const TRAIN_WHERE_HOW = /\b(where|wher)\b|\bhow\b(?!\s+(high|many|much|good|is|are|far)\b)/;
 const SKILL_STATS: [RegExp, number][] = [
     [/\b(attack|atk|att)\b/, 0], [/\b(defence|defense|def)\b/, 1], [/\b(strength|str)\b/, 2], [/\b(hitpoints|hp)\b/, 3], [/\b(ranged|range)\b/, 4],
     [/\b(prayer|pray)\b/, 5], [/\b(magic|mage)\b/, 6], [/\b(cooking|cook)\b/, 7], [/\b(woodcutting|woodcut|wc)\b/, 8], [/\b(fletching|fletch)\b/, 9],
@@ -668,7 +673,10 @@ export function stateAnswer(ctx: AnswerContext): StateAnswer | null {
     if (skill) {
         const rest = msg.replace(skill[0], ' ').replace(/\s+/g, ' ').trim();
         const asks = /\b(level|levels)\b/.test(msg) || /^(what is )?your( at| level)?$/.test(rest) || /^how high is your$/.test(rest) || (raw.includes('?') && rest.split(' ').filter(Boolean).length <= 1);
-        if (asks) return text('skill', pick(SKILL_LEVEL).replace('{n}', String(bot.baseLevels[skill[1]])));
+        // (bots ideas, round 5 ship: the r3 writers' notes) a where or how question with "lvl" in it asks where or how to
+        // train ("where did you lvl range ?", "where do i lvl wc", "how do u lvl mining so fast"), not the level: "im 13" no
+        // more; "how high is ur wc", "how many lvls ..." still ask it
+        if (asks && !TRAIN_WHERE_HOW.test(msg)) return text('skill', pick(SKILL_LEVEL).replace('{n}', String(bot.baseLevels[skill[1]])));
     }
     return null;
 }

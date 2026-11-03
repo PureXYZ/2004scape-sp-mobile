@@ -9,7 +9,8 @@
 #     assemble train                     the training files; the LoRA (3 epochs, adapters after each)
 #     merge convert quantize             the adapters of EPOCH (default: the last) as a Q4_K_M GGUF in $RUN/epoch<N>
 #     valid                              that GGUF on the valid situations (150; the retrain's 200: llama-server, eval.mjs; choose an epoch)
-#     publish                            that GGUF to $LM_CACHE/models (bots-2004-q4km.gguf, .sha256, model.json)
+#     publish                            that GGUF to $LM_CACHE/models (OUT_NAME, its .sha256, model.json); never over
+#                                        another model of that name (a pinned one: a new model takes a new OUT_NAME)
 #     eval-base                          the base model prompted alone (renderLocal + 6 examples) on the 300 held out
 #     eval                               that GGUF on the 300 held out (eval.mjs, beside the base, the rules and, when
 #                                        $EVAL/gen-r1.jsonl is there, the first model's lines; with the note:
@@ -18,6 +19,13 @@
 #                                        $EVAL/target-gen-r1.jsonl (select-r2.mjs finish already wrote it)
 #     target                             that GGUF on the target situations, scored beside the first model's lines,
 #                                        the rules' and the writers' replies: $RUN/epoch<N>/target-gen.jsonl, target-report.json
+#     target-r3-base                     (bots ideas, round 5: the r3 data, select-r3.mjs) the round 2 model (R2_GGUF) on the
+#                                        two r3 target splits (target-react, target-turn: reactions to the human, bots'
+#                                        turns), plain (ambient lines never think), scored beside the rules' and the
+#                                        writers' lines: $EVAL/r2-on-target-r3/<split>-gen-r2.jsonl, <split>-report-r2.json
+#     target-r3                          that GGUF on the two r3 target splits, plain, scored beside the round 2 model's
+#                                        lines (target-r3-base first when missing), the rules' and the writers':
+#                                        $RUN/epoch<N>/<split>-gen.jsonl, <split>-report.json
 #     all                                assemble train merge convert quantize valid publish eval-base eval
 #
 # Environment (defaults in brackets): LM_CACHE [the shared cache of scripts/lib/cache.sh: LC_CACHE_DIR, else
@@ -25,12 +33,16 @@
 # llama.cpp/, runs/], PHASE7_DATA [required: the phase 7 training data, which is not published], RUN [$LM_CACHE/runs/r16-e3], EPOCH [3], PORT [18093], NAME [the model's name], LORA_CONFIG [lora.yaml beside this
 # file: its settings, with this data's counts written into $RUN/lora.yaml], OLD_GGUF [$LM_CACHE/runs/r16-e3/epoch2/
 # bots-2004-q4km.gguf: the first published model], LM_DIR [$PHASE7_DATA/lm: the assembled files], OUT_DIR
-# [$LM_CACHE/models: where publish puts the GGUF and its model.json], THINK [unset; 1: the note variant:
+# [$LM_CACHE/models: where publish puts the GGUF and its model.json], OUT_NAME [the file name models/bots-2004.json pins:
+# the GGUF's name there; a new model's own name, pinned with it, else publish refuses], THINK [unset; 1: the note variant:
 # assemble with NOTES (notes.mjs's {id, note}), the loss on the note and the reply, valid, eval and target with the
 # note, model.json's template qwen-chatml-think], BOTH [unset; with THINK=1, 1: every example twice, without and with its
 # note: one model in both modes, template qwen-chatml-hybrid, the app's switch picks; VALID_PLAIN=1 runs valid, eval and
 # target without the note], NOTES [$PHASE7_DATA/notes.jsonl]. An epoch is as many steps as $LM_DIR/train.jsonl has rows
 # (2,850; the retrain's 3,800; twice that with BOTH); EPOCHS [3] of them. Run from anywhere.
+# (bots ideas, round 5: the r3 data) R2_GGUF [$LM_CACHE/models/r2-both/bots-2004-q4km.gguf: the published round 2
+# model, target-r3-base's], PLAIN_REPEAT [1: assemble's --plain-repeat, each row of the new kinds this many times in
+# train]. The new kinds are plain-only (no note) in every mode; THINK=1 BOTH=1 trains round 2's rows both ways beside them.
 set -eu
 
 cd "$(dirname "$0")/../../../../.."
@@ -54,10 +66,14 @@ PYC=$LM_CACHE/venv-convert/bin/python
 NAME=${NAME:-"2004 chat (Qwen3.5 0.8B + LoRA)"}
 LORA_CONFIG=${LORA_CONFIG:-$HERE/lora.yaml}
 OLD_GGUF=${OLD_GGUF:-$LM_CACHE/runs/r16-e3/epoch2/bots-2004-q4km.gguf}
+R2_GGUF=${R2_GGUF:-$LM_CACHE/models/r2-both/bots-2004-q4km.gguf}
+PLAIN_REPEAT=${PLAIN_REPEAT:-1}
 WORK=$RUN/epoch$EPOCH
 LM_DIR=${LM_DIR:-$PHASE7_DATA/lm}
 OUT_DIR=${OUT_DIR:-$LM_CACHE/models}
-OUT=$OUT_DIR/bots-2004-q4km.gguf
+# (the review of the ship: the pin's file name, not model-v1's, which older checkouts pin)
+OUT_NAME=${OUT_NAME:-$(sed -n 's/^ *"file": *"\([^"]*\)".*/\1/p' models/bots-2004.json)}
+OUT=$OUT_DIR/$OUT_NAME
 EVAL=${EVAL:-$PHASE7_DATA/eval}
 THINK=${THINK:-}
 BOTH=${BOTH:-}
@@ -114,14 +130,31 @@ with_server() {
     trap - EXIT
 }
 
+# (bots ideas, round 5) an r3 target split's prompts: the assembled ones (with the writers' reference), else those
+# select-r3.mjs finish wrote into the data dir (before the writers' replies: the baseline)
+r3_prompts() {
+    if [ -f "$LM_DIR/$1-prompts.jsonl" ]; then echo "$LM_DIR/$1-prompts.jsonl"
+    elif [ -f "$PHASE7_DATA/$1-prompts.jsonl" ]; then echo "$PHASE7_DATA/$1-prompts.jsonl"
+    fi
+}
+
+# (bots ideas, round 5) the r3 target splits through the server of with_server, plain: gen_r3 <dir> <suffix>
+gen_r3() {
+    for split in target-react target-turn; do
+        P=$(r3_prompts $split)
+        [ -n "$P" ] || continue
+        node "$HERE/eval.mjs" gen --server="http://127.0.0.1:$PORT" --variant=lora --prompts="$P" --out="$1/$split$2.jsonl"
+    done
+}
+
 step() {
     case "$1" in
     assemble)
         if [ "$THINK" = 1 ]; then
             node "$HERE/notes.mjs" --data="$PHASE7_DATA" --out="$NOTES"
-            node "$HERE/assemble.mjs" --data="$PHASE7_DATA" --out="$LM_DIR" --notes="$NOTES" $BOTH_ARG
+            node "$HERE/assemble.mjs" --data="$PHASE7_DATA" --out="$LM_DIR" --notes="$NOTES" $BOTH_ARG --plain-repeat="$PLAIN_REPEAT"
         else
-            node "$HERE/assemble.mjs" --data="$PHASE7_DATA" --out="$LM_DIR"
+            node "$HERE/assemble.mjs" --data="$PHASE7_DATA" --out="$LM_DIR" --plain-repeat="$PLAIN_REPEAT"
         fi
         ;;
     train)
@@ -171,15 +204,23 @@ step() {
         mkdir -p "$OUT_DIR"
         # (without llama-quantize's two keys that name the imatrix and calibration files by their absolute paths: the
         # apps bundle this file and it is the release asset; the weights are unchanged)
-        rm -f "$OUT"
-        "$PYC" -B "$SRC/gguf-py/gguf/scripts/gguf_new_metadata.py" --force --remove-metadata quantize.imatrix.file --remove-metadata quantize.imatrix.dataset "$WORK/bots-2004-q4km.gguf" "$OUT" > "$WORK/publish.log" 2>&1
-        SHA=$(shasum -a 256 "$OUT" | awk '{ print $1 }')
+        rm -f "$OUT.new"
+        "$PYC" -B "$SRC/gguf-py/gguf/scripts/gguf_new_metadata.py" --force --remove-metadata quantize.imatrix.file --remove-metadata quantize.imatrix.dataset "$WORK/bots-2004-q4km.gguf" "$OUT.new" > "$WORK/publish.log" 2>&1
+        SHA=$(shasum -a 256 "$OUT.new" | awk '{ print $1 }')
+        # (the review of the ship: a checkout's pin names a file in this cache by its sha256; another model under its name
+        # breaks prepare-model.sh there)
+        if [ -f "$OUT" ] && [ "$(shasum -a 256 "$OUT" | awk '{ print $1 }')" != "$SHA" ]; then
+            rm -f "$OUT.new"
+            echo "build-model: $OUT is another model; set OUT_NAME to this one's own file name (and pin it in models/bots-2004.json)" >&2
+            exit 1
+        fi
+        mv "$OUT.new" "$OUT"
         BYTES=$(stat -f %z "$OUT")
-        echo "$SHA  bots-2004-q4km.gguf" > "$OUT.sha256"
+        echo "$SHA  $OUT_NAME" > "$OUT.sha256"
         cat > "$OUT_DIR/model.json" <<EOF
 {
     "name": "$NAME",
-    "file": "bots-2004-q4km.gguf",
+    "file": "$OUT_NAME",
     "bytes": $BYTES,
     "sha256": "$SHA",
     "ctx": 1024,
@@ -204,6 +245,9 @@ EOF
         # (beside the base, the first model's lines when they are there, and both modes of a model in both)
         LINES="base=$EVAL/gen-base-fewshot.jsonl"
         [ ! -f "$EVAL/gen-r1.jsonl" ] || LINES="$LINES r1=$EVAL/gen-r1.jsonl"
+        # (bots ideas, round 5: the round 2 model's lines beside, in an r3 data dir: select-r3.mjs finish copied them)
+        [ ! -f "$EVAL/gen-r2.jsonl" ] || LINES="$LINES r2=$EVAL/gen-r2.jsonl"
+        [ ! -f "$EVAL/gen-r2-think.jsonl" ] || LINES="$LINES r2-think=$EVAL/gen-r2-think.jsonl"
         [ ! -f "$EVAL/gen-lora.jsonl" ] || LINES="$LINES lora=$EVAL/gen-lora.jsonl"
         [ ! -f "$EVAL/gen-lora-think.jsonl" ] || LINES="$LINES lora-think=$EVAL/gen-lora-think.jsonl"
         # shellcheck disable=SC2086
@@ -218,6 +262,32 @@ EOF
         [ -f "$EVAL/target-gen-r1.jsonl" ] || step target-old
         with_server "$WORK/bots-2004-q4km.gguf" node "$HERE/eval.mjs" gen --server="http://127.0.0.1:$PORT" --variant=lora $THINK_ARG --prompts="$LM_DIR/target-prompts.jsonl" --out="$WORK/target-gen$( [ -n "$THINK_ARG" ] && echo -think ).jsonl"
         node "$HERE/eval.mjs" score --prompts="$LM_DIR/target-prompts.jsonl" --reference="$PHASE7_DATA/replies" --json="$WORK/target-report$( [ -n "$THINK_ARG" ] && echo -think ).json" "r1=$EVAL/target-gen-r1.jsonl" "epoch$EPOCH$( [ -n "$THINK_ARG" ] && echo -think )=$WORK/target-gen$( [ -n "$THINK_ARG" ] && echo -think ).jsonl"
+        ;;
+    target-r3-base)
+        # (bots ideas, round 5: the round 2 model on the r3 target splits, plain: the baseline)
+        mkdir -p "$EVAL/r2-on-target-r3"
+        # (the server's log beside the lines, not in an epoch's folder)
+        SAVED_WORK=$WORK
+        WORK=$EVAL/r2-on-target-r3
+        with_server "$R2_GGUF" gen_r3 "$EVAL/r2-on-target-r3" -gen-r2
+        WORK=$SAVED_WORK
+        for split in target-react target-turn; do
+            P=$(r3_prompts $split)
+            [ -n "$P" ] || continue
+            node "$HERE/eval.mjs" score --prompts="$P" --reference="$PHASE7_DATA/replies" --json="$EVAL/r2-on-target-r3/$split-report-r2.json" "r2=$EVAL/r2-on-target-r3/$split-gen-r2.jsonl"
+        done
+        ;;
+    target-r3)
+        [ -n "$(r3_prompts target-react)$(r3_prompts target-turn)" ] || { echo "build-model: no target-react-prompts.jsonl nor target-turn-prompts.jsonl in $LM_DIR or $PHASE7_DATA (the r3 data dir)" >&2; exit 1; }
+        for split in target-react target-turn; do
+            [ -z "$(r3_prompts $split)" ] || [ -f "$EVAL/r2-on-target-r3/$split-gen-r2.jsonl" ] || { step target-r3-base; break; }
+        done
+        with_server "$WORK/bots-2004-q4km.gguf" gen_r3 "$WORK" -gen
+        for split in target-react target-turn; do
+            P=$(r3_prompts $split)
+            [ -n "$P" ] || continue
+            node "$HERE/eval.mjs" score --prompts="$P" --reference="$PHASE7_DATA/replies" --json="$WORK/$split-report.json" "r2=$EVAL/r2-on-target-r3/$split-gen-r2.jsonl" "epoch$EPOCH=$WORK/$split-gen.jsonl"
+        done
         ;;
     all)
         for s in assemble train merge convert quantize valid publish eval-base eval; do step "$s"; done

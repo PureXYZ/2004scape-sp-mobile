@@ -5,8 +5,9 @@
 #   scripts/release.sh                 # build dist/<version>/ from a clean tree
 #   scripts/release.sh --allow-dirty   # build although the tree has uncommitted changes (a test build: never upload it)
 #   scripts/release.sh --upload        # upload dist/<version>/ as the DRAFT release v<version> (built first when it is
-#                                      # missing or was built from another commit), plus the release model-v1 with the
-#                                      # chat model when that does not exist yet (also a draft). Needs gh, logged in.
+#                                      # missing or was built from another commit), plus the chat model's own release
+#                                      # (the tag in models/bots-2004.json's url: model-v2 for r3) when that does not
+#                                      # exist yet (also a draft). Needs gh, logged in.
 #   options: --skip-ios, --skip-android (a partial dist/: --upload refuses it), --repo <owner/name> (for --upload;
 #            default PureXYZ/2004scape-sp-mobile)
 #
@@ -15,7 +16,7 @@
 #   2004Scape-<version>-android-lite.apk   key in ~/.android/2004scape) and without it
 #   2004Scape-<version>-ios.ipa            the iPhone app, unsigned (AltStore, SideStore or Sideloadly sign it with the
 #   2004Scape-<version>-ios-lite.ipa       player's own Apple Account), with and without the model
-#   bots-2004-q4km.gguf                    the model on its own (models/bots-2004.json pins its size and sha256)
+#   bots-2004-r3-q4km.gguf                 the model on its own (models/bots-2004.json pins its name, size and sha256)
 #   licenses.txt                           LICENSE and THIRD_PARTY_NOTICES.md with every licence text (the apps' own copy)
 #   SHA256SUMS.txt, RELEASE_NOTES.md       checksums; the notes (CHANGELOG.md's section for the version, install steps)
 #
@@ -80,9 +81,12 @@ APK_FULL="$NAME-android.apk"
 APK_LITE="$NAME-android-lite.apk"
 IPA_FULL="$NAME-ios.ipa"
 IPA_LITE="$NAME-ios-lite.ipa"
-MODEL_FILE=bots-2004-q4km.gguf
+# (the model's file name and its release's tag as models/bots-2004.json pins them: r3 is bots-2004-r3-q4km.gguf on
+# model-v2, so a cache keeps model-v1's bots-2004-q4km.gguf beside it for older checkouts)
+MODEL_FILE=$(json_field models/bots-2004.json file)
 LICENSES_FILE=licenses.txt
-MODEL_TAG=model-v1
+MODEL_TAG=$(json_field models/bots-2004.json url | sed -n 's#.*/releases/download/\([^/]*\)/.*#\1#p')
+[ -n "$MODEL_FILE" ] && [ -n "$MODEL_TAG" ] || { echo "release: models/bots-2004.json names no model file or release url" >&2; exit 1; }
 BUNDLE_ID=io.github.purexyz.scape2004
 # the 2004Scape release key's certificate (public): an APK signed with anything else is not this project's release
 RELEASE_CERT_SHA256=$(printf '%s' "${RELEASE_CERT_SHA256:-88:47:5C:3F:C0:29:42:05:46:56:3E:CA:F8:87:21:37:B1:35:38:6A:0F:5D:53:24:0D:BE:1B:0D:AB:12:82:65}" | tr -d ':' | tr '[:upper:]' '[:lower:]')
@@ -181,12 +185,13 @@ and \`android/scripts/prepare-model.sh --download\` fetch it from here and check
 
 Licence: Apache License 2.0. This is a modified version of Qwen3.5-0.8B, Copyright 2026 Alibaba Cloud, changed for
 this project in 2026: a LoRA (rank 16) fine-tuned on game chat lines, merged into the base weights, converted to GGUF with llama.cpp
-and quantised to Q4_K_M. (Its GGUF metadata names Qwen3.5-0.8B-Base as the base model, copied from Qwen3.5-0.8B's model
-card by the converter; the weights it was made from are Qwen/Qwen3.5-0.8B's, above.) The licence's full text is in
+and quantised to Q4_K_M. (Its GGUF metadata names Qwen3.5-0.8B as the base model, with this notice as its description;
+the first model, model-v1, names Qwen3.5-0.8B-Base there, copied from Qwen3.5-0.8B's model card by the converter.) The
+licence's full text is in
 $LICENSES_FILE, attached, and in THIRD_PARTY_NOTICES.md (section E).
 EOF
         gh release create "$MODEL_TAG" --repo "$REPO" --draft --latest=false --target "$COMMIT" \
-            --title "Chat model v1" --notes-file "$notes" "$DIST/$MODEL_FILE" "$DIST/$LICENSES_FILE"
+            --title "Chat model ${MODEL_TAG#model-}" --notes-file "$notes" "$DIST/$MODEL_FILE" "$DIST/$LICENSES_FILE"
         rm -f "$notes"
     fi
     say "Draft release $TAG"

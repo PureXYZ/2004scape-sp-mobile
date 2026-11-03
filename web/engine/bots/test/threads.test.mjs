@@ -20,6 +20,11 @@
 //   fixes       (variety round 2, the fixes: B) upstream's answers keep their words (a question back a line of its own,
 //               "I'm alright" / "u?"); an exchange's turns and the conversation's new chains each in the place of a line
 //               of the speaker's own (the debt); a members or novelty piece gets its own words, never "nice armour"
+//   ideas       (bots ideas, round 5 ship) the rules' ideas: the weather opener's own answer agrees with its opener,
+//               "best skill?" its highest skill, a level compare the real levels; "hey <question>" answered as the
+//               question, "where do i lvl wc" no level ask
+//   nextto      (bots ideas, round 5 ship) a bot coming and going beside a human standing still for an hour says hello
+//               once, not again to its wave; again after 10+ minutes out of sight; "u following me?" once while near
 //   errors      none
 //
 //   node --expose-gc web/engine/bots/test/threads.test.mjs [--seed=5]
@@ -422,7 +427,8 @@ function fits(said, line) {
     const fits = resp.length === 1 && last.length === 1 && last[0].cls === 'complaint' && L.responseFits({ c: 'response', after: last[0].after ?? undefined }, 'complaint');
     check('S2-6: a complaint said near now and then gets a response that fits its class ("tell me about it"), never another response', fits, `${resp.map(s => s.text).join(' | ')} (${JSON.stringify(last[0] ?? null)})`);
     W.setWitnessRatesForTest(null);
-    sim.teleportHuman(3300, 3000);
+    // (back to Lumbridge's courtyard: bots of the world may be near it, the nextto scene moves them off)
+    sim.teleportHuman(3208, 3220);
 }
 
 // WEAR-11: a partyhat at a bank gets a comment; a full set put on is shown off
@@ -539,7 +545,8 @@ function fits(said, line) {
         const each = pair.map((p, i) => Math.min(6, debt0[i] + turns.filter(s => s.name === p.username).length) - debt0[i]);
         check('B3: an exchange near the human: each turn in the place of a line of its speaker\'s own (its debt one more a turn)', turns.length >= 2 && owed.every((n, i) => n === each[i]), `${turns.map(s => s.text).join(' / ')}; owed ${owed.join(', ')} for ${each.join(', ')} (owing ${debt0.join(', ')} before)`);
         for (const p of pair) place(p, 2600 + Math.floor(Math.random() * 40), 3300);
-        sim.teleportHuman(3300, 3000);
+        // (back to Lumbridge's courtyard: bots of the world may be near it, the nextto scene moves them off)
+        sim.teleportHuman(3208, 3220);
     } else check('B3: two sociable bots for the exchange', false);
 }
 
@@ -570,6 +577,184 @@ function fits(said, line) {
     const wrong = kinds.flatMap(k => fits(k).filter(t => /armour|rich|gear/.test(t)).map(t => `${k}: ${t}`));
     const own = kinds.every(k => fits(k).some(t => !t.includes('{item}')));
     check('B5: the members and novelty pieces\' gear lines: their own words for each ("nice glory", "lol mime"), none of armour or wealth', wrong.length === 0 && own && fits('members-glory').includes('nice glory') && fits('novelty-mime').includes('lol mime') && fits('trim').includes('nice armour'), wrong.join('; '));
+}
+
+// (bots ideas, round 5 ship: the r3 writers' notes, rows r3-0871, r3-0938, r3-0647, r3-1192, r3-1054, r3-1120, r3-1188)
+// the rules' ideas: a turn never against the speaker's own line or levels; a "hey" with a question after it is the
+// question; a where or how question with "lvl" in it no level ask
+{
+    scene(SEED, 'ideas');
+    const pool = (id, key) => T.THREAD_LINES.topics[id][key];
+    const plainOf = t => t.plain ?? t.text;
+    // weather: the opener's own answer to "u?" agrees with its opener ("its raining here" / "its sunny here lol, u?" /
+    // "its sunny here lol" no more; "its so cold" / "same, wbu?" / "its sunny here lol" neither)
+    let owns = 0;
+    let sunnyHeard = 0;
+    const against = [];
+    const notPool = [];
+    for (let i = 0; i < 240; i++) {
+        const [a, b] = [bots[i % bots.length], bots[(i * 5 + 1) % bots.length]];
+        if (a === b) continue;
+        const turns = T.drawTopicForTest('weather', a, b, 6);
+        if (!turns || turns.length < 3 || turns[1].plain === undefined || turns[2].by !== 0) continue;
+        owns++;
+        const [own, heard, mine] = [turns[0].text, turns[1].plain, turns[2].text];
+        if (/sunny/.test(heard)) sunnyHeard++;
+        if (!pool('weather', 'answer').includes(mine)) notPool.push(mine);
+        const says = /^same\b/.test(mine) ? (/^same\b/.test(heard) ? own : heard) : mine;
+        if (/sunny/.test(says) || (/snow/.test(own) && /no snow/.test(says))) against.push(`${own} / ${heard}, u? / ${mine}`);
+    }
+    check('(round 5 ship) weather: the opener\'s own answer to "u?" never says against its opener ("its sunny here lol" after its "its raining here"; "same" after "its sunny here lol"), from the pool as written', owns >= 60 && sunnyHeard >= 1 && against.length === 0 && notPool.length === 0, { owns, sunnyHeard, against: against.slice(0, 4), notPool: notPool.slice(0, 4) });
+    // levels: "best skill?" its highest skill (r3-0647: "prob str" from a bot with str 25, wc and mining 51); a level answer its real level
+    const [p, q] = [bots[4], bots[5]];
+    const SK = T.THREAD_LINES.skills;
+    const saved = [p, q].map(x => [...x.baseLevels]);
+    const setLevels = (x, levels) => {
+        for (const sk of SK) x.baseLevels[T.threadSkillStat(sk)] = 10;
+        for (const [sk, l] of Object.entries(levels)) x.baseLevels[T.threadSkillStat(sk)] = l;
+    };
+    setLevels(q, { str: 25, wc: 51, mining: 51, cooking: 47 });
+    setLevels(p, { att: 40, fishing: 33 });
+    const bestOf = x => {
+        const top = Math.max(...SK.map(sk => x.baseLevels[T.threadSkillStat(sk)]));
+        return SK.filter(sk => x.baseLevels[T.threadSkillStat(sk)] === top);
+    };
+    const named = text => SK.filter(sk => new RegExp(`\\b${sk}\\b`).test(text));
+    let bestAsked = 0;
+    const wrongBest = [];
+    for (let i = 0; i < 160; i++) {
+        const turns = T.drawTopicForTest('favskill', p, q, 6);
+        if (!turns || !/\bbest\b/.test(turns[0].text)) continue;
+        bestAsked++;
+        const theirs = named(plainOf(turns[1]));
+        if (theirs.length !== 1 || !bestOf(q).includes(theirs[0])) wrongBest.push(`${turns[0].text} / ${turns[1].text}`);
+        if (turns[1].plain !== undefined && turns[2]?.by === 0) {
+            const mine = named(turns[2].text);
+            if (mine.length > 0 && !mine.every(sk => bestOf(p).includes(sk))) wrongBest.push(`${turns[0].text} / ${turns[1].text} / ${turns[2].text}`);
+        }
+    }
+    check('(round 5 ship) "best skill?" is answered with the bot\'s highest skill (str 25, wc and mining 51: wc or mining, never "prob str"), the asker\'s own too', bestAsked >= 30 && wrongBest.length === 0, { bestAsked, wrong: wrongBest.slice(0, 4) });
+    let levelAnswers = 0;
+    const wrongLevel = [];
+    for (let i = 0; i < 80; i++) {
+        for (const id of ['level', 'cb']) {
+            const turns = T.drawTopicForTest(id, p, q, 6);
+            if (!turns) continue;
+            const sk = id === 'cb' ? null : turns[0].text.split(/\W+/).find(w => T.threadSkillStat(w) !== null);
+            const real = x => (sk ? x.baseLevels[T.threadSkillStat(sk)] : x.combatLevel);
+            levelAnswers++;
+            const n = Number(plainOf(turns[1]).match(/\d+/)?.[0]);
+            if (n !== real(q)) wrongLevel.push(`${turns[0].text} / ${turns[1].text} (${real(q)})`);
+            if (turns[2]?.by === 0 && /\d/.test(turns[2].text) && Number(turns[2].text.match(/\d+/)[0]) !== real(p)) wrongLevel.push(`${turns[0].text} / ${turns[1].text} / ${turns[2].text} (${real(p)})`);
+        }
+    }
+    check('(round 5 ship) a level compare\'s answers are the two bots\' real levels (the skill asked, combat)', levelAnswers >= 100 && wrongLevel.length === 0, { levelAnswers, wrong: wrongLevel.slice(0, 4) });
+    for (const [i, x] of [p, q].entries()) saved[i].forEach((l, k) => (x.baseLevels[k] = l));
+    // a "hey" with a question after it: the question's answer, not a hello (r3-1192, r3-1054); a hello alone is one
+    const heyAsked = ['hey y does my items disappear?', 'hey what is ur favorite game?', 'hi where do i get a pickaxe', 'hey whats ur cb?'].map(t => [t, lib.answerFor(t, p, q)]);
+    // (the review of the ship: small talk after the hello is still a hello, "hey whats up" got "sry what?")
+    const hello = ['hey', 'hi all', 'heyy :)', 'yo', 'hey whats up', 'hey whats up?', 'hi how ya doing'].map(t => [t, lib.answerFor(t, p, q)]);
+    check('(round 5 ship) "hey <question>" is answered as the question (no greeting; "hey whats ur cb?" its combat), a hello alone or with small talk ("hey whats up", "hi how ya doing") as a greeting', heyAsked.every(([, r]) => r?.id !== 'greeting') && heyAsked[3][1]?.id === 'combat' && hello.every(([, r]) => r?.id === 'greeting'), [...heyAsked, ...hello].map(([t, r]) => `${t}: ${r?.id ?? 'none'}`));
+    // a where or how question with "lvl" in it (r3-1120, r3-1188): not "im 13"; the level asked still is
+    const whereLvl = ['where did you lvl range ? :(', 'where did yoi lvl range ?', 'where do i lvl wc', 'how do u lvl mining so fast'].map(t => [t, lib.answerFor(t, p, q)]);
+    const lvlAsked = ['whats ur range lvl?', 'wc lvl?', 'how high is ur wc', 'what lvl is ur mining'].map(t => [t, lib.answerFor(t, p, q)]);
+    check('(round 5 ship) a where or how question with "lvl" in it is no level ask (no \'skill\' answer); "wc lvl?", "how high is ur wc" still are', whereLvl.every(([, r]) => r?.id !== 'skill') && lvlAsked.every(([, r]) => r?.id === 'skill'), [...whereLvl, ...lvlAsked].map(([t, r]) => `${t}: ${r ? `${r.id} "${r.text}"` : 'none'}`));
+}
+
+// (bots ideas, round 5 ship) the next-to hello's cadence: a bot that comes and goes beside a human standing still (a
+// bank's: clay_clara greeted the idle human 4 times in an hour at Varrock West) says hello once in the hour, and not again
+// to its wave; again after 10 minutes out of sight; "u following me?" once while near
+{
+    scene(SEED, 'nextto');
+    const R = lib.Reactions;
+    // (Lumbridge's courtyard, every other bot within 20 tiles moved off)
+    sim.teleportHuman(3208, 3220);
+    tick(2);
+    const [hx, hz] = [sim.human.x, sim.human.z];
+    const b = bots[6];
+    const c = bots[7];
+    for (const o of sim.bots()) if (o !== b && o !== c && Math.max(Math.abs(o.x - hx), Math.abs(o.z - hz)) <= 20) place(o, hx + 60, hz + 60);
+    place(c, hx + 60, hz + 62);
+    R.setReactionRatesForTest({ nextTo: 1, hello: 1, wave: 1, followed: 1 });
+    R.forgetHumanForTest(sim.human);
+    const toHuman = (from, who) => said.slice(from).filter(s => s.kind === 'reaction' && s.to === sim.human.username && s.name === who.username);
+    // (a hello: its pools' lines, as styled; its other reactions are not: a random event's monster may hit the idle human)
+    const HELLOS = [...R.REACTION_LINES.nextTo, ...R.REACTION_LINES.waveHello].map(l => l.replace(' {name}', ''));
+    const hellos = (from, who) => toHuman(from, who).filter(s => HELLOS.some(l => fits(s.text, l)));
+    // (the human kept at full Hitpoints: standing an hour, something killed it in a first run, and its respawn is a move)
+    const stay = n => {
+        for (let i = 0; i < n; i += 5) {
+            tick(5);
+            sim.human.levels[lib.PlayerStat.HITPOINTS] = sim.human.baseLevels[lib.PlayerStat.HITPOINTS];
+        }
+    };
+    // (and back on its tile if anything moved it: a random event took it off once)
+    const home = () => {
+        if (sim.human.x !== hx || sim.human.z !== hz || sim.human.level !== 0) sim.teleportHuman(hx, hz);
+    };
+    const anims = [];
+    const play = lib.Player.prototype.playAnimation;
+    lib.Player.prototype.playAnimation = function (anim, delay) {
+        if (this === b) anims.push(lib.SeqType.get(anim)?.debugname ?? anim);
+        return play.call(this, anim, delay);
+    };
+    const from = said.length;
+    let waves = 0;
+    try {
+        // an hour: beside the human 30 s, then 5 tiles off (still in sight) 10 s, and back
+        for (let t = 0; t < 6000; t += 400) {
+            home();
+            place(b, hx + 1, hz);
+            stay(300);
+            // (the human waves from half an hour on, until it waves back: it may be typing a line of its own at one)
+            if (t >= 2800 && !anims.includes('emote_wave')) {
+                waves++;
+                sim.human.playAnimation(lib.SeqType.getId('emote_wave'), 0);
+                stay(40);
+            }
+            place(b, hx + 6, hz);
+            stay(100);
+        }
+    } finally {
+        lib.Player.prototype.playAnimation = play;
+    }
+    const hour = hellos(from, b);
+    const waveBack = anims.filter(a => a === 'emote_wave').length;
+    check('(round 5 ship) a bot coming and going beside a human standing still for an hour says hello once (its wave back to the human\'s wave without a hello)', hour.length === 1 && waveBack === 1, { lines: hour.map(s => `t${s.t}: ${s.text}`), waveBack, waves });
+    // 10+ minutes out of sight, then beside it again: a hello again
+    place(b, hx + 40, hz);
+    stay(1100);
+    home();
+    const back = said.length;
+    place(b, hx + 1, hz);
+    stay(300);
+    const again = hellos(back, b);
+    check('(round 5 ship) after 10+ minutes out of sight of each other, beside it again: a hello again', again.length === 1, again.map(s => s.text));
+    // followed: asked once, not again when the human stops and follows it again (still near; no hello from it meanwhile,
+    // and the second follow past its own gap between two reactions)
+    R.setReactionRatesForTest({ nextTo: 0, hello: 0, wave: 0, followed: 1 });
+    place(b, hx + 60, hz + 60);
+    place(c, hx + 2, hz);
+    // (past its gap since any reaction of its own before)
+    stay(650);
+    const f0 = said.length;
+    const follow = n => {
+        home();
+        sim.human.setInteraction(lib.Interaction.ENGINE, c, lib.ServerTriggerType.APPLAYER3);
+        stay(n);
+        sim.human.clearInteraction();
+        sim.teleportHuman(hx, hz);
+        place(c, hx + 2, hz);
+    };
+    follow(80);
+    stay(700);
+    follow(80);
+    // (its every reaction to the human: its hellos are off here, and its "?" is a line of the pool)
+    const asked = toHuman(f0, c);
+    check('(round 5 ship) "u following me?" once while near: the human following it again after a stop is not asked again', asked.length === 1, asked.map(s => `t${s.t}: ${s.text}`));
+    R.setReactionRatesForTest(null);
+    place(b, hx + 60, hz + 60);
+    place(c, hx + 60, hz + 62);
 }
 
 check('no errors', errors.length === 0, errors.slice(0, 3).join(' | '));

@@ -934,6 +934,19 @@ function isPureGreeting(mes: string): boolean {
 /** (variety round 1) a greeting's words, the longest first ("o hey" before "hey") */
 const GREETING_WORDS = [...chatResponses.greetings.patterns, 'all', 'everyone', 'every1', 'guys', 'people', 'there'].sort((a, b) => b.length - a.length);
 
+/**
+ * (bots ideas, round 5 ship: the r3 writers' notes) a greeting with a question after it ("hey y does my items
+ * disappear?", "hi where do i get a pickaxe"): its answer is the question's, not a hello back. Small talk after it is
+ * still a greeting ("hey whats up", "hi how ya doing?": nothing else answers those, and they got "sry what?": the
+ * review of the ship). `msg` is the line cleaned
+ */
+function greetingThenQuestion(raw: string, msg: string): boolean {
+    const rest = withoutPatterns(msg, GREETING_WORDS);
+    return rest.length > 1 && !SMALL_TALK.test(rest) && (raw.includes('?') || isQuestionText(rest));
+}
+/** (the review of the ship) the opener's small talk, as cleanMessage leaves it ("whats up" is "what is up"), and nothing after but a word to the hearer */
+const SMALL_TALK = /^(what is (up|good|new|happening)|how (is it going|is it goin|ya doing|ya doin|you doing|you doin|are you|are ya|are things|is life|is everything|you been|ya been|goes it))( with you| man| dude| bro| mate| m8| all| guys| everyone| lol| :\)| \(:)*$/;
+
 /** (variety round 1, SAY-7) a line as a greeting is read: no smileys, stretched letters collapsed ("heyyyy" hey, "hiii" hi) */
 function greetingText(mes: string): string {
     return cleanMessage(mes.replace(/[:;=]-?[()dpo3]/gi, ' ').replace(/([a-z])\1{2,}/gi, '$1'));
@@ -2205,8 +2218,9 @@ function processIntent(message: string, memory: BotMemory, bot: Player, asker: P
         id = 'dance';
     }
 
-    // Greetings
-    else if (matchesAny(msg, data.greetings.patterns)) {
+    // Greetings ((bots ideas, round 5 ship) a greeting with a question after it is the question: "hey y does my items
+    // disappear?", "hey what is ur favorite game?" got "Hello there!")
+    else if (matchesAny(msg, data.greetings.patterns) && !greetingThenQuestion(message, msg)) {
         response = pickSmart(data.greetings.replies, memory, bot);
         id = 'greeting';
         upstream = true;

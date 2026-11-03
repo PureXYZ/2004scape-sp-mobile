@@ -899,7 +899,7 @@ async function lmStubChecks(stubScriptId, botsScriptId) {
     // the app with think false (Think first is On here); greyed out with Rules, its choice kept, the engine hearing it off
     const ambientRow = () => evaluate(`(() => { const row = document.getElementById('botchat-ambient'); const s = document.getElementById('settings-pane'); return { shown: !row.hidden, unused: row.classList.contains('unused'), disabled: [...row.querySelectorAll('.seg button')].map(b => b.disabled), on: [...row.querySelectorAll('.seg button.on')].map(b => b.textContent), hint: document.getElementById('botchat-ambient-hint').textContent, setting: window.LostCityHost.settings.botAmbient, fits: s.scrollHeight <= s.clientHeight + 1 }; })()`);
     let row = await ambientRow();
-    check("lm: Bots' own talk shows at Rules (its default), in use with On-device (\"Talk between bots near you\"), the page still all on screen", row.shown && !row.unused && JSON.stringify(row.on) === '["Rules"]' && row.setting === 'rules' && row.hint === 'Talk between bots near you' && JSON.stringify(row.disabled) === '[false,false]' && row.fits, JSON.stringify(row));
+    check("lm: Bots' own talk shows at Rules (its default), in use with On-device (\"Reactions to you and talk between bots near you\"), the page still all on screen", row.shown && !row.unused && JSON.stringify(row.on) === '["Rules"]' && row.setting === 'rules' && row.hint === 'Reactions to you and talk between bots near you' && JSON.stringify(row.disabled) === '[false,false]' && row.fits, JSON.stringify(row));
     let ambientMode = await lastMode();
     let sentBeforeAmbient = (await lmStub()).sent.filter(m => m.type === 'lm').length;
     await inWorker(LM_REQUEST(9101, 9000, true));

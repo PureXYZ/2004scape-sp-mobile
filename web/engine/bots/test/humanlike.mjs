@@ -65,7 +65,12 @@
 //               10-25 ticks later; all on the human's dice (a run without the flag is unchanged)
 //   --model-capture=FILE  (phase 7) every reply to the human the rules composed and every line of the human's they left
 //               unanswered that a model could answer, as JSON lines {t, kind, ruleText, situation} (port/BotModelPrompt's
-//               situationOf, at the moment the bot decides): the training data's situations. No dice: the run is the same
+//               situationOf, at the moment the bot decides): the training data's situations. No dice: the run is the same.
+//               (bots ideas, round 5: I stage 2) And every line of the bots' own talk a model may word near the human
+//               (port/BotModelAmbient's listeners: a thread's turn after the opener, a bot's answer to a bot, a reaction to
+//               the human), as {t, kind: 'thread' | 'botanswer' | 'reaction', react, topic, turn, hint, ruleText,
+//               event, situation}: the r3 data's. The reactions' switch is on for the capture (setAmbientReactionsForTest): without
+//               a model they stay the rules' and nothing changes (no die)
 //   --model=stub[:L[:F]]  (phase 7, Track E) a model words the replies in its scope (port/BotModel): the library's
 //               deterministic stub (replies from the situation, each answer L ticks after its request, default 2; a share
 //               F of the requests fail, default 0: half answer nothing, half an error; 4 % are planted bad lines the
@@ -84,6 +89,10 @@
 //               bot's answer to a bot); LM1-LM8 (lib/humanlike-metrics.mjs MODEL_METRICS, printed apart with MD1-MD6) and
 //               a sample of those lines next to the rules' they replaced. --lm7-base=FILE: the --json report of the same
 //               run without the model, for LM7 (H7 with the model against without)
+//   --reactions (bots ideas, round 5: I stage 2) with --ambient: port/BotModelAmbient's reactions' switch on (the r3 model's
+//               AMBIENT_REACTIONS): the model words the reactions to the human near it too (gz, waves, followed, next to,
+//               its death, kill, dance, the Wilderness, its gear and level). (Round 5 ship) AMBIENT_REACTIONS ships true
+//               with r3, so --ambient has them already; --reactions=false turns them off (a run as stage 1 had it)
 
 // Line kinds: an explicit kind from the library wins (port/BotSay's listeners get `(player, line, kind, to)`: botSay's
 // kind and addressee; `{ kind, to }` as the third argument is read too), then BotPlayer._say's (idle, newbie,
@@ -135,6 +144,14 @@ if (MODEL && !/^stub(:[\d.]+){0,2}$/.test(MODEL) && !/^https?:\/\/[^\s]+$/.test(
 }
 // ---- (bots ideas, round 4: I model) --ambient: the bots' own talk in the model's words; --lm7-base: LM7's run without the model ----
 const AMBIENT = args.ambient === 'true';
+// (bots ideas, round 5: I stage 2) --reactions: the reactions' switch on with --ambient
+const REACTIONS = args.reactions === 'true';
+// (round 5 ship) --reactions=false: the switch off (it ships on)
+const NO_REACTIONS = args.reactions === 'false';
+if ((REACTIONS || NO_REACTIONS) && !AMBIENT) {
+    console.error('humanlike: --reactions needs --ambient (and --model)');
+    process.exit(2);
+}
 if (AMBIENT && !MODEL) {
     console.error('humanlike: --ambient needs --model (stub or http)');
     process.exit(2);
@@ -359,6 +376,16 @@ if (MODEL_CAPTURE) {
         if (req.to !== human || req.via === 'market' || req.via === 'reaction') return;
         modelCaptured.push({ t: lib.World.currentTick, kind, ruleText, situation: lib.BotModelPromptNs.situationOf(req) });
     });
+    // ---- (bots ideas, round 5: I stage 2) the bots' own talk near the human and the reactions to it, the switch on for
+    // the capture (without a model they stay the rules': no die) ----
+    const amb = lib.BotModelAmbientNs;
+    if (amb?.ambientListeners && typeof amb.setAmbientReactionsForTest === 'function') {
+        amb.setAmbientReactionsForTest(true);
+        amb.ambientListeners.push((req, situation) => {
+            modelCaptured.push({ t: lib.World.currentTick, kind: req.kind, react: req.react ?? null, topic: req.topic ?? null, turn: req.turn ?? null, hint: req.hint, ruleText: req.ruleText, event: req.event ?? null, situation });
+        });
+    }
+    // ---- end of I stage 2's block ----
 }
 // ---- (realism phase 7, Track E) --model: a model words the replies in its scope (port/BotModel): the library's stub, or a
 // llama-server the run waits for (askHttp, after each tick); MD1-MD6 from its stats and log at the end ----
@@ -370,6 +397,11 @@ if (MODEL) {
         console.error('humanlike: --model needs the phase 7 library (port/BotModel setModelForTest)');
         process.exit(2);
     }
+    // (bots ideas, round 5: I stage 2: the reactions too)
+    if (REACTIONS || NO_REACTIONS) lib.BotModelAmbientNs.setAmbientReactionsForTest(REACTIONS);
+    // (the review of the ship: the switch as the run has it, on by default with --ambient, so a run with
+    // --reactions=false reads apart)
+    const reactions = AMBIENT ? { reactions: lib.BotModelAmbientNs.ambientReactions() } : {};
     if (MODEL.startsWith('stub')) {
         const [, l, f] = MODEL.split(':');
         const latencyTicks = l ? Number(l) : 2;
@@ -379,12 +411,12 @@ if (MODEL) {
             process.exit(2);
         }
         ns.setModelForTest('stub', { latencyTicks, failRate, ambient: AMBIENT });
-        modelInfo = { kind: 'stub', latencyTicks, failRate, ambient: AMBIENT };
+        modelInfo = { kind: 'stub', latencyTicks, failRate, ambient: AMBIENT, ...reactions };
     } else {
         modelHttp.url = MODEL.replace(/\/+$/, '');
         ns.setModelMode({ mode: 'local', local: true, online: false, ambient: AMBIENT });
         ns.setModelChannel(msg => modelHttp.queue.push(msg));
-        modelInfo = { kind: 'http', url: modelHttp.url, ambient: AMBIENT };
+        modelInfo = { kind: 'http', url: modelHttp.url, ambient: AMBIENT, ...reactions };
     }
 }
 /** one line of the chat's characters, at most 120 (the guard cuts to 80): §3's grammar for the on-device model */

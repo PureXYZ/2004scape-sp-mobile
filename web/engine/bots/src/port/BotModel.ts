@@ -29,7 +29,8 @@
 // ambient checks), their numbers apart (modelStats.ambient: LM1-LM8; the replies' MD1-MD6 as they were), the log's
 // "(ambient)" mark and the stub's ambient words. The replies to the human (wantsModel, MODEL_VIAS, the retry) are as
 // they were. (Round 4 fixes) The replies' MAX_IN_FLIGHT counts no line of the bots' own talk (inFlightFor), and a line
-// of the bot's to a human gives up its own talk's request first (supersedeAmbient: port/BotChat.sayTyped).
+// of the bot's to a human gives up its own talk's request first (supersedeAmbient: port/BotChat.sayTyped). (Bots ideas,
+// round 5: I stage 2) The stub words a reaction to the human (Situation.event) too: the rules' line, never a thanks.
 import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
 import { toDisplayName } from '#/util/JString.js';
@@ -660,10 +661,23 @@ function stubReply(s: Situation, msg: ModelRequestMessage): string {
 function stubAmbient(s: Situation, msg: ModelRequestMessage): string {
     const h = hash(`${msg.id}|${s.heard.text}|${s.bot.name}|ambient`);
     const base = (s.hint?.text ?? 'lol').toLowerCase();
+    if (s.event) return stubReaction(s, base, h); // (bots ideas, round 5: I stage 2)
     const forms = AMBIENT_COUNTER_RX.test(base) ? [base, `ya ${base}`, `lol ${base}`, base] : [base, `ya ${base}`, `${base} lol`, `lol ${base}`, `${base} :)`, base];
     return forms[h % forms.length];
 }
 // ---- end of I model's block ----
+// ---- (bots ideas, round 5: I stage 2) ----
+/**
+ * the default stub's words for a reaction to the human (Situation.event): the rules' line in a 2004 way ("gz lol", "omg
+ * lvl 95!!"), now and then the event's level after a gz ("gz on 60"); never a thanks, never the human's name
+ */
+function stubReaction(s: Situation, base: string, h: number): string {
+    const level = /^levelled .+ to (\d+)$/.exec(s.event ?? '');
+    const forms = [base, `${base} lol`, `lol ${base}`, `${base}!!`, base];
+    if (level && /^(gz|gratz|grats|congrats|nice|gj)\b/.test(base)) forms.push(`gz on ${level[1]}`);
+    return forms[h % forms.length];
+}
+// ---- end of I stage 2's block ----
 
 /** (bots ideas, Track B) the planted anachronisms, in turn: two of the late terms and the old one */
 const PLANTED_LATE = ['nice whip lol', 'just check the wiki lol', 'doing pest control'];

@@ -432,7 +432,7 @@ botChat.host = object : AndroidBotChat.Host {
 ### 5.3 The model in the APK (`lostcity.model`, android/build-logic)
 
 - `android/scripts/prepare-model.sh [--download | <gguf> | --spike | --none]` writes `android/build/model-assets/Model/`
-  (by default the iPhone's model, `models/bots-2004.json`: the cache's `models/bots-2004-q4km.gguf`, sha256 `94ef25e0…`,
+  (by default the iPhone's model, `models/bots-2004.json`: the cache's `models/bots-2004-r3-q4km.gguf`, sha256 `d92111c2…`,
   template `qwen-chatml-hybrid`; a relative path is taken from where the script is run). The plugin adds it to every APK component's assets (`assets/Model/`),
   stored (`noCompress "gguf"`). Without a prepared model the build warns and the APK has none; `-Plc.model=none` leaves
   it out on purpose. `verifyModel` checks size and sha256 against model.json before the assets merge.

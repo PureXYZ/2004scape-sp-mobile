@@ -9,15 +9,18 @@ with `scripts/release.sh`. Each release carries four apps, the chat model, their
 | `2004Scape-<version>-android-lite.apk` | Android, without the model (about 54 MB) |
 | `2004Scape-<version>-ios.ipa` | iPhone, unsigned (a sideloading tool signs it), with the model (about 550 MB) |
 | `2004Scape-<version>-ios-lite.ipa` | iPhone, unsigned, without the model (about 40 MB) |
-| `bots-2004-q4km.gguf` | The chat model on its own, for building from source (about 530 MB) |
+| `bots-2004-r3-q4km.gguf` | The chat model on its own, for building from source (about 530 MB; the file `models/bots-2004.json` names) |
 | `licenses.txt` | LICENSE and THIRD_PARTY_NOTICES.md with every licence's full text, as the apps carry it (the model's Apache License 2.0 among them) |
 | `SHA256SUMS.txt` | The sha256 of every file above |
 | `RELEASE_NOTES.md` | The notes the release page shows |
 
 Sizes here and in the release notes are decimal megabytes (1 MB = 1,000,000 bytes).
 
-The chat model is also published once as a release of its own, tagged **`model-v1`** (with `licenses.txt`): that is the
-URL [models/bots-2004.json](../models/bots-2004.json) pins and `prepare-model.sh --download` fetches.
+The chat model is also published once as a release of its own (with `licenses.txt`), tagged as the URL
+[models/bots-2004.json](../models/bots-2004.json) pins it, which `prepare-model.sh --download` fetches: **`model-v1`**
+(`bots-2004-q4km.gguf`, the first model) is published; **`model-v2`** (`bots-2004-r3-q4km.gguf`, the round 3 model the
+pin names since 2026-11) is **not published yet**, so until it is `--download` fails and the model must be in the cache
+already (`release.sh --upload` makes its draft the first time it runs with this pin).
 
 ## What you need
 
@@ -57,10 +60,12 @@ URL [models/bots-2004.json](../models/bots-2004.json) pins and `prepare-model.sh
    and its checksums hold, or builds it first; then it creates a **draft** GitHub release `v<version>` with `gh` and
    uploads the files. A commit rewritten after the build (a rebase, an amend, the squash below) is another commit, so
    `--upload` builds again, about five minutes, with new checksums and notes: check those, not the earlier build's. It
-   refuses when the commits being released name a private id (The public history). The first time, it also creates
-   the `model-v1` release with the model and `licenses.txt`; after that `model-v1` already exists and is left alone (the model only changes with a new tag and a new URL in `models/bots-2004.json`).
-5. **Publish.** Open the drafts on GitHub, check the files and the notes, and publish them: `model-v1` first (the first
-   time), because `prepare-model.sh --download` needs it public, then `v<version>`. Publishing makes the tag
+   refuses when the commits being released name a private id (The public history). When the model's release (the tag
+   in `models/bots-2004.json`'s URL: `model-v2` now) does not exist yet, it also creates it with the model and
+   `licenses.txt`; after that it is left alone (the model only changes with a new file name, a new tag and a new URL in
+   `models/bots-2004.json`).
+5. **Publish.** Open the drafts on GitHub, check the files and the notes, and publish them: the model's release first
+   (when it is new), because `prepare-model.sh --download` needs it public, then `v<version>`. Publishing makes the tag
    `v<version>` on GitHub if it is not there yet (`git fetch --tags` brings it here).
 
 ### The public history

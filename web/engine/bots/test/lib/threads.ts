@@ -19,3 +19,7 @@ export { setDirectorForTest, resetDirectorForTest } from '#/engine/bot/port/BotD
 export { default as WordEnc } from '#/cache/wordenc/WordEnc.js';
 export { default as ObjType } from '#/cache/config/ObjType.js';
 export { PlayerStat } from '#/engine/entity/PlayerStat.js';
+// (bots ideas, round 5 ship: the reactions' cadence, a wave and a follow)
+export { default as SeqType } from '#/cache/config/SeqType.js';
+export { Interaction } from '#/engine/entity/Interaction.js';
+export { default as ServerTriggerType } from '#/engine/script/ServerTriggerType.js';

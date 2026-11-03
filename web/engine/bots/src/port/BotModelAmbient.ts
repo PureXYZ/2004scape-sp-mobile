@@ -27,17 +27,30 @@
 // would not, and with the model's words the world's dice run as with the rules' line, so a run with the model and one
 // without are the same world but for the words and their timing (humanlike's LM7 compares them).
 // Its numbers: port/BotModel's modelStats.ambient (and its log, marked `ambient`): humanlike's LM1-LM8.
+//
+// (bots ideas, round 5: I stage 2) Reactions to the human, kind
+// 'reaction': port/BotReactions' gz, wave hello, "u following me?" and "sup?" to one standing next to it, and
+// port/BotWitness's reactions (its death, its kill, a dance or another emote, the Wilderness, its gear, its level passing),
+// each with its event in plain words (Situation.event: renderLocal's reaction branch), the rules' line the hint and the
+// fallback, through the same gates; and a reaction goes first: one decided in the tick a line of the bots' own talk was
+// asked takes its place (that line falls back to the rules', at its rules' time). The guard keeps a reaction's role (no
+// thanks, no "wat u want": port/BotModelGuard). All behind AMBIENT_REACTIONS, on since the round 3 model (r3, trained on
+// them) ships (bots ideas, round 5 ship); with it false the reactions never reach this module (no request, no die,
+// nothing captured).
+// Every line this module may word is told to its listeners first (ambientListeners: humanlike's --model-capture, the r3
+// training data's situations): when its speaker is near a human, whatever the setting, and with no dice.
 import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
 import { ambientKeyboard, botPersona, sayTypedAt, type TypedLine } from '#/engine/bot/port/BotChat.js';
-import { ambientAvailable, askModel, modelChannel, modelRequestsInFlight, modelStats, NATIVE_TIMEOUT_MS, type ModelLogEntry } from '#/engine/bot/port/BotModel.js';
+import { ambientAvailable, askModel, modelChannel, modelRequestsInFlight, modelStats, NATIVE_TIMEOUT_MS, pendingModelReply, supersedeAmbient, type ModelLogEntry } from '#/engine/bot/port/BotModel.js';
 import { AMBIENT_COUNTER_RX } from '#/engine/bot/port/BotModelGuard.js';
 import { renderLocal, situationOf } from '#/engine/bot/port/BotModelPrompt.js';
-import type { OnlinePrompt } from '#/engine/bot/port/BotModelTypes.js';
+import type { OnlinePrompt, Situation } from '#/engine/bot/port/BotModelTypes.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 import { nameSeed, seededRandom } from '#/engine/bot/port/BotSeed.js';
 import { styleLine } from '#/engine/bot/port/BotStyle.js';
 import { typingTicks } from '#/engine/bot/port/BotTiming.js';
+import { botConsole as console } from '#/engine/bot/port/BotLog.js';
 
 /** a speaker this close to a human on its floor (Chebyshev; about the client's view): its line may be the model's */
 export const AMBIENT_RANGE = 15;
@@ -46,8 +59,34 @@ export const AMBIENT_GAP_TICKS = 34;
 /** the deadline: the rules' own say time + this; then the rules' line at once */
 export const AMBIENT_SLACK_TICKS = 4;
 
-/** the kinds of the bots' own talk a model words (stage 1) */
-export type AmbientKind = 'thread' | 'botanswer';
+/** the kinds of the bots' own talk a model words (stage 1); (bots ideas, round 5: I stage 2) and the reactions to the human */
+export type AmbientKind = 'thread' | 'botanswer' | 'reaction';
+
+// ---- (bots ideas, round 5: I stage 2) the reactions' switch ----
+/**
+ * Reactions to the human in the model's words: true since the round 3 model (trained on them) ships (models/bots-2004.json
+ * pins r3); they still only run with Bots' own talk on Model (Rules, the default, asks nothing). With it false
+ * port/BotReactions and port/BotWitness never call ambientWords for a reaction (no request, no die). Tests and the
+ * capture set it either way with setAmbientReactionsForTest.
+ */
+export const AMBIENT_REACTIONS = true;
+let reactionsOn: boolean = AMBIENT_REACTIONS;
+/** reactions to the human may be the model's (AMBIENT_REACTIONS, or a test's or a capture's word); no dice */
+export function ambientReactions(): boolean {
+    return reactionsOn;
+}
+/** (tests, the capture) the reactions' switch on or off; null: AMBIENT_REACTIONS again */
+export function setAmbientReactionsForTest(on: boolean | null): void {
+    reactionsOn = on ?? AMBIENT_REACTIONS;
+}
+/**
+ * What a reaction is to, for the r3 data and its spread (the capture): a level-up ('gz'; 'milestone' at a level of ten or
+ * 99), a wave ('wave'), followed ('followed'), stood next to ('nextto'), the human's death ('died'; 'pked' by a player),
+ * its kill ('kill'), a dance or another emote ('dance', 'emote'), the Wilderness ('wildy'), what it wears ('gear') and its
+ * level passing by ('level')
+ */
+export type ReactionKind = 'gz' | 'milestone' | 'wave' | 'followed' | 'nextto' | 'died' | 'pked' | 'kill' | 'dance' | 'emote' | 'wildy' | 'gear' | 'level';
+// ---- end of I stage 2's block ----
 
 /** A line of the bots' own talk the rules decided, for the model to word. */
 export interface AmbientRequest {
@@ -68,13 +107,36 @@ export interface AmbientRequest {
     extra: number;
     /** told the words said (the model's styled, or the rules' line), before the line's `then` */
     onSaid?: (text: string) => void;
+    // ---- (bots ideas, round 5: I stage 2) ----
+    /** (a reaction) what the human did, in plain words after its name: Situation.event */
+    event?: string;
+    /** (a reaction) what it is to, for the data (the capture) */
+    react?: ReactionKind;
+    /** (a thread's turn) its topic (data/threads.json's id), for the data (the capture) */
+    topic?: string;
+    /** (a thread's turn) its place in the thread (1: the answer to the opener), for the data (the capture) */
+    turn?: number;
+    // ---- end of I stage 2's block ----
 }
+
+// ---- (bots ideas, round 5: I stage 2) the capture's listeners ----
+/**
+ * A line the model may word, told before anything is decided (humanlike's --model-capture: the r3 training data): the
+ * request and the situation its prompt is rendered from. Told when its speaker is near a human (not the mod), whatever
+ * the setting. Listeners must not draw dice nor change anything.
+ */
+export type AmbientListener = (req: AmbientRequest, situation: Situation) => void;
+export const ambientListeners: AmbientListener[] = [];
+// ---- end of I stage 2's block ----
 
 /** Claude's prompt for an ambient request: none (ambient lines go to the on-device model only; native never reads it) */
 const NO_ONLINE: OnlinePrompt = Object.freeze({ system: '', context: '', user: '' });
 
 const rates = { gap: AMBIENT_GAP_TICKS, range: AMBIENT_RANGE };
 let lastAskAt = -Infinity;
+// ---- (bots ideas, round 5: I stage 2) the last ask's speaker and kind: a reaction in the same tick goes first ----
+let lastAsk: { bot: Player; kind: AmbientKind } | null = null;
+// ---- end of I stage 2's block ----
 
 /** a human (not a bot, logged in) on the bot's floor within `range` tiles */
 function nearHuman(bot: Player, range: number): boolean {
@@ -88,16 +150,48 @@ function nearHuman(bot: Player, range: number): boolean {
 /**
  * Why this line stays the rules' ('off': Bots' own talk is not the model's, or no channel; 'mod': the player-mod bot's
  * lines are always the rules'; 'far': no human near; 'inflight': a request in flight; 'pacing': the 20 s gap), or null:
- * the model may word it. No dice.
+ * the model may word it. No dice. (Bots ideas, round 5: I stage 2) A reaction (`kind`) decided in the tick a line of the
+ * bots' own talk was asked, that line's request the only one in flight, may take its place (yielding).
  */
-export function ambientRefusal(bot: Player): string | null {
+export function ambientRefusal(bot: Player, kind: AmbientKind = 'thread'): string | null {
     if (!ambientAvailable() || modelChannel() === null) return 'off';
     if (bot.staffModLevel > 0) return 'mod';
     if (!nearHuman(bot, rates.range)) return 'far';
-    if (modelRequestsInFlight() > 0) return 'inflight';
-    if (World.currentTick - lastAskAt < rates.gap) return 'pacing';
+    const yields = kind === 'reaction' && yielding() !== null;
+    if (modelRequestsInFlight() > (yields ? 1 : 0)) return 'inflight';
+    if (!yields && World.currentTick - lastAskAt < rates.gap) return 'pacing';
     return null;
 }
+
+// ---- (bots ideas, round 5: I stage 2) reactions first ----
+/**
+ * the speaker of a line of the bots' own talk (a thread's turn, a bot's answer) asked in this very tick and still waiting
+ * on the model, which a reaction decided now goes before; else null
+ */
+function yielding(): Player | null {
+    if (lastAsk === null || lastAsk.kind === 'reaction' || lastAskAt !== World.currentTick) return null;
+    return pendingModelReply(lastAsk.bot)?.ambient ? lastAsk.bot : null;
+}
+
+/** the situation a line of the bots' own talk is worded for (a reaction's with its event); pure */
+function ambientSituation(req: AmbientRequest, now: number): Situation {
+    const situation = situationOf({ bot: req.bot, to: req.partner, heard: req.heard, channel: 'public', via: req.kind, greeted: false, intent: { id: req.intent ?? req.kind, text: req.hint } }, now);
+    return req.kind === 'reaction' && req.event ? { ...situation, event: req.event } : situation;
+}
+
+/** the capture's listeners told of a line its speaker says near a human (not the mod's); no dice */
+function tellListeners(req: AmbientRequest): void {
+    if (req.bot.staffModLevel > 0 || !nearHuman(req.bot, rates.range)) return;
+    const situation = ambientSituation(req, World.currentTick);
+    for (const listener of ambientListeners) {
+        try {
+            listener(req, situation);
+        } catch (err) {
+            console.error('[BotModelAmbient] a listener failed', err);
+        }
+    }
+}
+// ---- end of I stage 2's block ----
 
 /** the line said, noted in the log entry (LM5, LM8) and told to the caller, before its own `then` */
 function saidLine(line: TypedLine, entry: ModelLogEntry, text: string, onSaid?: (text: string) => void): TypedLine {
@@ -119,7 +213,10 @@ function saidLine(line: TypedLine, entry: ModelLogEntry, text: string, onSaid?: 
  * (ambientRefusal: nothing done, nothing drawn): the caller says the rules' line as before.
  */
 export function ambientWords(req: AmbientRequest, line: TypedLine): boolean {
-    const why = ambientRefusal(req.bot);
+    // (bots ideas, round 5: I stage 2: a reaction only with the reactions' switch on; the capture's listeners first)
+    if (req.kind === 'reaction' && !reactionsOn) return false;
+    if (ambientListeners.length) tellListeners(req);
+    const why = ambientRefusal(req.bot, req.kind);
     if (why === 'off') return false;
     if (why !== null) {
         const skipped = modelStats.ambient.skipped;
@@ -129,10 +226,18 @@ export function ambientWords(req: AmbientRequest, line: TypedLine): boolean {
     const bot = req.bot;
     const persona = botPersona(bot);
     const now = World.currentTick;
+    // (bots ideas, round 5: I stage 2: a reaction goes first: the line of the bots' own talk asked this tick falls back
+    // to the rules' line, at its rules' time, and gives the reaction its place)
+    if (req.kind === 'reaction') {
+        // (counted in its fallbacks, 'superseded')
+        const before = yielding();
+        if (before !== null) supersedeAmbient(before);
+    }
     lastAskAt = now;
+    lastAsk = { bot, kind: req.kind };
     // (the rules' timing, as sayTyped would type their line now; the keyboard held to the deadline)
     const kb = ambientKeyboard(bot, req.ruleText, req.extra, AMBIENT_SLACK_TICKS);
-    const situation = situationOf({ bot, to: req.partner, heard: req.heard, channel: 'public', via: req.kind, greeted: false, intent: { id: req.intent ?? req.kind, text: req.hint } }, now);
+    const situation = ambientSituation(req, now);
     // (native's own timeout a tick before the deadline: its rules' line then at its time, not said late)
     const timeoutMs = Math.max(1000, Math.min(NATIVE_TIMEOUT_MS, (kb.deadline - now - 1) * 600));
     askModel({
@@ -149,7 +254,8 @@ export function ambientWords(req: AmbientRequest, line: TypedLine): boolean {
         deadline: kb.deadline,
         // (the partner's name as the model wrote it: no echo roll, no die)
         keepName: true,
-        ambient: { rulesDue: kb.due, counter: AMBIENT_COUNTER_RX.test(req.hint.trim()), timeoutMs },
+        // (a reaction keeps no counter-question: the human answers it, no drawn turn does)
+        ambient: { rulesDue: kb.due, counter: req.kind !== 'reaction' && AMBIENT_COUNTER_RX.test(req.hint.trim()), timeoutMs },
         use: (text, entry) => {
             kb.release();
             // (the words' own dice: the world's run as with the rules' line)
@@ -174,6 +280,7 @@ export function setAmbientRatesForTest(opts: { gap?: number; range?: number } = 
     rates.gap = opts.gap ?? AMBIENT_GAP_TICKS;
     rates.range = opts.range ?? AMBIENT_RANGE;
     lastAskAt = -Infinity;
+    lastAsk = null; // (bots ideas, round 5: I stage 2)
 }
 
 /** (tests) the tick of the last ambient request (-Infinity: none yet) */

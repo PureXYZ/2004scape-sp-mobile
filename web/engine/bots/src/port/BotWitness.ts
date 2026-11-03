@@ -27,6 +27,11 @@
 // next line, BotChatter.countAsOwnLine). Rate limits per bot, per area and per human. Every roll is Math.random
 // (seeded in the sims); nothing reads the wall clock. Per tick: a counter; every SCAN_EVERY ticks a pass over the bots
 // online (who wears what, who passes whom).
+// (bots ideas, round 5: I stage 2) A reaction to the human (lineKind 'reaction': its death, its kill, a dance or another
+// emote, the Wilderness, its gear, its level passing) may be worded by the on-device model near it, with port/
+// BotModelAmbient's reactions' switch on (AMBIENT_REACTIONS: the round 3 model): its event in plain words ("died next to
+// you", "got killed by a pker in the wilderness", "is wearing a dragon med helm", "walked past you, combat 95"), the
+// rules' line its hint and its fallback, the rules' timing (say); with it off, as before (no die more).
 import InvType from '#/cache/config/InvType.js';
 import ObjType from '#/cache/config/ObjType.js';
 import VarPlayerType from '#/cache/config/VarPlayerType.js';
@@ -55,6 +60,10 @@ import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 // (bots ideas, Track B: loot) the human's death pile
 import { notePileDeath, tickPiles } from '#/engine/bot/port/BotLoot.js';
+// ---- (bots ideas, round 5: I stage 2) reactions in the model's words ----
+import { ambientReactions, ambientWords, type ReactionKind } from '#/engine/bot/port/BotModelAmbient.js';
+import { withoutName } from '#/engine/bot/port/BotModelGuard.js';
+// ---- end of I stage 2's block ----
 
 // ── the log (the humanlike runner: W10, W14, W15) ────────────────────────────
 
@@ -153,6 +162,10 @@ interface SayOpts {
     lineKind: LineKind;
     /** after it is said */
     then?: () => void;
+    // ---- (bots ideas, round 5: I stage 2) a reaction to the human: what it did in plain words, and what it is ----
+    words?: string;
+    react?: ReactionKind;
+    // ---- end of I stage 2's block ----
 }
 
 /**
@@ -172,7 +185,8 @@ function say(bot: Player, event: string, opts: SayOpts): boolean {
     log(bot, event, opts.about);
     const to = opts.to !== undefined ? opts.to : (picked.to?.player ?? null);
     const emote = picked.line.tag.emote;
-    sayTyped(bot, styleLine(picked.text, persona).line, {
+    const text = styleLine(picked.text, persona).line;
+    const line = {
         to,
         kind: opts.lineKind,
         then: () => {
@@ -180,7 +194,14 @@ function say(bot: Player, event: string, opts: SayOpts): boolean {
             if (emote && (EMOTES as readonly string[]).includes(emote)) botEmote(bot, emote as Emote, true);
             opts.then?.();
         }
-    }, reactionTicks(persona, 'notice'));
+    };
+    const extra = reactionTicks(persona, 'notice');
+    // ---- (bots ideas, round 5: I stage 2) a reaction to the human in the model's words near it, with the switch on (the
+    // rules' line, its name out, the hint; the same timing; the emote and the reply window in `then` as before) ----
+    const human = to !== null && to.is_bot !== true ? to : null;
+    const worded = opts.lineKind === 'reaction' && human !== null && opts.words !== undefined && ambientReactions() && ambientWords({ kind: 'reaction', bot, partner: human, heard: '', hint: withoutName(picked.text, human.displayName || human.username), ruleText: text, intent: event, extra, event: opts.words, react: opts.react }, line);
+    // ---- end of I stage 2's block ----
+    if (!worded) sayTyped(bot, text, line, extra);
     if (opts.lineKind !== 'reaction') countAsOwnLine(bot);
     return true;
 }
@@ -430,9 +451,11 @@ export function respondTo(speaker: Player, cls: HeardClass): void {
 /**
  * (port/BotReactions: the human died, danced or did another emote, went into the Wilderness, killed something, at (x, z)
  * on `level`) one bot within `distance` may react, to the human: "lol u died", "nice dance lol", "careful in the wildy".
- * At most one a minute for a human, and each kind at its own gap. True when one was said.
+ * At most one a minute for a human, and each kind at its own gap. True when one was said. (Bots ideas, round 5: I stage
+ * 2) `words`: what it did in plain words, the model's event ("is dancing", "killed a hill giant"; a death's are the
+ * bot's own view of it: humanDeathWords)
  */
-export function reactToHuman(human: Player, event: string, x: number, z: number, level: number, distance = 10): boolean {
+export function reactToHuman(human: Player, event: string, x: number, z: number, level: number, distance = 10, words?: string): boolean {
     const now = World.currentTick;
     let h = humanSaid.get(human);
     if (!h) humanSaid.set(human, (h = { at: -Infinity, kinds: new Map() }));
@@ -442,11 +465,39 @@ export function reactToHuman(human: Player, event: string, x: number, z: number,
     if (!picked || Math.random() >= (testRates.human ?? HUMAN_CHANCE[event] ?? 0.2)) return false;
     const bot = voiced(crowd, picked, now);
     if (!bot) return false;
-    if (!say(bot, event, { about: human, to: human, lineKind: 'reaction' })) return false;
+    // ---- (bots ideas, round 5: I stage 2) the event's words and kind (no dice) ----
+    const seen = event === 'react-death' ? humanDeathWords(human, bot) : { words, react: HUMAN_REACT[event] };
+    // ---- end of I stage 2's block ----
+    if (!say(bot, event, { about: human, to: human, lineKind: 'reaction', words: seen.words, react: seen.react })) return false;
     h.at = now;
     h.kinds.set(event, now);
     return true;
 }
+
+// ---- (bots ideas, round 5: I stage 2) the human's doings in plain words ----
+/** the reaction's kind of each of the human's doings (a death's: humanDeathWords) */
+const HUMAN_REACT: Readonly<Record<string, ReactionKind>> = { 'react-death': 'died', 'react-dance': 'dance', 'react-emote': 'emote', 'react-wild': 'wildy', 'react-kill': 'kill' };
+
+/** the human's death as `bot` saw it: by a player (274's hero points: a PKer's hits) or not, next to it or near, in the Wilderness */
+function humanDeathWords(human: Player, bot: Player): { words: string; react: ReactionKind } {
+    const pked = human.heroPoints.some(h => h && h.hash64 !== human.hash64 && h.hash64 !== -1n && h.points > 0);
+    const wild = wildernessLevelAt(human.x, human.z) > 0;
+    const near = Math.max(Math.abs(bot.x - human.x), Math.abs(bot.z - human.z)) <= 1 ? 'next to you' : 'near you';
+    if (pked) return { words: wild ? 'got killed by a pker in the wilderness' : 'got killed by a pker', react: 'pked' };
+    return { words: wild ? `died in the wilderness ${near}` : `died ${near}`, react: 'died' };
+}
+
+/** "a blue partyhat", "an ice warrior", "full rune", "rune platelegs": a thing named as a line would (port/BotReactions too) */
+export function withArticle(item: string): string {
+    if (/^(full |gilded|gold trim|trimmed)/.test(item) || /\)$/.test(item) || /s$/.test(item)) return item;
+    return `${/^[aeiou]/.test(item) ? 'an' : 'a'} ${item}`;
+}
+
+/** a notable piece in plain words for the model's event ("a phat", "full rune", "rune (t)", "a zammy plate") */
+function gearWords(gear: NotableGear): string {
+    return withArticle(gear.item);
+}
+// ---- end of I stage 2's block ----
 
 // ---- (bots ideas, Track B: loot) the human's minute for port/BotLoot's words to it (W15: "finders keepers lol", "ur stuff
 // is still here") ----
@@ -662,7 +713,8 @@ function gearSeen(wearer: Player, now: number): void {
     const crowd = witnesses(wearer.x, wearer.z, wearer.level, SEE_DISTANCE, now, p => p === wearer || remarked.get(p)?.has(wearer) === true || wornHas(p, gear));
     const bot = voiced(crowd, pickCurious(crowd), now);
     if (!bot) return;
-    if (!say(bot, gear.kind === 'rare' ? 'witness-rare' : 'witness-gear', { about: wearer, to: wearer, kind: gearLineKind(gear), slots: { item: gear.item }, lineKind: wearer.is_bot ? 'event' : 'reaction' })) return;
+    // (bots ideas, round 5: I stage 2: the human's gear in plain words, the model's event)
+    if (!say(bot, gear.kind === 'rare' ? 'witness-rare' : 'witness-gear', { about: wearer, to: wearer, kind: gearLineKind(gear), slots: { item: gear.item }, lineKind: wearer.is_bot ? 'event' : 'reaction', words: `is wearing ${gearWords(gear)}`, react: 'gear' })) return;
     wearerSaid.set(wearer, now);
     mark(bot, wearer);
 }
@@ -693,7 +745,8 @@ function levelSeen(passer: Player, now: number): void {
     const crowd = witnesses(passer.x, passer.z, passer.level, SEE_DISTANCE, now, p => p === passer || remarked.get(p)?.has(passer) === true || (high ? p.combatLevel > cb - 25 : p.combatLevel < 40 || isNewbie(p)));
     const bot = voiced(crowd, pickCurious(crowd), now);
     if (!bot) return;
-    if (!say(bot, 'witness-level', { about: passer, kind: high ? 'high' : 'low', slots: { n: String(cb) }, to: passer.is_bot ? null : passer, lineKind: passer.is_bot ? 'event' : 'reaction' })) return;
+    // (bots ideas, round 5: I stage 2: the human's level passing, the model's event)
+    if (!say(bot, 'witness-level', { about: passer, kind: high ? 'high' : 'low', slots: { n: String(cb) }, to: passer.is_bot ? null : passer, lineKind: passer.is_bot ? 'event' : 'reaction', words: `walked past you, combat ${cb}`, react: 'level' })) return;
     wearerSaid.set(passer, now);
     mark(bot, passer);
 }
@@ -717,4 +770,10 @@ export function resetWitnessForTest(): void {
 /** Tests only: `bot` may react again now (its gap forgotten). Never called by the game. */
 export function readyForTest(bot: Player): void {
     botSaid.delete(bot);
+}
+
+/** (bots ideas, round 5: I stage 2) Tests and the r3 data's staged world only: the gaps of reactions to `p` forgotten (its minute, each kind's, its gear's and level's) */
+export function forgetHumanForTest(p: Player): void {
+    humanSaid.delete(p);
+    wearerSaid.delete(p);
 }

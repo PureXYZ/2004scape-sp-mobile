@@ -2419,7 +2419,8 @@ export function ambientUsedShare(r) {
     if (!s || !s.eligible) return { value: null };
     const list = ambientEntries(r);
     const via = v => `${v} ${list.filter(e => e.via === v && e.outcome === 'used').length}/${list.filter(e => e.via === v).length}`;
-    return { value: pct(s.used, s.eligible), detail: `${s.used} of ${s.eligible} asked (${via('thread')} thread turns, ${via('botanswer')} bots' answers)` };
+    // (bots ideas, round 5: I stage 2: and the reactions to the human, with the switch on)
+    return { value: pct(s.used, s.eligible), detail: `${s.used} of ${s.eligible} asked (${via('thread')} thread turns, ${via('botanswer')} bots' answers, ${via('reaction')} reactions)` };
 }
 
 /** LM3: the guard's refusals of ambient answers, of the answers that came with words (judged with the real model) */

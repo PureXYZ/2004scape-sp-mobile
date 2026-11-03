@@ -167,8 +167,9 @@ always the bots' own logic.
   which is a little slower. If you install the full app over the lite one, your choice is kept: pick **On-device**
   here yourself.
 - **Bots' own talk** (Rules or Model; Rules for now): with Model, the on-device model also words the bots' talk
-  between themselves near you (their threads and answers to each other), always on the phone and never through
-  Claude. It needs the on-device model and a chat model other than Rules.
+  between themselves near you (their threads and answers to each other) and their reactions to you (a gz on your
+  level, a wave back, a word when you stand next to one, follow it or die near it), always on the phone and never
+  through Claude. It needs the on-device model and a chat model other than Rules.
 - **Claude online:** Claude (Anthropic's Claude Haiku) writes the replies, using **your own** Claude API key from
   [platform.claude.com](https://platform.claude.com) (tap **Set key**). The key is stored only on your phone (the iOS
   Keychain or the Android Keystore), never in the game or its saves. While this is chosen, each reply request sends

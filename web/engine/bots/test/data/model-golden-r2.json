@@ -1,0 +1,9 @@
+{
+    "about": "(bots ideas, round 5: I stage 2) renderLocal's text of every situation of the round 2 model's data (phase7-data-r2: situations.jsonl, eval.jsonl, target.jsonl; not published), as the engine rendered it before the reactions: sha256 of each file's `${id}\\n${system}\\n${user}\\n` in its order. test/model-ambient.test.mjs's golden scene renders them again and compares: the reply prompts are the shipped model's format, byte for byte.",
+    "base": "331aa19",
+    "files": {
+        "situations.jsonl": { "rows": 4450, "sha256": "6602d117f59d9b49825a4918960c0d96533fd8ff112f44fcdb8637536587e7b3" },
+        "eval.jsonl": { "rows": 300, "sha256": "bb2fdd3925b0fcefe48e4028f59b30078f1a78d92c3aadd7abd987a52c9c9dd9" },
+        "target.jsonl": { "rows": 150, "sha256": "61546e0060e6dd6e1b39e24bdff13fd244f6b262bd7da2a98f3b715e332ca6f8" }
+    }
+}

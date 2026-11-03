@@ -1,6 +1,7 @@
-// The bots ideas work, round 4 (theme I: the model for the bots' own talk): test/lib/simworld.ts with port/BotModelAmbient,
-// the model's seam (port/BotModel: the stub), its guard and prompt, the threads and the chat they hook into, and what a
-// staged scene turns off, through one module graph. test/model-ambient.test.mjs uses it.
+// The bots ideas work, round 4 (theme I: the model for the bots' own talk; round 5: stage 2, the reactions to the human):
+// test/lib/simworld.ts with port/BotModelAmbient, the model's seam (port/BotModel: the stub), its guard and prompt, the
+// threads and the chat they hook into, (round 5) the reactions (port/BotReactions, port/BotWitness), and what a staged
+// scene turns off, through one module graph. test/model-ambient.test.mjs uses it.
 export * from './simworld.js';
 export * as Ambient from '#/engine/bot/port/BotModelAmbient.js';
 export * as BotModelNs from '#/engine/bot/port/BotModel.js';
@@ -29,3 +30,9 @@ export { setLingerForTest } from '#/engine/bot/port/BotLinger.js';
 export { setTeleportRatesForTest } from '#/engine/bot/port/BotTeleport.js';
 export { setRudeRatesForTest } from '#/engine/bot/port/BotRude.js';
 export { quietForTest } from '#/engine/bot/port/BotChatter.js';
+// ---- (bots ideas, round 5: I stage 2) the reactions to the human (port/BotReactions, port/BotWitness) ----
+export * as Witness from '#/engine/bot/port/BotWitness.js';
+export { REACTION_LINES } from '#/engine/bot/port/BotReactions.js';
+export { default as SeqType } from '#/cache/config/SeqType.js';
+export { setVoiceCapForTest } from '#/engine/bot/port/BotVoice.js';
+// ---- end of I stage 2's block ----
