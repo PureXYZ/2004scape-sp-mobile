@@ -19,8 +19,8 @@ Sizes here and in the release notes are decimal megabytes (1 MB = 1,000,000 byte
 The chat model is also published once as a release of its own (with `licenses.txt`), tagged as the URL
 [models/bots-2004.json](../models/bots-2004.json) pins it, which `prepare-model.sh --download` fetches: **`model-v1`**
 (`bots-2004-q4km.gguf`, the first model) is published; **`model-v2`** (`bots-2004-r3-q4km.gguf`, the round 3 model the
-pin names since 2026-11) is **not published yet**, so until it is `--download` fails and the model must be in the cache
-already (`release.sh --upload` makes its draft the first time it runs with this pin).
+pin names since 1.2.0) is published with 1.2.0 (`release.sh --upload` made its draft the first time it ran with this pin;
+publish it before the app release, or `--download` fails for that release's sources).
 
 ## What you need
 

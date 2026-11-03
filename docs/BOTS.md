@@ -535,7 +535,7 @@ reply, and the rules' own line is the fallback.
   for the asker's level, …) and its persona. Upstream's replies are used where they fit.
 - **On-device**: the fine-tuned Qwen3.5-0.8B (Q4_K_M GGUF, about 530 MB) run by llama.cpp in the app (Metal on iOS,
   the CPU on Android); since 2026-11 the round 3 model (r3: `models/bots-2004.json`, `bots-2004-r3-q4km.gguf`, its
-  release `model-v2` not published yet), trained on the replies and on the bots' own talk and reactions. How it was made: [web/engine/bots/test/model-data/README.md](../web/engine/bots/test/model-data/README.md).
+  release `model-v2`, since 1.2.0), trained on the replies and on the bots' own talk and reactions. How it was made: [web/engine/bots/test/model-data/README.md](../web/engine/bots/test/model-data/README.md).
 - **Claude online**: Claude Haiku through the Messages API with the player's own key. Each request carries a static
   2004 guide (cached) and the bot's facts and the chat near it.
 

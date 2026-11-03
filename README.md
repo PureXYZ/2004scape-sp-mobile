@@ -114,6 +114,7 @@ Settings opens from the ⚙ button. The defaults:
 | Display | Layout: Mobile (full-screen world) or Classic (the original 765×503 screen) | Mobile |
 | | Frame rate 30 / 50, World scaling Smooth / Pixel, Camera buttons | 50, Pixel, Hide |
 | | Screen margins (**Adjust**): Side, Top and Bottom, each None / Auto / +16 / +32 (space kept clear of the screen's edges, notch or camera hole) | Auto |
+| XP drops | XP drops On / Off (the total XP under the orbs, each gain rising into it), Speed Slow / Normal / Fast, Style Separate / Combined | On, Normal, Separate |
 | Sound | Silent switch: Mute / Play (iPhone; Android always plays), Vibration | Play, On |
 | Controls | Hold for menu, Camera drag, Options menu Large / Classic | Normal (400 ms), Normal, Large |
 | Tap options | What a tap does with Attack on NPCs and on players: Tap, By level, Hold or Hidden | By level (as in 2004) |
@@ -149,7 +150,11 @@ world starts with a mix of newcomers, mid-levels and veterans, and they level at
 
 They do what 2004 players did: train skills, buy gear, bank, sell at Varrock West and the other trade banks, hang out
 at Falador park, run drop parties and clan walks, duel at the Duel Arena (members worlds), PK at the Edgeville ditch and
-deep in the Wilderness (only within the game's PvP rules), get random events, and chat. Talk to one by its name in
+deep in the Wilderness (only within the game's PvP rules) and loot what they kill, get random events, and chat.
+Veterans kill dragons and go for the King Black Dragon in teams (now and then the Kalphite Queen); in late 2004 they
+go to see Rellekka's rock crabs and the new lighthouse, and members keep kittens and play Gnomeball and Runelink. Bots
+keep goals between sessions, get moods, rage-quit or hop now and then, celebrate 99s, remember each other and pass
+rumours around. Talk to one by its name in
 public chat ("hi Lumby Larry"), add one as a friend, trade with a vendor, or private-message a friend **come here** and
 it runs over. A bot never takes your character's name.
 

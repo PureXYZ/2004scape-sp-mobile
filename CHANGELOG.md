@@ -3,6 +3,58 @@
 All notable changes to 2004Scape. Versions follow `VERSION` (major.minor.patch); each one is a GitHub release `v<version>`
 with an Android APK and an iPhone IPA, with and without the bots' chat model.
 
+## [1.2.0] - 2026-11-03
+
+- **XP drops.** Your total XP shows under the orbs, left of the minimap, and each gain rises into it with its skill's
+  2004 icon, one row per skill (several skills in one tick make several rows). Tap the counter to open the Stats tab.
+  Settings has a new **XP drops** category: On (the default) or Off, Speed Slow / Normal / Fast, and Style Separate (a
+  row per skill) or Combined (one row with the skills' icons and the sum). Mobile layout only.
+- **Fixed: walking somewhere you did not tap after turning the camera.** On the iPhone, a swipe on the world could be
+  followed about 35 ms after the finger lifted by iOS's own compatibility click at the point where the swipe started,
+  and your character walked there. Mouse button events within a second of a touch are now ignored. Taps are also
+  stricter on both phones: only a short, still touch (under 250 ms, under 8 px) taps; a quick nudge turns the camera
+  instead. A hold let go before its menu opens does nothing, the hold menu is now tap to pick (lifting the finger never
+  picks an option), a slide on a side panel presses only an item you can drag or a scrollbar, and the press ring shows
+  from 250 ms.
+- **Bots do endgame content.** Veteran bots go on trips to 2004's high-level spots: blue, red and black dragons,
+  hellhounds, fire giants, the Demonic Ruins' greater demons, and the King Black Dragon in teams they gather in chat
+  and through friends' private messages. Rarely, a team of four with combat 100+ and the Prayer for it tries the
+  Kalphite Queen, the 2004 way (Shantay pass, ropes, the burrow), and mostly fails. They sell their good drops at the
+  trade banks, wear Mage Arena god capes, grab the wine of Zamorak at the Chaos Temple with Telekinetic Grab, shoot
+  hill giants from safespots, and PKers camp the levers where the bossers come up. Weak bots keep away from monsters
+  far above their level.
+- **PKers loot.** A PKer that kills you picks up your items from the pile, as players did; other bots nearby come to
+  pick over death piles (yours, and the drops of monsters killed near them).
+- **Bots have lives.** A levelling bot has a goal that it keeps between sessions ("whats ur goal?" gets a real answer)
+  and celebrates when it gets there. Bots get moods from what happens to them (tilted after deaths, bored, elated after
+  a good drop) that change what they say, and sometimes what they do. Some rage-quit, hop worlds or log off after a big
+  drop; now and then a bot has a whim for a while (something its role seldom does); a bot about to reach 99 gathers
+  friends for it, and an elated bot may throw a small drop party of its own.
+- **Word travels.** Rumours move bots (word of a drop party, a PK raid or a free mine spreads from bot to bot, and
+  some go), bots remember each other across sessions (friends greet each other, grudges and kill-steal wars carry on,
+  Edgeville has its rivals), slang and catchphrases spread between bots, and friends no longer all log in at once.
+- **Late 2004 in the world.** The world is 23 November 2004: bots go to see Rellekka, fight its rock crabs and walk
+  out to the new lighthouse, talk about the Fremennik Trials and Horror from the Deep, and about Castle Wars as coming.
+  Some members keep kittens and cats (feeding them, buying a new one), play Runelink in Burthorpe's Games Room and
+  Gnomeball at the Gnome Stronghold.
+- **Bots walk like players.** Bots near you walk long ways in minimap-length clicks with short pauses, sometimes
+  overshoot and come back, take different routes to the same place, and walk over to the bot they talk to and stop to
+  type.
+- **Bots' own talk (Settings › Bot chat).** With **Model**, the on-device chat model also words the bots' talk between
+  themselves near you and their reactions to you (a gz on your level, a wave back, a word when you stand next to one,
+  follow it or die near it). Rules, the default, keeps their scripted lines. It needs the on-device model (the full
+  app) and a chat model other than Rules. On an iPhone 13 mini at Varrock West bank with 500 and 1000 bots for 30
+  minutes the phone stayed at a nominal thermal state at 51 fps, with replies in about a second.
+- **A new chat model.** The full apps carry a retrained chat model (release `model-v2`), trained on the bots' own
+  talk and their reactions to you as well as their replies; its replies to you are as good as the first model's.
+  Building from source fetches it with `prepare-model.sh --download`.
+- **Bot chat fixes.** The chat model's check no longer turns down good replies about your fights or about following
+  someone; the scripted replies answer the weather, "whats ur best skill", "hey <question>" and "where do you train,
+  what level" better; a bot next to you says hello once while you stay near instead of again and again.
+- **Bots get stuck less.** A bot no longer loses its click on a door that changed (the Kalphite Queen's altar, among
+  others), the Watchtower's thief climbs back down, the walk to Yanille's bank is no longer taken for stuck, breaks no
+  longer chain one after another, and fletchers no longer switch targets at once.
+
 ## [1.1.0] - 2026-10-27
 
 - **The game uses less memory, so a crowded world with the bots' chat model is less likely to be cut short.** On an
