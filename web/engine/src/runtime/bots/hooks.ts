@@ -5,7 +5,8 @@
 // disconnects the human whose packet was being handled).
 //
 //   World.processClientsIn     after: BotManager.clearAfkEvents() - the engine's own random-event roll is cleared for every
-//                              bot (the flag is set here); the bot library arms bots near a human itself (phase 5a)
+//                              bot (the flag is set here); the bot library arms bots near a human itself (phase 5a); in
+//                              the test soaks' save profile `bench`, the human's roll too
 //   World.processPlayers       after: BotManager.tick() - keep-alive, staggered spawning, the AI (upstream: World.cycle)
 //   World.sendPrivateMessage   before: BotChat.onPrivateMessage ("come here" ...); consumed messages go no further
 //   MessagePublicHandler       after a successful handle(): BotChat.onPublicMessage with the line as typed (the bots
@@ -14,6 +15,7 @@ import { BotManager } from '#/engine/bot/BotManager.js';
 import { BotChat } from '#/engine/bot/port/BotChat.js';
 import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
+import Environment from '#/util/Environment.js';
 import MessagePublicHandler from '#/network/game/client/handler/MessagePublicHandler.js';
 import type MessagePublic from '#/network/game/client/model/MessagePublic.js';
 import { fromBase37 } from '#/util/JString.js';
@@ -52,8 +54,18 @@ export function botTickSummary() {
 
 export function installHooks(): void {
     const processClientsIn = world.processClientsIn;
+    // (the test soaks' save profile, app-test --soak: the engine runs in debug, where 274 gives a Jmod random events too, and
+    // a soak's player standing at the hub was taken into one mid-phase, away from the crowd it measures)
+    const quietHuman = Environment.node.profile === 'bench';
     world.processClientsIn = function (this: typeof World) {
         processClientsIn.call(this);
+        if (quietHuman) {
+            try {
+                for (const p of World.playerLoop.all()) if (!isBot(p)) p.afkEventReady = false;
+            } catch (e) {
+                botError('afk', 'clearing the soak player\'s random events failed', e);
+            }
+        }
         if (!botsActive()) return;
         bots.counters.clientsIn++;
         try {
