@@ -26,7 +26,16 @@ import { isMembersWorld } from '#/engine/bot/port/BotWorldRules.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 /** the minigames' task kinds (their tasks' names): MG1's time, FT1's "on a minigame wherever it is" */
-export const MINIGAME_KINDS: readonly string[] = ['Trawler', 'AgilityArena', 'RangingGuild', 'TreasureTrail'];
+export const MINIGAME_KINDS: readonly string[] = [
+    'Trawler',
+    'AgilityArena',
+    'RangingGuild',
+    'TreasureTrail',
+    // ---- (bots ideas, round 3: G period) the Games Room's Runelink, Gnomeball ----
+    'GamesRoom',
+    'Gnomeball'
+    // ---- end of G period's block ----
+];
 
 /** the far budget: FAR_PER_100 bots out at 100 online, growing as (N / 100)^FAR_EXP */
 export const FAR_PER_100 = 4;

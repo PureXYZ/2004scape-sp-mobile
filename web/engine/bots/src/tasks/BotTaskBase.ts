@@ -53,7 +53,8 @@ import {
     tilesInSquare,
     carriesWebBlade,
     bankedWebBlade,
-    locInRoute
+    locInRoute,
+    queuedRouteEndsNear
 } from '#/engine/bot/BotAction.js';
 import { botPathToEntity, botReachedEntity, pathBudgetLeft } from '#/engine/bot/port/BotPathing.js';
 import { isApproached } from '#/engine/GameMap.js';
@@ -621,6 +622,12 @@ export function advanceBankWalk(
             } catch {
                 /* debug hook must never affect gameplay */
             }
+        } else if (queuedRouteEndsNear(player, bx, bz, 1)) {
+            // (bots ideas, round 4 fixes) its queued route ends at the bank and it walks it (it moved: a bot that stood is
+            // the jump's, above): on along it, no detour. A tile within 4 of Yanille's bank is outside its east wall, and the
+            // walk round to its west door began again (minigames.test seed 9). Its escape count stands: still no progress
+            // next window, and the jump comes when it would have
+            walkTo(player, bx, bz, bl);
         } else {
             // Clear existing (bad) waypoints so the hasWaypoints guard in
             // walkTo() doesn't block the detour recalculation.
@@ -704,6 +711,8 @@ export class StuckDetector {
     /** port: the walk's leg at the snapshot and what it had left (BotAction.walkLeft) */
     private snapshotLeg = '';
     private snapshotLeft = -1;
+    /** (bots ideas, round 4 fixes) and along its queued route to the leg's point (walkLeft's `route`; -1: none) */
+    private snapshotRoute = -1;
     /** port: the tick of the last check (a walk after a pause starts a new window) */
     private lastCheckTick = -1;
 
@@ -762,6 +771,7 @@ export class StuckDetector {
             const leg0 = walkLeft(player as Player, destX, destZ);
             this.snapshotLeg = leg0?.key ?? '';
             this.snapshotLeft = leg0?.left ?? -1;
+            this.snapshotRoute = leg0?.route ?? -1;
             this.snapshotDist = Math.abs(player.x - destX) + Math.abs(player.z - destZ);
             this.snapshotX = player.x;
             this.snapshotZ = player.z;
@@ -783,12 +793,16 @@ export class StuckDetector {
         // gateway). Measured only to the destination, a climb over White Wolf Mountain was "desperately stuck"
         const leg = walkLeft(player as Player, destX, destZ);
         if (leg && this.snapshotLeft >= 0) {
-            const along = leg.key === this.snapshotLeg ? this.snapshotLeft - leg.left : this.minProgress;
+            let along = leg.key === this.snapshotLeg ? this.snapshotLeft - leg.left : this.minProgress;
+            // (bots ideas, round 4 fixes) or along its queued route to the leg's point, both ends of the window on it (a
+            // walk round a building to its door: BotAction.walkLeft's `route`). Only ever more progress than before
+            if (leg.key === this.snapshotLeg && leg.route >= 0 && this.snapshotRoute >= 0) along = Math.max(along, this.snapshotRoute - leg.route);
             progress = Math.max(progress, along);
         }
         if (leg) {
             this.snapshotLeg = leg.key;
             this.snapshotLeft = leg.left;
+            this.snapshotRoute = leg.route;
         }
 
         this.snapshotDist = dist;
@@ -831,6 +845,7 @@ export class StuckDetector {
         this.ticks = 0;
         this.snapshotLeg = '';
         this.snapshotLeft = -1;
+        this.snapshotRoute = -1;
         this.snapshotDist = -1;
         this.snapshotX = -1;
         this.snapshotZ = -1;
@@ -1461,7 +1476,7 @@ export function awayFromSpot(player: Player, location: readonly [number, number,
 export const FUTILE_BANK_VISITS = 2;
 /** port (variety round 1, F): tasks ended by the guard (tests, the report) */
 export const bankLoopStats = { ended: 0, byTask: {} as Record<string, number> };
-const bankVisits = new WeakMap<Player, { task: BotTask; pack: string; xp: number; same: number }>();
+const bankVisits = new WeakMap<Player, { task: BotTask; pack: string; xp: number; bank: number; same: number }>();
 
 /** the pack's items and counts, in slot order */
 function packKey(player: Player): string {
@@ -1475,6 +1490,25 @@ function packKey(player: Player): string {
     return key;
 }
 
+/**
+ * (bots ideas, round 4 fixes) the bank's items and counts as a number (FNV-1a over slot, id and count; no draw): a trip
+ * whose last stop put something in the bank came to something, whatever the pack holds at the next
+ */
+function bankHash(player: Player): number {
+    const bid = bankInvId();
+    const inv = bid === -1 ? null : player.getInventory(bid);
+    if (!inv) return 0;
+    let h = 0x811c9dc5;
+    for (let slot = 0; slot < inv.capacity; slot++) {
+        const it = inv.get(slot);
+        if (!it) continue;
+        h = Math.imul(h ^ slot, 0x01000193);
+        h = Math.imul(h ^ it.id, 0x01000193);
+        h = Math.imul(h ^ it.count, 0x01000193);
+    }
+    return h >>> 0;
+}
+
 function totalXp(player: Player): number {
     let xp = 0;
     for (let i = 0; i < player.stats.length; i++) xp += player.stats[i];
@@ -1483,7 +1517,8 @@ function totalXp(player: Player): number {
 
 /**
  * port (variety round 1, F: the general guard against futile bank loops): the bot is at a bank booth for its skill's task
- * (advanceBankWalk's arrival; a task with a step: not a bankstand's). FUTILE_BANK_VISITS arrivals in a row with the same pack and no XP between (a trip from
+ * (advanceBankWalk's arrival; a task with a step: not a bankstand's). FUTILE_BANK_VISITS arrivals in a row with the same pack and no XP between, and (bots
+ * ideas, round 4 fixes) nothing put in or taken out of the bank since the last (a trip from
  * the bank and back that came to nothing) are the start of a loop a passer-by sees (a thief with a pack full of stolen cakes it would not bank stood at Ardougne's booth for 15-18 minutes;
  * a smith with leftover bars walked bank to anvil and back): the task ends and the planner picks again. True when it ended.
  */
@@ -1501,9 +1536,12 @@ export function noteBankVisit(player: Player): boolean {
     if (!step) return false;
     const pack = packKey(player);
     const xp = totalXp(player);
+    // ((bots ideas, round 4 fixes) and the bank as it was at the last arrival: a no-XP errand's round, picked and banked,
+    // came back with the same load (24 cabbages twice) and was ended as a loop, errands.test 'picking' at seeds 4 and 10)
+    const bank = bankHash(player);
     const last = bankVisits.get(player);
-    const same = last && last.task === task && last.pack === pack && last.xp === xp ? last.same + 1 : 1;
-    bankVisits.set(player, { task, pack, xp, same });
+    const same = last && last.task === task && last.pack === pack && last.xp === xp && last.bank === bank ? last.same + 1 : 1;
+    bankVisits.set(player, { task, pack, xp, bank, same });
     if (same < FUTILE_BANK_VISITS) return false;
     bankVisits.delete(player);
     bankLoopStats.ended++;

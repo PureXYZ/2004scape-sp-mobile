@@ -28,6 +28,9 @@ import { isMilestone } from '#/engine/bot/port/BotLines.js';
 import { isCastHeld } from '#/engine/bot/port/BotTeleport.js';
 import { isArmed, randomEventTaskFor } from '#/engine/bot/port/BotRandomEvents.js';
 import { noteTaskSwitch } from '#/engine/bot/port/BotSpots.js';
+// ---- (bots ideas, round 3: G period) theme G's habits (port/BotPeriod, a leaf: its list is filled by port/BotPeriodIndex) ----
+import { periodHabits } from '#/engine/bot/port/BotPeriod.js';
+// ---- end of G period's block ----
 
 const RESCAN_TICKS = 600;
 /**
@@ -44,7 +47,9 @@ const CHEER_DELAY_TICKS = 3;
 
 // port: and Bankstand, which ends on its own (30 minutes); upstream's rescan cut every stint at 6 minutes. (The realism
 // work's phase 5b: and a set piece's own long tasks, a Duel Arena visit and a party's host, which end on their own.)
-const NO_INTERRUPT_TASKS = new Set(['ShopTrip', 'Bank', 'Walk', 'Init', 'Idle', 'Prayer', 'Bankstand', 'DuelArena', 'PartyHost']);
+// (Bots ideas, Track A, round 1 fixes: A6, and a drop sale's stint, a Bankstand of its own name: 15 minutes without XP
+// cut most stints at about 16 of their 10-25.)
+const NO_INTERRUPT_TASKS = new Set(['ShopTrip', 'Bank', 'Walk', 'Init', 'Idle', 'Prayer', 'Bankstand', 'DuelArena', 'PartyHost', 'DropSale']);
 
 // port: upstream's idle lines read like real chat with the players' names cut out (" hates attackishere", "Are you
 // ignoring me, ?!"), and upstream said them so, half a sentence. The data marks each gap with {name}, and the bot fills
@@ -409,6 +414,16 @@ export class BotPlayer {
         // port: a monster attacks a bot that is not out to fight: it fights off a weak one and runs from the rest,
         // and its task waits meanwhile
         if (this._selfDefence()) return;
+
+        // ---- (bots ideas, round 3: G period) theme G's habits (port/BotPets: a stroke, a feed, a pet page, a trip) ----
+        for (const habit of periodHabits) {
+            if (habit(this)) {
+                this.planXpTick++;
+                this.lastHadWaypoints = this.player.hasWaypoints();
+                return;
+            }
+        }
+        // ---- end of G period's block ----
 
         // ── A RANDOM EVENT (port/BotRandomEvents, the realism work's phase 5a) ──
         // port: the bot's answer to an event that came to it (the genie, a lamp, a strange box, the way back from a fail

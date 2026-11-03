@@ -77,6 +77,17 @@ const STEPS = [
     ['members places and minigames (the far budget scaled with N, far-town outings, Yanille\'s watchmen upstairs, the Shilo cart, the Ranging Guild, the Fishing Trawler\'s crews, the Brimhaven Agility Arena, a Treasure Trail from a real clue; variety round 2, track M)', ['--expose-gc', test('minigames.test.mjs')]],
     ['conversation (topic threads with pair memory, the social approach v2 and one voice\'s share, witnesses and reactions, clique banter, gear comments; variety round 2, track S2)', ['--expose-gc', test('threads.test.mjs')]],
     ['fashion (status gear, members fashion of late 2004, PK outfit variety, novelty pieces, clique colours; variety round 2, track W2)', ['--expose-gc', test('fashion.test.mjs')]],
+    ['the endgame (prep and the dusty key, solo spots, the Wilderness\'s endgame spots, KBD teams, the lairs\' ways out, drop moments and sales; bots ideas round 1, track A)', ['--expose-gc', test('endgame.test.mjs')]],
+    ['loot and vultures (the killer takes the human\'s pile, vultures after the reveal, the loot ledger, the Chaos Temple; the wine crowd, safespots and lever camps; the late-terms guard; bots ideas round 1, track B)', ['--expose-gc', test('loot.test.mjs')]],
+    ['the arcs foundation (the saved arcs: encoding, caps, old and corrupt stores, quits; the bus and its sites; the line helper\'s budget modes; leaving at once; bots ideas round 2)', ['--expose-gc', test('arcs-store.test.mjs')]],
+    ['lives with arcs (goals, moods, leaving for reasons, 99 parties, whims; bots ideas round 2, theme C)', ['--expose-gc', test('arcs.test.mjs')]],
+    ['word that travels (rumours, ties and grudges, slang, clique timing; bots ideas round 2, theme D)', ['--expose-gc', test('word.test.mjs')]],
+    ['the period foundation (theme G\'s switch, the buzz\'s budget, registry and hook: no dice while off, offers, caps, the gap, the keep, visits and their jumps, the boost; bots ideas round 3)', ['--expose-gc', test('period-budget.test.mjs')]],
+    ['period content (kittens, the Games Room\'s Runelink, Gnomeball, their talk; bots ideas round 3, theme G)', ['--expose-gc', test('period.test.mjs')]],
+    ['the update buzz (the Rellekka visit, the rock crabs, the lighthouse; bots ideas round 3, theme G)', ['--expose-gc', test('buzz.test.mjs')]],
+    ['movement (minimap hops, pauses, overshoots, lanes, route variants; bots ideas round 3, theme H)', ['--expose-gc', test('movement.test.mjs')]],
+    ['talk moves (walk up to talk, stop to talk; bots ideas round 3, theme H)', ['--expose-gc', test('talkmoves.test.mjs')]],
+    ['the model for the bots\' own talk (thread turns and bots\' answers near the human, the stub; bots ideas round 4, theme I)', ['--expose-gc', test('model-ambient.test.mjs')]],
     ...(FULL
         ? [
               ['coverage, members world', sim('--scenario=coverage', '--ticks=2500')],

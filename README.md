@@ -123,7 +123,7 @@ Settings opens from the ⚙ button. The defaults:
 | | Jmod (staff commands and the crown) | Off |
 | | Bots: Off, 25, 50, 100, 250, 500, 750, 1000 | 500 |
 | | Detail High / Low | High |
-| Bot chat | Chat model: Rules, On-device, Claude online; Think first | On-device (Rules without a model), Think first On |
+| Bot chat | Chat model: Rules, On-device, Claude online; Think first; Bots' own talk: Rules, Model | On-device (Rules without a model), Think first On, Bots' own talk Rules |
 
 World settings apply when you tap **Restart** in that category (online they are the server's: only Detail stays).
 Settings › About shows the version and
@@ -166,6 +166,9 @@ always the bots' own logic.
   bots fall back to their own lines. **Think first** lets the model plan each reply in a short hidden note first,
   which is a little slower. If you install the full app over the lite one, your choice is kept: pick **On-device**
   here yourself.
+- **Bots' own talk** (Rules or Model; Rules for now): with Model, the on-device model also words the bots' talk
+  between themselves near you (their threads and answers to each other), always on the phone and never through
+  Claude. It needs the on-device model and a chat model other than Rules.
 - **Claude online:** Claude (Anthropic's Claude Haiku) writes the replies, using **your own** Claude API key from
   [platform.claude.com](https://platform.claude.com) (tap **Set key**). The key is stored only on your phone (the iOS
   Keychain or the Android Keystore), never in the game or its saves. While this is chosen, each reply request sends

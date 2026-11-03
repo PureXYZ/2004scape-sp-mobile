@@ -4,7 +4,8 @@
 // against llama.cpp b11297's macOS prebuilt (android/scripts/fetch-llama.sh), CPU only as on Android, run on the Mac's JVM
 // (Android Studio's JBR) by Gradle (:botchat:lmHarness, src/harness/.../HarnessMain.kt) against the local mock of the
 // Messages API (web/test/lm/mock-claude.mjs, shared with the iOS harness). The Android twin of web/test/native/lm-harness.mjs:
-// the same 51 checks with the same names, then the Android extras A1-A5. Last it checks every
+// the same 51 checks with the same names (and (bots ideas, round 4) the bots' own talk's, as iOS's, (round 4 fixes) one
+// running stopped by a reply and not counted toward the replies' 3 among them), then the Android extras A1-A5. Last it checks every
 // request the mock got: the API's fields, as docs/ARCHITECTURE.md §7.1 lists them (a request the mock found wrong fails the
 // run). No real API call, no key.
 //

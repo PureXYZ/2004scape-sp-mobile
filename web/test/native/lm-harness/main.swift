@@ -6,7 +6,9 @@ import Foundation
 // and the fallback chain without a phone. The key comes from a stand-in (the Keychain is the app's). With a model whose
 // template is 'qwen-chatml-hybrid' (the base model as a stand-in: model.json beside it, then ios/scripts/prepare-model.sh) the
 // requests' think (Settings › Bot chat › Think first) is tested too: the note when asked, never in the reply; and the
-// templates that decide alone (the same GGUF told it is the note variant, or the plain model).
+// templates that decide alone (the same GGUF told it is the note variant, or the plain model). (Bots ideas, round 4) The
+// bots' own talk (`ambient`): the on-device model only, refused when warm, behind a reply and while resting, the queue
+// serving the replies first; (round 4 fixes) one running stopped by a reply, and not counted toward the replies' 3.
 //
 //   lm-harness <mock url> <model folder | none> <bench-prompts.json>
 // Prints `CHECK <ok|FAIL> <name> — <detail>` lines and `DONE pass=N fail=M`.
@@ -35,6 +37,10 @@ final class Harness {
     var nextId = 1
     /// the memory warning's two requests, by order
     var released: [Int: Result<LocalModel.Output, LocalModel.Failure>] = [:]
+    /// (bots ideas, round 4: I model) the order the model's queue answered in
+    var order: [String] = []
+    /// (round 4 fixes) when the last of them came
+    var answeredAt = Date()
     var pass = 0
     var fail = 0
 
@@ -61,14 +67,24 @@ final class Harness {
     }
 
     /// A request as the page sends it; its id. `think`: Settings › Bot chat › Think first (nil: a request without it).
-    func send(mode: String, fallback: Bool? = nil, think: Bool? = nil, timeoutMs: Int = 9000) -> Int {
+    /// (bots ideas, round 4: I model) `ambient`: a line of the bots' own talk (Settings › Bot chat › Bots' own talk).
+    func send(mode: String, fallback: Bool? = nil, think: Bool? = nil, timeoutMs: Int = 9000, ambient: Bool = false) -> Int {
         let id = nextId
         nextId += 1
         var message: [String: Any] = ["type": "lm", "id": id, "mode": mode, "local": local, "online": online, "maxChars": 80, "timeoutMs": timeoutMs]
         if let fallback { message["fallback"] = fallback }
         if let think { message["think"] = think }
+        if ambient { message["ambient"] = true }
         model.handle(message)
         return id
+    }
+
+    /// (round 4 fixes) A generation's outcome in the page's words: 'local', or the failure's.
+    nonisolated static func outcome(_ result: Result<LocalModel.Output, LocalModel.Failure>) -> String {
+        switch result {
+        case .success: "local"
+        case .failure(let failure): failure.description
+        }
     }
 
     /// The reply to request `id`, as the page hears it.
@@ -82,8 +98,8 @@ final class Harness {
         return (try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]) ?? [:]
     }
 
-    func ask(mode: String, fallback: Bool? = nil, think: Bool? = nil, timeoutMs: Int = 9000) async -> [String: Any] {
-        await answer(send(mode: mode, fallback: fallback, think: think, timeoutMs: timeoutMs))
+    func ask(mode: String, fallback: Bool? = nil, think: Bool? = nil, timeoutMs: Int = 9000, ambient: Bool = false) async -> [String: Any] {
+        await answer(send(mode: mode, fallback: fallback, think: think, timeoutMs: timeoutMs, ambient: ambient))
     }
 
     /// The on-device model asked directly (not through the router): its whole output, the note included.
@@ -276,6 +292,90 @@ final class Harness {
             model.thermalState = { .nominal }
         }
 
+        // (bots ideas, round 4: I model) the bots' own talk (ambient: Settings › Bot chat › Bots' own talk): the on-device
+        // model only, never the note; refused 'hot' at thermal fair (a reply's gate stays serious) and 'busy' while a reply
+        // is on the model; the model's queue serves the replies first; an ambient request may load the model
+        key = "sk-ant-test-ok-amb1"
+        reply = await ask(mode: "online", ambient: true)
+        check("ambient, mode online with a key: the on-device model answers, never Claude (else unavailable)", hasLocal ? reply["source"] as? String == "local" && reply["usage"] == nil : reply["error"] as? String == "unavailable", describe(reply))
+        key = nil
+        if hasLocal {
+            model.thermalState = { .fair }
+            reply = await ask(mode: "local", ambient: true)
+            check("ambient at thermal fair: refused 'hot' at once", reply["error"] as? String == "hot" && reply["text"] is NSNull && Int(reply["ms"] as? Double ?? 999) < 50, describe(reply))
+            reply = await ask(mode: "local")
+            check("a reply at thermal fair: answered (its gate stays serious)", reply["source"] as? String == "local", describe(reply))
+            model.thermalState = { .nominal }
+            if model.local.thinkSupport == .option {
+                reply = await ask(mode: "local", think: true, ambient: true)
+                check("ambient with think true: written without the note (the bots' own talk never thinks)", reply["source"] as? String == "local" && plainReply(reply), "\(describe(reply)); \(noteOf(reply))")
+            }
+            let replyId = send(mode: "local")
+            let ambientId = send(mode: "local", ambient: true)
+            let refused = await answer(ambientId)
+            let replied = await answer(replyId)
+            check("ambient while a reply to the player is on the model: refused 'busy' at once, the reply answered", refused["error"] as? String == "busy" && refused["text"] is NSNull && replied["source"] as? String == "local", "\(describe(refused)) | \(describe(replied))")
+            // the queue: one running, then a line of the bots' own talk, then a reply: the reply runs first
+            let queueModel = LocalModel(info: modelInfo, availableMemory: { 2 << 30 })
+            _ = await generate(queueModel, think: false)
+            order = []
+            for (tag, ambient) in [("first", false), ("ambient", true), ("reply", false)] {
+                queueModel.generate(system: local["system"] ?? "", user: local["user"] ?? "", think: false, deadline: .now() + .seconds(30), ambient: ambient) { [weak self] _ in
+                    self?.order.append(tag)
+                }
+            }
+            let queuedAt = Date()
+            while order.count < 3, Date().timeIntervalSince(queuedAt) < 30 {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            check("the model's queue serves the replies first: one running, then the bots' own talk, then a reply: first, reply, ambient", order == ["first", "reply", "ambient"], order.joined(separator: ", "))
+            // (round 4 fixes) a reply asked while a line of the bots' own talk runs: that one stops at its next token
+            // ('busy'), the reply runs at once (the note asked of the line of their talk here: a longer run to catch)
+            order = []
+            queueModel.generate(system: local["system"] ?? "", user: local["user"] ?? "", think: queueModel.thinkSupport == .option, deadline: .now() + .seconds(30), ambient: true) { [weak self] result in
+                self?.order.append("ambient: \(Harness.outcome(result))")
+            }
+            let runAt = Date()
+            while !queueModel.ambientRunning, Date().timeIntervalSince(runAt) < 10 {
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+            let askedAt = Date()
+            queueModel.generate(system: local["system"] ?? "", user: local["user"] ?? "", think: false, deadline: .now() + .seconds(30)) { [weak self] result in
+                self?.answeredAt = Date()
+                self?.order.append("reply: \(Harness.outcome(result))")
+            }
+            while order.count < 2, Date().timeIntervalSince(askedAt) < 30 {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            check("a reply asked while a line of the bots' own talk runs: that one stops at its next token ('busy'), the reply runs at once", order == ["ambient: busy", "reply: local"] && !queueModel.ambientRunning, "\(order.joined(separator: ", ")); the reply in \(Int(answeredAt.timeIntervalSince(askedAt) * 1000)) ms")
+            queueModel.unload(reason: "harness: queue")
+            // (round 4 fixes) the router: a line of the bots' own talk in flight is not counted toward the replies' 3
+            let runningId = send(mode: "local", ambient: true)
+            let waitAt = Date()
+            while !model.local.ambientRunning, Date().timeIntervalSince(waitAt) < 10 {
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+            let replyIds = (0 ..< 3).map { _ in send(mode: "local") }
+            let fourth = await answer(send(mode: "local"))
+            let stopped = await answer(runningId)
+            var three: [[String: Any]] = []
+            for id in replyIds {
+                three.append(await answer(id))
+            }
+            check("the bots' own talk in flight is not counted toward the replies' 3: three replies taken and answered, a fourth 'busy' at once; the one of their talk running stopped for them ('busy')",
+                  fourth["error"] as? String == "busy" && Int(fourth["ms"] as? Double ?? 999) < 50 && three.allSatisfy { $0["source"] as? String == "local" } && stopped["error"] as? String == "busy" && stopped["text"] is NSNull
+                      && model.counters["ambientStopped"] as? Int ?? 0 >= 1,
+                  "\(describe(fourth)) | \(describe(stopped)) | \(three.map(describe).joined(separator: " | ")) | \(model.counters)")
+            // an ambient request may load the model
+            model.local.unload(reason: "harness: ambient load")
+            while model.local.isLoaded {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            reply = await ask(mode: "local", ambient: true)
+            check("ambient with the model not in memory: it loads the model and answers", reply["source"] as? String == "local" && model.local.isLoaded && (reply["timings"] as? [String: Any])?["loadMs"] != nil, describe(reply))
+            check("the counters count the bots' own talk and its refusals", model.counters["ambient"] as? Int ?? 0 >= 4 && model.counters["ambientRefused"] as? Int ?? 0 >= 2, "\(model.counters)")
+        }
+
         // memory: a load needs room; a memory warning stops the reply being written and drops those waiting
         if hasLocal {
             let tight = LocalModel(info: modelInfo, availableMemory: { 100 << 20 })
@@ -329,10 +429,10 @@ final class Harness {
                 if let id = reply["id"] as? Int { answers[id] = reply }
             }
             var restId = 9000
-            func restAsk() async -> [String: Any] {
+            func restAsk(ambient: Bool = false) async -> [String: Any] {
                 restId += 1
                 let id = restId
-                chat.handle(["type": "lm", "id": id, "mode": "local", "local": local, "online": online, "maxChars": 80, "timeoutMs": 9000])
+                chat.handle(["type": "lm", "id": id, "mode": "local", "local": local, "online": online, "maxChars": 80, "timeoutMs": 9000, "ambient": ambient])
                 let asked = Date()
                 while answers[id] == nil, Date().timeIntervalSince(asked) < 15 {
                     try? await Task.sleep(for: .milliseconds(10))
@@ -348,6 +448,9 @@ final class Harness {
             let started = Date()
             var reply = await restAsk()
             check("resting: a request is answered 'unavailable' at once, nothing loaded", reply["error"] as? String == "unavailable" && reply["text"] is NSNull && Date().timeIntervalSince(started) < 0.5 && !chat.local.isLoaded, describe(reply))
+            // (bots ideas, round 4: I model)
+            reply = await restAsk(ambient: true)
+            check("resting: a line of the bots' own talk (ambient) is refused 'unavailable' at once, nothing loaded", reply["error"] as? String == "unavailable" && reply["text"] is NSNull && !chat.local.isLoaded, describe(reply))
             chat.warm()
             try? await Task.sleep(for: .milliseconds(500))
             check("resting: a warm-up loads nothing", !chat.local.isLoaded)

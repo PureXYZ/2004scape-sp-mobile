@@ -52,7 +52,16 @@ const PLACES: readonly Place[] = [
     { name: 'Yanille', x: 2560, z: 3090, r: 25 },
     { name: 'Tree Gnome Village', x: 2525, z: 3170, r: 25 },
     { name: 'the Gnome Stronghold', x: 2460, z: 3430, r: 60, prep: 'at' },
-    { name: 'the Barbarian Outpost', x: 2540, z: 3570, r: 20, prep: 'at' }
+    { name: 'the Barbarian Outpost', x: 2540, z: 3570, r: 20, prep: 'at' },
+    // ---- (bots ideas, round 3: G period) the Games Room under Burthorpe (its own map square: no other place near) ----
+    { name: 'the Games Room', x: 2207, z: 4960, r: 32, prep: 'in' },
+    // ---- end of G period's block ----
+    // ---- (bots ideas, round 3: G buzz) the update's places: Rellekka,
+    // the lighthouse past its causeway, the Feldip Hills (chompies) ----
+    { name: 'Rellekka', x: 2660, z: 3670, r: 30 },
+    { name: 'the Lighthouse', x: 2510, z: 3630, r: 12, prep: 'at' },
+    { name: 'the Feldip Hills', x: 2560, z: 2975, r: 45 }
+    // ---- end of G buzz's places ----
 ];
 
 /** the Dwarven Mine, under Falador and Ice Mountain */

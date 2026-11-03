@@ -41,7 +41,9 @@ import { RestTask, REST_TO, REST_LIMIT_TICKS } from '#/engine/bot/tasks/RestTask
 import { isLevelling, type PlannerKey } from '#/engine/bot/port/BotRoster.js';
 
 /** the task kinds that answer their own attackers: the fights (combat, ranged and magic, PKers); a thief's stall guard is answered here */
-export const OWN_DEFENCE_KINDS: ReadonlySet<string> = new Set(['Combat', 'RangedMagic', 'PKer', 'EdgevillePKer']);
+// (bots ideas, Track A: the period endgame) a boss team's errand answers its own attackers: in the KBD's lair it fights it,
+// and leaves by the lever while it breathes on it (a run from it, cornered there, gave the trip up)
+export const OWN_DEFENCE_KINDS: ReadonlySet<string> = new Set(['Combat', 'RangedMagic', 'PKer', 'EdgevillePKer', 'KbdTeam', 'KqTeam']);
 
 /** a bot fights back a monster of at most its own level while above this share of its Hitpoints */
 const FIGHT_BACK_ABOVE = 0.4;

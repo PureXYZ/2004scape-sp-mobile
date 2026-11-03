@@ -112,7 +112,15 @@ check('level-up phrases', phrases.levelup.length >= 5, `${phrases.levelup.length
 const varietyJson = JSON.parse(fs.readFileSync(path.join(BOTS_DIR, 'data/lines2004-variety.json'), 'utf8'));
 const slotValues = { ...lib.Slots.slotSamples(), clan: varietyJson.clans };
 let slotLines = 0;
+// (bots ideas, round 2: arcs foundation: the lines of themes C and D (data/lines2004-arcs.json, lines2004-word.json), and
+// any line with a slot of its own ({goal}, {left}, {nick}, {ore} ...: filled by port/BotArcsSay, not port/BotSlots), are
+// checked filled in the arcs' block below, with the themes' samples)
+const ARC_SLOT = /\{([a-z][a-z0-9_]*)\}/g;
+const slotKeysOf = text => [...new Set([...text.matchAll(ARC_SLOT)].map(m => m[1]))];
+const arcsTexts = new Set(['lines2004-arcs.json', 'lines2004-word.json'].flatMap(f => (JSON.parse(fs.readFileSync(path.join(BOTS_DIR, 'data', f), 'utf8')).groups ?? []).flatMap(g => g.lines)));
+const isArcsLine = line => arcsTexts.has(line.text) || slotKeysOf(line.text).some(k => !lib.Slots.SLOTS.includes(k) && k !== 'name');
 for (const line of lib.NEW_LINES) {
+    if (isArcsLine(line)) continue;
     const slots = lib.Slots.slotsIn(line.text);
     if (!slots.length) {
         clean(`2004 line (${line.tag.c})`, line.text);
@@ -127,6 +135,127 @@ for (const line of lib.NEW_LINES) {
     }
 }
 notes.push(`${slotLines} slot lines (templates filled) checked`);
+// ---- (bots ideas, round 2: arcs foundation) themes C's and D's lines (port/BotArcsSay sayArcLine: data/lines2004-arcs.json,
+// lines2004-word.json) and any line with slots of its own, each slot filled from each of its samples in turn (the others
+// at their first): every form passes the filter and the charset (below) whole. A slot with no samples fails: each theme
+// gives the values its code fills, in its block ----
+{
+    const ARC_SLOT_SAMPLES = {
+        // ---- C arcs: the slot samples of theme C's lines ({goal}, {done}, {left}, {gear}, {skill} ...) ----
+        // (port/BotGoals goalWords: a level goal in every short skill name at a few targets, with each unlock it names; a
+        // gear goal's piece as port/BotSlots itemSay names it; the money, combat and total goals; port/BotGoals goalLeft;
+        // the 99s' and the moods' {skill} and {target}; the parties' and weddings' {place}: the banks, the venues)
+        ...(() => {
+            const shorts = ['att', 'str', 'def', 'range', 'pray', 'mage', 'cooking', 'wc', 'fletching', 'fishing', 'fm', 'crafting', 'smithing', 'mining', 'herb', 'agility', 'thieving', 'rc'];
+            const unlocks = { att: 'att', def: 'def', range: 'range', pray: 'prayer', mage: 'mage', cooking: 'cooking', wc: 'wc', fletching: 'fletching', fishing: 'fishing', fm: 'fm', crafting: 'crafting', smithing: 'smithing', mining: 'mining', thieving: 'thieving', rc: 'rc' };
+            const level = [];
+            for (const s of shorts) for (const t of [5, 15, 30, 43, 60, 70, 85, 99]) level.push(`${t} ${s}`);
+            // (each unlock with its skill and its level: "60 wc for yews")
+            for (const [s, key] of Object.entries(unlocks)) {
+                for (let at = 1; at < 99; at++) {
+                    const u = lib.Slots.nextUnlock(key, at - 1, true);
+                    if (u && u.next === at) level.push(`${at} ${s} for ${u.unlock}`);
+                }
+            }
+            const metals = ['bronze', 'iron', 'steel', 'black', 'mith', 'addy', 'rune', 'dragon'];
+            const pieces = ['scim', 'long', 'sword', 'baxe', 'mace', '2h sword', 'plate', 'legs', 'plateskirt', 'chainbody', 'med', 'full helm', 'kite', 'sq', 'warhammer', 'dagger', 'spear', 'axe', 'pickaxe'];
+            const items = [...metals.flatMap(m => pieces.map(p => `${m} ${p}`)), 'leather body', 'leather chaps', 'studded body', 'studded chaps', 'wizard hat', 'blue wizard robe', 'black wizard hat', 'coif', 'new gear'];
+            const money = ['25k', '50k', '100k', '250k', '500k', '1m'];
+            const combat = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 126].map(n => `cb ${n}`);
+            const total = ['500 total', '750 total', '1000 total', '1250 total'];
+            const left = ['1 lvl', '3 lvls', '24 lvls', '500', '1', '20k', '850k', '1.2m', '850 xp', '60k xp', '1.2m xp'];
+            const places = ['draynor bank', 'varrock west bank', 'varrock east bank', 'al kharid bank', 'fally west bank', 'fally east bank', 'edge bank', 'seers bank', 'catherby bank', 'ardy north bank', 'ardy south bank', 'yanille bank', 'the gnome bank', 'fally park', 'varrock square', 'lumby castle', 'varrock church', 'lumby church'];
+            return {
+                goal: [...level, ...items, ...money, ...combat, ...total],
+                // (a goal done: its words without an unlock, never a piece: "finally 60 wc!!", "100k done!!")
+                done: [...level.filter(w => !w.includes(' for ')), ...money, ...combat, ...total],
+                gear: items,
+                left,
+                skill: [...new Set([...shorts, ...slotValues.skill])],
+                target: slotValues.target,
+                place: [...new Set([...places, ...slotValues.place])]
+            };
+        })(),
+        // ---- end of C's samples ----
+        // ---- D word: the slot samples of theme D's lines ({place}, {ore}, {mine}, {item}, {nick} ...) ----
+        // (every word port/BotRumours fills: wordSlotValues; a {nick} a few friends' names, as port/BotArcsSay never says a
+        // line the filter would change: a nick that would be starred leaves that line out)
+        ...(lib.wordSlotValues?.() ?? {}),
+        nick: ['kev', 'matty', 'dave', 'jen', 'tom', 'sarah', 'chris'],
+        // ---- end of D's samples ----
+        // ---- (bots ideas, round 3) G period: the slot samples of the G builder's lines (data/lines2004-period.json, a
+        // thread topic's or an answer's own {slot}: every value its code fills) ----
+        // ---- end of G period's samples ----
+        // ---- (bots ideas, round 3) G buzz: the slot samples of the H builder's theme G lines (data/lines2004-buzz.json) ----
+        // ---- end of G buzz's samples ----
+    };
+    // (a theme's samples for one of port/BotSlots' slots, {place} or {item}, take the place of that module's)
+    const values = { ...slotValues, ...ARC_SLOT_SAMPLES };
+    let arcLines = 0;
+    for (const line of lib.NEW_LINES) {
+        if (!isArcsLine(line)) continue;
+        const keys = slotKeysOf(line.text);
+        const missing = keys.filter(k => !(values[k]?.length > 0));
+        check(`arcs line ${JSON.stringify(line.text)}: samples for its slots`, missing.length === 0, missing.join(', '));
+        if (missing.length) continue;
+        const first = Object.fromEntries(keys.map(k => [k, String(values[k][0])]));
+        const fill = vals => line.text.replace(ARC_SLOT, (all, k) => (vals[k] === undefined ? all : String(vals[k])));
+        const forms = new Set([fill(first)]);
+        for (const k of keys) for (const v of values[k]) forms.add(fill({ ...first, [k]: v }));
+        for (const said of forms) {
+            clean(`arcs line with slots (${line.tag.event ?? line.tag.c})`, said);
+            arcLines++;
+        }
+    }
+    notes.push(`${arcLines} arcs lines (their own slots filled) checked`);
+}
+// ---- end of the arcs foundation's block ----
+// ---- (bots ideas, round 3: the period foundation) theme G's lines files (data/lines2004-period.json: the G builder's;
+// lines2004-buzz.json: the H builder's theme G parts): every line is one of NEW_LINES (GROUPS_2004 loads both, so the
+// checks above filter each one, its slots filled), and every group is a set piece's: its tag an event no bot is ever
+// noted with ('period', 'buzz': port/BotLines EVENT_WINDOW names them), members only, with the kinds that name its
+// moments, and lines ----
+{
+    const all = new Set(lib.NEW_LINES.map(l => l.text));
+    let groups = 0;
+    for (const [file, event] of [
+        ['lines2004-period.json', 'period'],
+        ['lines2004-buzz.json', 'buzz']
+    ]) {
+        const json = JSON.parse(fs.readFileSync(path.join(BOTS_DIR, 'data', file), 'utf8'));
+        check(`${file}: a groups list (empty until its builder fills it)`, Array.isArray(json.groups));
+        for (const [i, g] of (json.groups ?? []).entries()) {
+            groups++;
+            const t = g.tag ?? {};
+            const ok = t.c === 'event' && t.event === event && t.members === true && Array.isArray(t.kinds) && t.kinds.length > 0 && Array.isArray(g.lines) && g.lines.length > 0;
+            check(`${file} group ${i}: a set piece's (event '${event}', members, kinds, lines)`, ok, JSON.stringify(t));
+            const missing = (g.lines ?? []).filter(l => !all.has(l));
+            check(`${file} group ${i}: every line in NEW_LINES`, missing.length === 0, missing.slice(0, 3).join(' | '));
+        }
+    }
+    notes.push(`${groups} theme G groups (period, buzz) checked`);
+}
+// ---- end of the period foundation's block ----
+// ---- (bots ideas, round 3: G period) the G builder's answers (port/BotPeriodTalk PERIOD_ANSWERS: a kitten, the Games
+// Room, Runelink, Gnomeball, Castle Wars) and doing phrases (port/BotActivity: the Games Room, Gnomeball, a pet trip):
+// every one as written; Castle Wars never said to be open (PC9) ----
+{
+    const periodTalk = lib.PERIOD_ANSWERS ? { PERIOD_ANSWERS: lib.PERIOD_ANSWERS } : null;
+    if (periodTalk) {
+        let n = 0;
+        for (const [pool, lines] of Object.entries(periodTalk.PERIOD_ANSWERS)) {
+            for (const line of lines) {
+                clean(`period answer (${pool})`, line);
+                n++;
+            }
+        }
+        const open = Object.values(periodTalk.PERIOD_ANSWERS).flat().filter(l => /playing (cw|castle wars)|(cw|castle wars) game|won (at|a) (cw|castle wars)/i.test(l));
+        check('period answers: none says Castle Wars is open', open.length === 0, open.join(' | '));
+        for (const kind of ['GamesRoom', 'Gnomeball', 'PetTrip']) clean(`doing (${kind})`, lib.activityFor(kind, null).toLowerCase());
+        notes.push(`${n} period answers checked`);
+    }
+}
+// ---- end of G period's block ----
 for (const [kind, lines] of Object.entries(lib.PK_LINES)) for (const line of lines) clean(`PK line (${kind})`, line);
 // (revised in the realism work's phase 5a: the 400-600 is lines2004.json's own library; phase 5a's files of lines,
 // data/lines2004-texture.json and data/lines2004-events.json, come on top of it, and NEW_LINES holds them all)
@@ -618,6 +747,36 @@ for (const name of names) {
         for (const template of lines) for (const p of prices) clean(`trade talk (${pool})`, template.replace('{p}', p));
     }
 }
+// ---- (bots ideas, Track B: loot) a loot line's {item} is whatever the human dropped (port/BotLoot: port/BotSlots itemSay of
+// its name), not only the slot samples above: every such line with every tradeable item a player wears or stacks; the
+// filled lines the filter would star are counted (port/BotLoot sayLootLine says the line without the item then), and each
+// group with an {item} line has lines without one to fall back on ----
+{
+    const loot = lib.NEW_LINES.filter(l => /^(pk-|vulture-|pile-)/.test(l.tag.event ?? '') && l.text.includes('{item}'));
+    const names = new Set();
+    for (let i = 0; i < 12000; i++) {
+        const t = lib.ObjType.get(i);
+        if (!t || !t.name || !t.tradeable || t.certtemplate !== -1 || (t.wearpos === -1 && !t.stackable)) continue;
+        const say = lib.Slots.itemSay(t.name);
+        if (say) names.add(say);
+    }
+    let filled = 0;
+    let starred = 0;
+    for (const line of loot) {
+        for (const item of names) {
+            const text = line.text.replaceAll('{item}', item);
+            filled++;
+            if (lib.filter(text) !== text) starred++;
+            else canSay('loot line (item)', text);
+        }
+    }
+    check(`loot lines: ${loot.length} {item} lines filled with ${names.size} items' names: most pass the filter whole (${starred} of ${filled} starred: said without the item)`, loot.length >= 5 && names.size > 200 && starred / filled < 0.1, `${starred} of ${filled}`);
+    for (const event of new Set(loot.map(l => l.tag.event))) {
+        check(`loot lines: ${event} has lines without {item} to fall back on`, lib.NEW_LINES.some(l => l.tag.event === event && !l.text.includes('{item}')));
+    }
+    notes.push(`Track B (ideas): ${filled} loot lines with an item's name, ${starred} starred (said without it)`);
+}
+// ---- end of Track B's (ideas) block ----
 const code = await codeChatStrings();
 for (const { site, text: piece } of code.pieces) canSay(`code string (${site})`, piece.replace(/\{[a-z0-9]+\}/gi, ''));
 notes.push(`${code.pieces.length} strings the bots' code says, from ${code.sites} chat calls (${code.unresolved} of their parts built at run time: names, items, prices, the data's lines)`);
@@ -697,6 +856,32 @@ async function codeChatStrings() {
     }
     return { pieces, sites, unresolved };
 }
+
+// ---- (bots ideas, Track A: the period endgame) a drop sale's adverts (port/BotDropSale.dropAdvert): every endgame loot's
+// short name, one and several, each advert form (its dice walked through), at prices of each form ----
+{
+    const names = ['rune_chainbody', 'rune_med_helm', 'rune_full_helm', 'rune_sq_shield', 'rune_kiteshield', 'rune_platelegs', 'rune_plateskirt', 'rune_platebody', 'rune_scimitar', 'rune_longsword', 'rune_2h_sword', 'rune_battleaxe', 'rune_warhammer', 'rune_spear', 'dragon_med_helm', 'dragon_chainbody', 'dragon_spear', 'dragon_bones', 'dragonhide_blue', 'dragonhide_black', 'dragonhide_red', 'dragonhide_green', 'wine_of_zamorak'];
+    let n = 0;
+    const bad = [];
+    for (const name of names) {
+        const id = lib.ObjTypeForTrackA.getId(name);
+        if (id === -1) {
+            bad.push(`${name}: no such item`);
+            continue;
+        }
+        for (const count of [1, 3]) {
+            for (const price of [700, 17000, 44000, 2200000, 15000000]) {
+                for (let form = 0; form < 4; form++) {
+                    const line = lib.dropAdvert(new Map([[id, count]]), () => price, (() => { let k = 0; return () => (k++ === 0 ? 0 : (form + 0.5) / 4); })());
+                    n++;
+                    if (line === null || lib.filter(line) !== line || !lib.survivesWordPack(line)) bad.push(`${JSON.stringify(line)} -> ${JSON.stringify(line && lib.filter(line))}`);
+                }
+            }
+        }
+    }
+    check(`Track A: a drop sale's adverts pass the filter and the charset whole (${n} checked)`, bad.length === 0, bad.slice(0, 5).join(' | '));
+}
+// ---- end of Track A's checks ----
 
 console.log(
     `chat filter: ${phrases.idle.length} idle and ${phrases.levelup.length} level-up phrases, ${lib.NEW_LINES.length} 2004 lines, ${allReplies.length} replies (${joinedWhole} of ${joinedTotal} greeting-and-answer pairs said whole), ${names.length} names; ${checked} checks against the 274 word filter and chat codec`

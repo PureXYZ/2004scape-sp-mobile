@@ -129,7 +129,8 @@ check('a stand of 3-10 minutes (a break or a step about within it)', lens.length
 // (a thief, a smith, a cook, a lingering bot and, since the social track, a social regular at its hub hold a tile of their own too;
 // since the variety work's round 1 track F a PKer at its patrol tile, a gatherer waiting by a taken rock or tree, and a
 // login's linger by the human)
-const holding = sim.bots().filter(p => kindOf(p) !== 'Hangout' && lib.standTileOf(p) !== null && !['Thieve', 'Smith', 'Cook', 'Social', 'PKer', 'Mine', 'Woodcut', 'Fletching', 'Fish', 'Linger'].includes(kindOf(p)) && lib.habitOf(p) !== 'linger');
+// (bots ideas, Track B: the wine crowd's grabbers hold a tile of their own in the Chaos Temple: Telegrab)
+const holding = sim.bots().filter(p => kindOf(p) !== 'Hangout' && lib.standTileOf(p) !== null && !['Thieve', 'Smith', 'Cook', 'Social', 'PKer', 'Mine', 'Woodcut', 'Fletching', 'Fish', 'Linger', 'Telegrab'].includes(kindOf(p)) && lib.habitOf(p) !== 'linger');
 check('its tile goes back when it ends', holding.length === 0, holding.slice(0, 3).map(p => `${p.username} (${kindOf(p)})`).join(', '));
 const errors = BotManager.stats().errors;
 check('no errors', errors === 0 && logErrors.length === 0, `${errors} bot errors; ${logErrors.slice(0, 2).join(' | ')}`);

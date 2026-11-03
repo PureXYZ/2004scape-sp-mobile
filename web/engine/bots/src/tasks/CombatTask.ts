@@ -93,6 +93,11 @@ import { claimArgument, humanAttacking, isMultiAt, KS_FAR, maySteal, noteSteal, 
 import { argue } from '#/engine/bot/port/BotChatter.js';
 // (the variety work, round 1, Track D: the dungeons' clicks on the way in)
 import { enterDungeon } from '#/engine/bot/port/BotDungeons.js';
+// (bots ideas, Track B: loot) the human's death pile is not a fighter's to loot
+import { pileOfObj } from '#/engine/bot/port/BotLoot.js';
+// ---- (bots ideas, round 2: D word) theme D's hooks (port/BotWordHooks: rumours, ties) ----
+import { wordHooks } from '#/engine/bot/port/BotWordHooks.js';
+// ---- end of D's block ----
 
 // ── Shared NPC claim registry ─────────────────────────────────────────────────
 // Module-level set of NPC keys currently targeted by any CombatTask instance.
@@ -398,6 +403,10 @@ export class CombatTask extends BotTask {
      * ended the trip's fight (its errand's sub-task: over when its spot moves); at 10x XP within minutes (WT1 0.26-0.98)
      */
     holdStep = false;
+    // ---- (bots ideas, Track A: the period endgame) a team's fight (a KBD team in its multi-combat lair): the NPC its mates
+    // fight is its to fight too (no "taken" give-up, no claim kept off it). False for every other fight ----
+    shareNpc = false;
+    // ---- end of Track A's field ----
 
     constructor(step: SkillStep, stat: PlayerStat) {
         super('Combat');
@@ -1158,7 +1167,7 @@ export class CombatTask extends BotTask {
             // once, a person's moment later the next (it re-engaged twice before, for nothing: "Someone else is fighting
             // that."), and now and then says so ("ks!": port/BotChatter.argue). A rude bot's own steal: in a multi-combat
             // area it fights on (it joins on purpose); a single-way race it lost, it lets go quietly
-            if (this.currentNpc && !this.hasHit) {
+            if (this.currentNpc && !this.hasHit && !this.shareNpc) { // (bots ideas, Track A: not in a team's fight)
                 const taker = npcFighting(this.currentNpc);
                 const mine = this.steal !== null && this.steal.npc === this.currentNpc;
                 if (taker && taker !== player && !(mine && this.steal!.multi)) {
@@ -1255,7 +1264,8 @@ export class CombatTask extends BotTask {
                     // port: twice without a hit and it is one the bot cannot hit (behind a fence, or someone else's):
                     // passed over for 200 ticks. Upstream re-engaged for good: each re-engage reset the timeouts below,
                     // so only the watchdog ever ended it, 150 ticks later, giving up the whole spot
-                    if (++this.reengages > 2) {
+                    // (bots ideas, Track A: a team's fight keeps at its one boss, the KBD's 5x5 crowded by its mates: no pass-over)
+                    if (++this.reengages > 2 && !this.shareNpc) {
                         if (this.currentNpc.nid >= 0) this.unreachable.set(this.currentNpc.nid, this.taskTicks + 200);
                         this._releaseNpc();
                         this.currentNpc = null;
@@ -1409,6 +1419,8 @@ export class CombatTask extends BotTask {
      *   - not already claimed by another CombatTask bot
      */
     private _isNpcAvailable(npc: Npc): boolean {
+        // (bots ideas, Track A: a team's fight shares its NPC)
+        if (this.shareNpc) return (this.unreachable.get(npc.nid) ?? -1) <= this.taskTicks;
         // Skip NPCs that already have a combat target (being fought by someone else)
         if ((npc as any).target !== null && (npc as any).target !== undefined) return false;
         // Skip NPCs already claimed by another bot this tick
@@ -1655,7 +1667,11 @@ export class CombatTask extends BotTask {
         if (free && d(free) <= d(npc)) return null;
         const [victim, multi] = victims.get(npc)!;
         if (!maySteal(player, !victim.is_bot)) return null;
-        if (!rollFor(player, npc, multi ? rudeRates.multi : rudeRates.single)) return null;
+        // ---- (bots ideas, round 2: D word) the KS war: against a bot it holds a grudge against, the roll x3 (port/BotTies;
+        // the caps above unchanged) ----
+        const war = victim.is_bot ? (wordHooks.stealFactor?.(player, victim) ?? 1) : 1;
+        // ---- end of D's block ----
+        if (!rollFor(player, npc, Math.min(1, (multi ? rudeRates.multi : rudeRates.single) * war))) return null;
         return { npc, victim, multi };
     }
 
@@ -1691,6 +1707,10 @@ export class CombatTask extends BotTask {
      */
     private _mayLoot(o: Obj): boolean {
         const p = this._lastPlayer;
+        // ---- (bots ideas, Track B: loot) not the human's death pile: its takers are the killer and the vultures
+        // (port/BotLoot, within their caps) ----
+        if (pileOfObj(o) !== null) return false;
+        // ---- end of Track B's (ideas) block ----
         if (!p || o.receiver64 === p.hash64) return true;
         if (this.ownKills.some(k => k.level === o.level && Math.abs(k.x - o.x) <= 1 && Math.abs(k.z - o.z) <= 1 && this.taskTicks - k.at <= OWN_KILL_TICKS)) return true;
         return rudeActs(p) && Math.max(Math.abs(o.x - p.x), Math.abs(o.z - p.z)) <= RUDE_LOOT_TILES;

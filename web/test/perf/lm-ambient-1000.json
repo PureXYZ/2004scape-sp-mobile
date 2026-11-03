@@ -1,0 +1,18 @@
+{
+    "description": "The phone heat test of the model for the bots' own talk (bots ideas round 4, theme I stage 1), run 3: Varrock West bank with 1000 bots for 30 minutes, the chat model On-device with Think first, Bots' own talk on Model (the engine's real ambient flow), the player's own chat as a reply every 30 s with the note. The memory run: the model resident at a hub with 1000 bots (the black flash's history, 2026-10-27). Activity Monitor + FPS + Thermal State samples (3 s) at the marks. Run with the phone's saves backed up.",
+    "bots": 1000,
+    "xctrace": true,
+    "notes": [
+        "Run 3 = phases title, hub-baseline, hub-30min (30 min, the real flow at 1000 bots).",
+        "Pass bars (HI-move-model.md §4 I4): thermal never serious; frame rate median 50 and p05 >= 45 in each 10 s window against title and hub-baseline; engine tick late p95 within hub-baseline's + 15 ms.",
+        "Memory: no memory warning, no model rest, no WebContent termination; WebContent at most 1,050 MB (the Activity Monitor samples; 2026-10-27's run: 950 MB at 28 min).",
+        "Replies to the player: median <= 1.6 s plain / 2.5 s with the note, p95 <= 4 s, no 'busy' because of the bots' own talk.",
+        "If run 3 fails on memory: the bots' own talk is off above 500 bots by default (the engine knows the count; the row says '(500 bots or fewer)').",
+        "Battery: report only, against a model-off run of the same length."
+    ],
+    "phases": [
+        { "name": "title", "where": "title", "settleSec": 10, "sec": 60, "traces": [{ "set": "am", "at": 2, "sec": 3, "tag": "-a" }] },
+        { "name": "hub-baseline", "tele": "0,49,53,49,44", "waitFill": 300, "settings": { "botChat": "local", "botThink": true, "botAmbient": "rules" }, "settleSec": 30, "sec": 300, "traces": [{ "set": "am", "at": 120, "sec": 3, "tag": "-a" }] },
+        { "name": "hub-30min", "settings": { "botChat": "local", "botThink": true, "botAmbient": "model" }, "lm": { "everySec": 30, "think": true }, "settleSec": 30, "sec": 1800, "traces": [{ "set": "am", "at": 120, "sec": 3, "tag": "-a" }, { "set": "am", "at": 900, "sec": 3, "tag": "-b" }, { "set": "am", "at": 1740, "sec": 3, "tag": "-c" }] }
+    ]
+}

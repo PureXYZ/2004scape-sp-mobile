@@ -143,6 +143,20 @@ export function activityFor(kind: string, step: SkillStep | null): string | null
             return 'High alching';
         case 'LawTrip':
             return 'Getting laws';
+        // ---- (bots ideas, round 3: G period) the Games Room, Gnomeball, a cat person's trip ----
+        case 'GamesRoom':
+            return 'Playing runelink';
+        case 'Gnomeball':
+            return 'Playing gnomeball';
+        case 'PetTrip':
+            return 'Doing an errand';
+        // ---- end of G period's block ----
+        // ---- (bots ideas, round 3 tune: G buzz) a sightseer at Rellekka, the lighthouse's visit (no phrase before: "wyd"
+        // had nothing to tell): "Sightseeing in Rellekka", "Sightseeing at the Lighthouse" ----
+        case 'Sightsee':
+        case 'Lighthouse':
+            return 'Sightseeing';
+        // ---- end of the tune's block ----
         default:
             return null;
     }

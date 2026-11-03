@@ -12,6 +12,13 @@
 //              word or refused; assistant talk, 2004's missing things, a bot owning up and a line the filter would
 //              change are refused
 //   rules      with no model (every sim) nothing is asked: the channel stays silent
+// (bots ideas, Track B: the late terms):
+//   guard late the ~45 terms of after 274 refused (whip, d scim, Barrows, the Abyss, Pest Control, fire cape, godswords,
+//              defenders, clan chat, ...), Castle Wars as played refused and as coming passed; 2004's own lines and the
+//              allow-list pass (kq, kbd, d chain, d med, mage arena, god cape, dusty key, telegrab, runelink, gnomeball,
+//              chompy, fremmy, rock crabs, the lighthouse); a player's name ("Whip Lad") is no anachronism; (round 1's
+//              fixes) a contraction's 'd ("i'd pick", "he'd def") and the plain words (a bond, vengeance, a blitz, an
+//              invention) pass, the players' uses of them ("buying bonds", "cast veng", "ice blitz") are refused
 // Track E's (spec §3, §5 items 1-8):
 //   guard+     (a) promises the rules did not make; (b) facts: levels next to a skill's name, "im in <place>", prices;
 //              (c) the human's line echoed back, the bot's own line again; (d) the human's name at the persona's rate;
@@ -146,6 +153,39 @@ check('guard: nothing is no line', g(null).ok === false && g('   ').ok === false
 check('guard: a 2004 quest named "slayer" is no anachronism (demon, dragon, vampire slayer); Slayer the skill still is', BotModelGuardNs.guardReply('demon slayer is easy', null).ok && BotModelGuardNs.guardReply('dragon slayer took me ages', null).ok && BotModelGuardNs.guardReply('whats ur slayer lvl', null).reason === 'anachronism', [BotModelGuardNs.guardReply('demon slayer is easy', null), BotModelGuardNs.guardReply('whats ur slayer lvl', null)]);
 check('guard: "yeah, just a bot" is owning up; "ur just a bot" (of someone else) is banter', BotModelGuardNs.guardReply('lol yeah just a bot', null).reason === 'confession' && BotModelGuardNs.guardReply('ur just a bot lol', null).ok, [BotModelGuardNs.guardReply('lol yeah just a bot', null), BotModelGuardNs.guardReply('ur just a bot lol', null)]);
 check('guard: slang from long after 2004 refused (rizz, no cap, ngl)', ['no cap', 'thats rizz', 'ngl its good', 'bruh'].every(t => BotModelGuardNs.guardReply(t, null).reason === 'anachronism'), ['no cap', 'thats rizz', 'ngl its good', 'bruh'].map(t => BotModelGuardNs.guardReply(t, null)));
+// ---- (bots ideas, Track B: the late terms; the spec's allow-list) ----
+{
+    const G = (t, sit = null, opts) => BotModelGuardNs.guardReply(t, sit, opts);
+    // each row of the late terms, in players' slang
+    const late = [
+        'lol nice whip', 'selling abby whip 3m', 'running the abyss', 'got a d scim drop', 'dscim > rune scim', 'dragon scimitar ftw', 'monkey madness is hard', 'training at barrows', 'full dharoks lol', 'karils', 'gonna do pest control',
+        'void knight armour is good', 'got my fire cape', 'jad is hard', 'fight caves tmrw', 'tokkul', 'bgs spec', 'godswords r op', 'gwd trip', 'bandos', 'rune defender', 'need a d def', 'warriors guild for defenders', 'going d legs', 'd claws spec',
+        'd boots', 'dark bow spec', 'gmaul spec lol', 'b ring is nice', 'need an amulet of fury', 'onyx ring', 'join my clan chat', 'clan wars later', 'bounty hunter', 'soul wars', 'team cape', 'skillcape for 99', 'pure ess 50 ea', 'my poh',
+        'loot share', 'veng up', 'lunars', 'ice barrage them', 'ancient magicks', 'desert treasure', 'divination', 'nice whip lol', 'doing pest control'
+    ];
+    const missed = late.filter(t => G(t).reason !== 'anachronism');
+    check(`guard (bots ideas): the ${late.length} late terms refused (whip, d scim, Barrows, the Abyss, Pest Control, fire cape, godswords, defenders, clan chat, ...)`, missed.length === 0, missed);
+    check('guard (bots ideas): Castle Wars as played refused ("cw was fun", "zammy won castle wars lol"); as coming it passes ("castle wars next month!!", "whats castle wars", "cant wait for castle wars")', ['cw was fun', 'castle wars games are fun', 'zammy won castle wars lol'].every(t => G(t).reason === 'anachronism') && ['castle wars next month!!', 'whats castle wars', 'cant wait for castle wars', 'castle wars soon', 'what are those castle wars portals'].every(t => G(t).reason !== 'anachronism'), ['cw was fun', 'castle wars next month!!', 'whats castle wars'].map(t => [t, G(t).reason ?? 'ok']));
+    // 2004's own (the research's must-pass lines and the integrator's allow-list for the endgame and the period's content)
+    const period = [
+        'demon slayer is easy', 'vampire slayer done', 'pc rune 2h?', 'my pc lagged', 'd axe spec', 'dds spec', 'd long', 'd med helm', 'd chain drop!!', 'dragon chain from kq', 'd sq shield', 'dragon spear', 'nice rune scim', 'rune def is 70?',
+        'my def is 40', 'def 1 pure', 'fremennik trials r long', 'horror from the deep', 'lighthouse quest', 'duel arena stakes', 'telegrab the wine', 'kbd trip', 'kq is new', 'green dhide', 'ty for the loot', 'chaos temple', 'ancient zombie',
+        'fury of the pker', 'whippet', 'jade', 'the abbey', 'barrow', 'kq', 'kbd', 'd chain', 'd med', 'mage arena', 'god cape', 'dusty key', 'telegrab', 'runelink', 'gnomeball', 'chompy', 'chompy hunting', 'fremmy', 'fremennik', 'rock crabs',
+        'the lighthouse', 'kbd team?', 'need a dusty key', 'bring something next time', 'ggs', 'lever camp'
+    ];
+    const wrong = period.filter(t => G(t).reason === 'anachronism');
+    check(`guard (bots ideas): ${period.length} lines of 2004 pass the late terms (quest names, "pc rune 2h?", "d axe spec", "rune def", kq, kbd, d chain, d med, mage arena, god cape, dusty key, telegrab, runelink, gnomeball, chompy, fremmy, rock crabs, the lighthouse)`, wrong.length === 0, wrong.map(t => [t, G(t)]));
+    // (round 1's fixes, B7) a contraction's 'd is no dragon, and the plain words pass; the players' uses of them do not
+    const plain = ["i'd pick the rune one", "i'd def go there", "he'd pick it up", "you'd legs it", "i'd boots it", "she’d def win", 'what an invention', 'james bond lol', 'this is a bond', 'vengeance is mine', 'blitz it', 'a barrage of hits', 'archaeology is cool'];
+    const used = ['i need a d pick', 'got a d def', 'buying bonds', 'bond for membership', 'cast veng', 'vengeance spell', 'ice blitz', 'smoke barrage', 'barraging pkers', 'invention skill', '99 invention', 'abyss rc', 'the abyss'];
+    const plainWrong = plain.filter(t => G(t).reason === 'anachronism');
+    const usedMissed = used.filter(t => G(t).reason !== 'anachronism');
+    check(`guard (bots ideas): ${plain.length} lines with a contraction's 'd or a plain word pass ("i'd pick the rune one", "james bond lol", "vengeance is mine"); ${used.length} players' uses of the terms are refused ("i need a d pick", "buying bonds", "cast veng", "ice blitz")`, plainWrong.length === 0 && usedMissed.length === 0, { plainWrong: plainWrong.map(t => [t, G(t)]), usedMissed });
+    // a player's name is no anachronism: online, the human's, the bot's own
+    const whip ={ ...s, human: { ...s.human, name: 'Whip Lad' }, heard: { ...s.heard, text: 'hey' }, hint: null, history: [] };
+    check('guard (bots ideas): a line naming a player online ("ask Whip Lad", "D Scim Kyle sells them") passes; the term alone is refused', G('ask whip lad lol', null, { names: ['Whip Lad', 'D Scim Kyle'] }).reason !== 'anachronism' && G('d scim kyle sells them', null, { names: ['D Scim Kyle'] }).reason !== 'anachronism' && G('hey whip lad', whip).reason !== 'anachronism' && G('nice whip lol', null, { names: ['Whip Lad'] }).reason === 'anachronism', [G('ask whip lad lol', null, { names: ['Whip Lad'] }), G('hey whip lad', whip), G('nice whip lol', null, { names: ['Whip Lad'] })]);
+}
+// ---- end of Track B's (ideas) checks ----
 // (the review of the merge) a yes to "r u a bot", a yes to a beg, the promise check's plans and exclamations, names that are phrases
 {
     const asked = { ...s, heard: { ...s.heard, text: 'r u a bot' }, hint: { intent: 'bot', text: 'no lol' } };

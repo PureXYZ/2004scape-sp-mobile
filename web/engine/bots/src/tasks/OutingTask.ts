@@ -144,6 +144,15 @@ export class OutingTask extends BotTask {
     }
 
     override interrupt(): void {
+        // (bots ideas, round 4 fixes) told to stop upstairs in the watchtower or behind Shilo's walls (ProgressWatchdog's
+        // end near the spot, endsNearSpot; a danger's leave, port/BotDefence), the outing leaves the way it came first, as
+        // at its time (tick: 'leave', the ladder down, the cart), and ends after. It ended up there: a thief stood on the
+        // watchtower's top floor with its task over (minigames.test seed 10)
+        const p = this._player;
+        if (this.started && this.phase !== 'done' && p && this._mustLeave(p)) {
+            this._leave(p, 'interrupted');
+            return;
+        }
         super.interrupt();
         this.inner.interrupt();
         this._end(null, 'interrupted');

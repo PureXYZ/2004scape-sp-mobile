@@ -116,6 +116,10 @@ import { levelUpStep, getProgressionStepWhere, SkillProgression } from '#/engine
 import { runFromAttackers } from '#/engine/bot/port/BotDefence.js';
 // (the variety work, round 1, Track D: the dungeons' clicks on the way in)
 import { enterDungeon } from '#/engine/bot/port/BotDungeons.js';
+// (bots ideas, Track B: A7, safespots at the Edgeville dungeon's hill giants)
+import { releaseSafespot, safespotGuard, safespotHeld, safespotTurn } from '#/engine/bot/port/BotSafespots.js';
+import { safespotRejoin } from '#/engine/bot/port/BotSafespots.js'; // (bots ideas, round 1's left-overs: T3)
+import { safespotAskDue } from '#/engine/bot/port/BotSafespots.js'; // (round 1's left-overs: the ask's retry)
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -282,6 +286,8 @@ export class RangedMagicTask extends BotTask {
     private noXpClicks = 0;
     private gateTried = false;
     private taskTicks = 0;
+    /** (bots ideas, Track B: A7) the bot (its safespot given back at a reset: port/BotSafespots) */
+    private lastPlayerForSafespot: Player | null = null;
 
     private readonly stuck = new StuckDetector(30, 4, 2);
     private readonly watchdog = new ProgressWatchdog(150);
@@ -340,9 +346,12 @@ export class RangedMagicTask extends BotTask {
     tick(player: Player): void {
         if (this.interrupted) return;
         this.taskTicks++;
+        this.lastPlayerForSafespot = player; // (bots ideas, Track B: A7: its tile given back at a reset)
         // port (the realism work): a target lost, by a kill or the game's own retaliation: the next click a moment later
         // (upstream clicked the next in the tick after: 47-66 % of its re-targets within a tick, the most of any task)
         this.pause.observe(player);
+        // (bots ideas, round 1's left-overs) a full safespot room's ask not said at its look, again while it waits fighting
+        safespotAskDue(player, this.step);
 
         // port: and its shopping (runes at Aubury's, arrows at Lowe's): from a spot by Ardougne the walk to Varrock
         // outlasted the watchdog, which jumped the bot back to its spot before it got there, every ~570 ticks (aged sim)
@@ -791,6 +800,9 @@ export class RangedMagicTask extends BotTask {
 
         // ── PATROL ────────────────────────────────────────────────────────────
         if (this.state === 'patrol') {
+            // ---- (bots ideas, Track B: A7) at a safespot room: its tile, the giants it shoots from there (port/BotSafespots) ----
+            if (this._safespot(player)) return;
+            // ---- end of Track B's (ideas) block ----
             const [cx, cz] = this.step.location;
             const [jcx, jcz] = botJitter(player, cx, cz, 8);
 
@@ -844,6 +856,9 @@ export class RangedMagicTask extends BotTask {
         if (this.state === 'scan') {
             // port: no gate sweep (see patrol)
 
+            // ---- (bots ideas, Track B: A7) on its safespot a giant to shoot comes before its arrows (they wait), and its tile ----
+            if (this._safespot(player, true)) return;
+            // ---- end of Track B's (ideas) block ----
             // port (the bot leak audit): its arrows and its kills' drops first (they land a few ticks after the shot or
             // the death)
             if (this.hasFoughtInArea && this._findLoot(player)) {
@@ -930,6 +945,14 @@ export class RangedMagicTask extends BotTask {
                 this.state = 'scan';
                 return;
             }
+            // ---- (bots ideas, Track B: A7) on its safespot, a giant gone out of its shot: the attack stopped, not followed ----
+            if (safespotGuard(player, this.currentNpc)) {
+                this._releaseNpc();
+                this.currentNpc = null;
+                this.state = 'scan';
+                return;
+            }
+            // ---- end of Track B's (ideas) block ----
 
             this.interactTicks++;
             this.approachTicks++;
@@ -1537,6 +1560,42 @@ export class RangedMagicTask extends BotTask {
         return !CLAIMED_NPCS.has(_npcKey(npc));
     }
 
+    // ---- (bots ideas, Track B: A7) a safespot's turn (port/BotSafespots): true when it took the turn ----
+    private _safespot(player: Player, shootOnly = false): boolean {
+        // (its own giant, chasing it to the tile, is its to shoot: the task's test counts any NPC with a target as taken)
+        const ok = (n: Npc): boolean => (n as unknown as { target: unknown }).target === player || this._isAvailable(n);
+        // (round 1's left-overs: T3) in its scan with no tile, one whose giant it can shoot now is taken (port/BotSafespots)
+        if (shootOnly) safespotRejoin(player, this.step, ok);
+        const turn = safespotTurn(player, this.step, ok, shootOnly);
+        if (turn === null) return false;
+        if (turn === 'hold') {
+            // (standing on its tile, waiting for its giant, is this task's work: its watchdog is told, as a PKer's post)
+            const held = safespotHeld(player);
+            if (held && player.x === held[0] && player.z === held[1]) this.watchdog.notifyActivity();
+            return true;
+        }
+        if (turn === 'leave') {
+            this.interrupt();
+            return true;
+        }
+        // (a moment after the last target, as a person looks round for one: TargetPause)
+        if (!this.pause.ready) return true;
+        this._claimNpc(turn);
+        this.currentNpc = turn;
+        this.noXpClicks = 0;
+        this.gateTried = false;
+        this._setAttackStyle(player);
+        interactNpcOp(player, turn, 2);
+        this.state = 'interact';
+        this.interactTicks = 0;
+        this.approachTicks = 0;
+        this.lastXp = player.stats[this._trainedStat()];
+        this.scanFail = 0;
+        this.hasFoughtInArea = true;
+        return true;
+    }
+    // ---- end of Track B's (ideas) block ----
+
     private _isNpcAlive(player: Player, npc: Npc): boolean {
         return npcWithin(npc, player.x, player.z, player.level, 30);
     }
@@ -1587,6 +1646,7 @@ export class RangedMagicTask extends BotTask {
     override reset(): void {
         super.reset();
         this._releaseNpc();
+        if (this.lastPlayerForSafespot) releaseSafespot(this.lastPlayerForSafespot); // (bots ideas, Track B: A7)
         this.state = 'check_equip';
         this.equipFails = 0;
         this.armourChecked = false;

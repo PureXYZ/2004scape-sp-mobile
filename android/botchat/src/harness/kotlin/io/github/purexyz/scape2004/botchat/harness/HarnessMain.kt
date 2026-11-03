@@ -3,7 +3,9 @@
 // built for macOS against llama.cpp b11297's macOS prebuilt, CPU only, as on Android) against the local mock of the
 // Messages API (web/test/lm/mock-claude.mjs), so the online path is tested without a key and the fallback chain without a
 // phone. The Kotlin port of the iOS harness, web/test/native/lm-harness/main.swift: the same 51 checks, with the same names
-// in the same order, then the Android extras A1-A5:
+// in the same order (and (bots ideas, round 4) the bots' own talk's, after the hot phone's: as the iOS ones, with their
+// resting check here too; (round 4 fixes) one running stopped by a reply, and not counted toward the replies' 3), then
+// the Android extras A1-A5:
 //   A1 the GGUF read through a file descriptor at an offset (an APK's stored asset): mmapped when aligned, read when not
 //   A2 a pause stops a long prompt inside its batch (llama.cpp's abort callback), and the next request works
 //   A3 the compute buffer stays small (n_outputs_max 1)
@@ -102,13 +104,17 @@ class Harness(private val modelInfo: ModelInfo?, private val mockUrl: String, pr
         println("CHECK ${if (ok) "ok" else "FAIL"} $name${if (detail.isEmpty()) "" else " — $detail"}")
     }
 
-    /** A request as the page sends it; its id. `think`: Settings › Bot chat › Think first (null: a request without it). */
-    fun send(mode: String, fallback: Boolean? = null, think: Boolean? = null, timeoutMs: Int = 9000, onlinePrompt: Map<String, Any?> = online): Int {
+    /**
+     * A request as the page sends it; its id. `think`: Settings › Bot chat › Think first (null: a request without it).
+     * (bots ideas, round 4: I model) `ambient`: a line of the bots' own talk (Settings › Bot chat › Bots' own talk).
+     */
+    fun send(mode: String, fallback: Boolean? = null, think: Boolean? = null, timeoutMs: Int = 9000, onlinePrompt: Map<String, Any?> = online, ambient: Boolean = false, to: BotChatModel = model): Int {
         val id = nextId++
         val message = linkedMapOf<String, Any?>("type" to "lm", "id" to id, "mode" to mode, "local" to local, "online" to onlinePrompt, "maxChars" to 80, "timeoutMs" to timeoutMs)
         if (fallback != null) message["fallback"] = fallback
         if (think != null) message["think"] = think
-        main.run { model.handle(message) }
+        if (ambient) message["ambient"] = true
+        main.run { to.handle(message) }
         return id
     }
 
@@ -118,8 +124,8 @@ class Harness(private val modelInfo: ModelInfo?, private val mockUrl: String, pr
         return JsonBridge.toMap(Json.parseToJsonElement(json) as JsonObject)
     }
 
-    fun ask(mode: String, fallback: Boolean? = null, think: Boolean? = null, timeoutMs: Int = 9000): Map<String, Any?> =
-        answer(send(mode, fallback, think, timeoutMs))
+    fun ask(mode: String, fallback: Boolean? = null, think: Boolean? = null, timeoutMs: Int = 9000, ambient: Boolean = false): Map<String, Any?> =
+        answer(send(mode, fallback, think, timeoutMs, ambient = ambient))
 
     /** The on-device model asked directly (not through the router): its whole output, the note included. */
     fun generate(localModel: LocalModel, think: Boolean): Result<LocalModel.Output> {
@@ -316,6 +322,103 @@ class Harness(private val modelInfo: ModelInfo?, private val mockUrl: String, pr
             reply = ask("online")
             check("a hot phone: Claude online still answers", reply["source"] == "online", describe(reply))
             main.run { model.thermal = ThermalProvider.NOMINAL }
+        }
+
+        // (bots ideas, round 4: I model) the bots' own talk (ambient: Settings › Bot chat › Bots' own talk): the on-device
+        // model only, never the note; refused 'hot' at thermal FAIR (a reply's gate stays SERIOUS), 'unavailable' while
+        // resting and 'busy' while a reply is on the model; the model's thread serves the replies first; an ambient request
+        // may load the model (the iOS harness's checks, by name)
+        key = "sk-ant-test-ok-amb1"
+        reply = ask("online", ambient = true)
+        check("ambient, mode online with a key: the on-device model answers, never Claude (else unavailable)", if (hasLocal) reply["source"] == "local" && reply["usage"] == null else reply["error"] == "unavailable", describe(reply))
+        key = null
+        if (hasLocal) {
+            main.run { model.thermal = ThermalProvider.fixed(ThermalLevel.FAIR) }
+            reply = ask("local", ambient = true)
+            check("ambient at thermal fair: refused 'hot' at once", reply["error"] == "hot" && isNull(reply, "text") && ((reply["ms"] as? Number)?.toDouble() ?: 999.0) < 50, describe(reply))
+            reply = ask("local")
+            check("a reply at thermal fair: answered (its gate stays serious)", reply["source"] == "local", describe(reply))
+            main.run { model.thermal = ThermalProvider.NOMINAL }
+            if (model.local.thinkSupport == ThinkSupport.OPTION) {
+                reply = ask("local", think = true, ambient = true)
+                check("ambient with think true: written without the note (the bots' own talk never thinks)", reply["source"] == "local" && plainReply(reply), "${describe(reply)}; ${noteOf(reply)}")
+            }
+            val replyId = send("local")
+            val ambientId = send("local", ambient = true)
+            val refused = answer(ambientId)
+            val replied = answer(replyId)
+            check("ambient while a reply to the player is on the model: refused 'busy' at once, the reply answered", refused["error"] == "busy" && isNull(refused, "text") && replied["source"] == "local", "${describe(refused)} | ${describe(replied)}")
+            // the queue: one running, then a line of the bots' own talk, then a reply: the reply runs first
+            val queueModel = LocalModel(modelInfo, LlmJni, main, HarnessLog) { 2048L shl 20 }
+            generate(queueModel, false)
+            val order = CopyOnWriteArrayList<String>()
+            val done = LinkedBlockingQueue<String>()
+            for ((tag, ambient) in listOf("first" to false, "ambient" to true, "reply" to false)) {
+                queueModel.generate(local["system"] as? String ?: "", local["user"] as? String ?: "", false, System.nanoTime() + 30_000_000_000L, ambient) {
+                    order += tag
+                    done.put(tag)
+                }
+            }
+            repeat(3) { done.poll(60, TimeUnit.SECONDS) }
+            check("the model's queue serves the replies first: one running, then the bots' own talk, then a reply: first, reply, ambient", order.toList() == listOf("first", "reply", "ambient"), order.joinToString(", "))
+            // (round 4 fixes) a reply asked while a line of the bots' own talk runs: that one stops at its next token
+            // ('busy'), the reply runs at once (the note asked of the line of their talk here: a longer run to catch)
+            order.clear()
+            val outcome = { result: Result<LocalModel.Output> -> if (result.isSuccess) "local" else (result.exceptionOrNull() as? LocalModel.Failure)?.description ?: "${result.exceptionOrNull()}" }
+            queueModel.generate(local["system"] as? String ?: "", local["user"] as? String ?: "", queueModel.thinkSupport == ThinkSupport.OPTION, System.nanoTime() + 30_000_000_000L, true) {
+                order += "ambient: ${outcome(it)}"
+                done.put("ambient")
+            }
+            val runAt = System.currentTimeMillis()
+            while (!queueModel.ambientRunning && System.currentTimeMillis() - runAt < 10_000) Thread.sleep(1)
+            val askedAt = System.nanoTime()
+            var replyMs = -1L
+            queueModel.generate(local["system"] as? String ?: "", local["user"] as? String ?: "", false, System.nanoTime() + 30_000_000_000L, false) {
+                replyMs = (System.nanoTime() - askedAt) / 1_000_000
+                order += "reply: ${outcome(it)}"
+                done.put("reply")
+            }
+            repeat(2) { done.poll(60, TimeUnit.SECONDS) }
+            check("a reply asked while a line of the bots' own talk runs: that one stops at its next token ('busy'), the reply runs at once", order.toList() == listOf("ambient: busy", "reply: local") && !queueModel.ambientRunning, "${order.joinToString(", ")}; the reply in $replyMs ms")
+            queueModel.shutdown()
+            // (round 4 fixes) the router: a line of the bots' own talk in flight is not counted toward the replies' 3
+            val runningId = send("local", ambient = true)
+            val waitAt = System.currentTimeMillis()
+            while (!model.local.ambientRunning && System.currentTimeMillis() - waitAt < 10_000) Thread.sleep(1)
+            // (the three and the fourth in one turn of the main thread, as the Swift harness sends them)
+            val ids = main.run {
+                (0 until 4).map {
+                    val id = nextId++
+                    model.handle(linkedMapOf<String, Any?>("type" to "lm", "id" to id, "mode" to "local", "local" to local, "online" to online, "maxChars" to 80, "timeoutMs" to 9000))
+                    id
+                }
+            }
+            val fourth = answer(ids[3])
+            val stopped = answer(runningId)
+            val three = ids.take(3).map { answer(it) }
+            @Suppress("UNCHECKED_CAST")
+            val stoppedCount = main.run { model.counters["ambientStopped"] as? Int ?: 0 }
+            check("the bots' own talk in flight is not counted toward the replies' 3: three replies taken and answered, a fourth 'busy' at once; the one of their talk running stopped for them ('busy')",
+                fourth["error"] == "busy" && ((fourth["ms"] as? Number)?.toDouble() ?: 999.0) < 50 && three.all { it["source"] == "local" } && stopped["error"] == "busy" && isNull(stopped, "text") && stoppedCount >= 1,
+                "${describe(fourth)} | ${describe(stopped)} | ${three.joinToString(" | ") { describe(it) }} | stopped $stoppedCount")
+            // an ambient request may load the model
+            model.local.unload("harness: ambient load")
+            while (model.local.isLoaded) Thread.sleep(10)
+            reply = ask("local", ambient = true)
+            @Suppress("UNCHECKED_CAST")
+            val timings = reply["timings"] as? Map<String, Any?>
+            check("ambient with the model not in memory: it loads the model and answers", reply["source"] == "local" && model.local.isLoaded && timings?.get("loadMs") != null, describe(reply))
+            val counters = main.run { model.counters }
+            check("the counters count the bots' own talk and its refusals", ((counters["ambient"] as? Int) ?: 0) >= 4 && ((counters["ambientRefused"] as? Int) ?: 0) >= 2, "$counters")
+            // resting for memory: refused 'unavailable' at once, nothing loaded (a model of its own: the rest is its own)
+            val resting = main.run { BotChatModel(LocalModel(modelInfo, LlmJni, main, HarnessLog) { 2048L shl 20 }, OnlineModel(main), MemoryKeyStore(), HarnessLog) }
+            main.run {
+                resting.onReply = { r -> queueFor(r["id"] as Int).put(JsonBridge.toJson(r).toString()) }
+                resting.memoryWarning()
+            }
+            reply = answer(send("local", ambient = true, to = resting))
+            check("resting: a line of the bots' own talk (ambient) is refused 'unavailable' at once, nothing loaded", reply["error"] == "unavailable" && isNull(reply, "text") && !resting.local.isLoaded, describe(reply))
+            resting.local.shutdown()
         }
 
         // memory: a load needs room; a memory warning stops the reply being written and drops those waiting

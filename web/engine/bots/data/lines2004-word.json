@@ -1,0 +1,32 @@
+{
+    "about": "The bots ideas work, round 2: theme D's lines (word that travels: rumours and their versions, fake-dp lines, tie greetings, grudge lines), in a late-2004 voice, the same shape and rules as lines2004.json: each group's tag says where and when it is true. Each group's tag carries an event no chatter event uses (so the idle picker never says them out of turn) and its kinds; its lines are said only through port/BotArcsSay (sayArcLine, arcLines(event, kind)), which fills their {slots} ({place}, {ore}, {mine}, {item}, {skill}, {mins}, {nick}). Every line, every slot filled, through the 274 filter and charset (test/chat-filter.test.mjs covers every group of GROUPS_2004; its theme D block checks the slots). word-rumour: a knower's telling, by the rumour's version (party, party-big, party-soon: a distorted one; ninety-nine, wedding: theme C's pieces; pk, pk-team, pk-victim; rocks-full, rocks-free; drop, drop-big), port/BotRumours. word-fake: a knower at a wrong place. word-missed: a late word after a party it did not go to. word-answer: a knower asked where, when, whether it is real. word-greet, word-greet-back: two bots that know each other (port/BotTies). word-grudge (any, ks, rock, pk), word-grudge-back: a grudge's first sight in a session. word-rival: an Edgeville PKer and its rival at the edge (LineKind pk).",
+    "groups": [
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["party"] }, "lines": ["dp at {place}", "drop party at {place}!!", "some1 said dp at {place}", "theres a dp at {place}", "dp at {place} go go", "heard theres a dp at {place}", "dp at {place} rn"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["party-big"] }, "lines": ["huge dp at {place}!!", "rune drops at the dp at {place} lol", "massive drop party at {place}", "some1 dropping rune at {place}!!"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["party-soon"] }, "lines": ["dp at {place} in 10 min", "dp {place} soon", "drop party at {place} in like 5 min"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["ninety-nine"] }, "lines": ["someone is getting 99 {skill} at {place}", "99 party at {place} soon", "some1 almost 99 {skill} at {place}"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["wedding"] }, "lines": ["wedding at {place} soon lol", "some1 getting married at {place}", "theres a wedding at {place}"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["pk"] }, "lines": ["pkers at {place}", "dont go to {place}, pkers", "pkers out at {place} watch out", "careful at {place}, pkers"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["pk-team"] }, "lines": ["pk team at {place}", "big pk team at {place}", "like 5 pkers at {place}"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["pk-victim"] }, "lines": ["got pked at {place}", "just got pked at {place}", "dont go to {place}, i just died there"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["rocks-full"] }, "lines": ["{ore} all taken at {mine}", "{mine} is full lol", "dont bother with {mine}, full", "no {ore} left at {mine}"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["rocks-free"] }, "lines": ["{ore} free at {mine}", "lots of {ore} at {mine} atm", "{mine} is empty, free {ore}"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["drop"] }, "lines": ["someone got a {item} drop at {place}", "{item} drop at {place} omg", "heard someone got a {item}"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rumour", "kinds": ["drop-big"] }, "lines": ["some1 got 2 {item} drops at {place}", "someone got a {item} drop at {place} so lucky"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-fake" }, "lines": ["wheres the dp??", "lol fake dp", "no dp here", "where is every1", "was there even a party"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-missed" }, "lines": ["missed the dp lol", "aw i missed the dp", "dp over already?", "was the dp any good"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-answer", "kinds": ["where"] }, "lines": ["{place}", "at {place}", "{place} i think", "{place} apparently"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-answer", "kinds": ["when"] }, "lines": ["like {mins} min", "in {mins} min i think", "{mins} min"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-answer", "kinds": ["when-soon"] }, "lines": ["soon i think", "now i think", "idk soon"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-answer", "kinds": ["real"] }, "lines": ["ya its real", "yea i think so", "thats what i heard", "ya for real"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-answer", "kinds": ["unsure"] }, "lines": ["idk thats what i heard", "dunno tbh", "idk maybe", "some1 said so"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-greet" }, "lines": ["hey again", "sup {nick}", "u again lol", "o hey {nick}", "back again lol", "yo {nick}", "{nick}!", "hey {nick} :)"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-greet-back" }, "lines": ["hey hey", "o hi", "lol hi", "yo yo", "hi again"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-grudge", "kinds": ["any"] }, "lines": ["u again", "oh great its u", "not u again", "this guy again lol", "watch it {nick}"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-grudge", "kinds": ["ks"] }, "lines": ["{nick} the ks guy", "ur the ks guy", "no ksing this time"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-grudge", "kinds": ["rock"] }, "lines": ["stay off my rocks", "my rocks this time {nick}"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-grudge", "kinds": ["pk"] }, "lines": ["u pked me lol", "remember me {nick}?"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-grudge-back" }, "lines": ["ok and", "whatever", "cry more lol", "make me lol"] },
+        { "track": "D", "tag": { "c": "event", "event": "word-rival" }, "lines": ["rematch?", "sit again lol", "u again huh", "round 2?"] }
+    ]
+}

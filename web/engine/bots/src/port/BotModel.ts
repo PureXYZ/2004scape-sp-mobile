@@ -12,7 +12,8 @@
 //     up, the marketplace, the rude lines; a reply with an action stays the rules'), and never the player-mod bot's;
 //   - the pending reply (askModel): the request goes out through the channel with the prompts port/BotChat rendered
 //     from the situation; one per bot (a newer reply of the bot supersedes it: supersedeModelReply), at most
-//     MAX_IN_FLIGHT in the world (more fall back at once, 'busy'); its deadline (MODEL_DEADLINE_TICKS after the decision
+//     MAX_IN_FLIGHT in the world (more fall back at once, 'busy'; (bots ideas, round 4 fixes) a line of the bots' own
+//     talk in flight not counted); its deadline (MODEL_DEADLINE_TICKS after the decision
 //     and the reply's extra ticks: then the rules' line at once); the answer (onModelReply, handled in the next tick,
 //     the world's time) through the guard, then the bot's own `use` (port/BotChat: the persona's style, typed from the
 //     decision) or its `fallback` with the reason; (2026-10-26) a refused or empty line asked for once more first
@@ -22,11 +23,18 @@
 //   - a deterministic stub for tests and sims (setModelForTest: replies from the situation, a set latency in ticks, a
 //     set failure rate, now and then a planted bad line the guard must catch).
 // No dice here: the stub's choices are hashes of the request, so a sim with the stub repeats.
+// (bots ideas, round 4: I model) The bots' own talk near the human (port/BotModelAmbient: a thread's turns after the
+// opener, a bot's answer to a bot): Settings › Bot chat › Bots' own talk (the page's mode message, `ambient`), its asks
+// (`ModelAsk.ambient`: the on-device model always, `mode: 'local'` even with Claude online, no retry, the guard's
+// ambient checks), their numbers apart (modelStats.ambient: LM1-LM8; the replies' MD1-MD6 as they were), the log's
+// "(ambient)" mark and the stub's ambient words. The replies to the human (wantsModel, MODEL_VIAS, the retry) are as
+// they were. (Round 4 fixes) The replies' MAX_IN_FLIGHT counts no line of the bots' own talk (inFlightFor), and a line
+// of the bot's to a human gives up its own talk's request first (supersedeAmbient: port/BotChat.sayTyped).
 import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
 import { toDisplayName } from '#/util/JString.js';
 import { botConsole as console } from '#/engine/bot/port/BotLog.js';
-import { guardReply, substantialLine, withoutName } from '#/engine/bot/port/BotModelGuard.js';
+import { AMBIENT_COUNTER_RX, guardReply, substantialLine, withoutName } from '#/engine/bot/port/BotModelGuard.js';
 import type { SituationRequest } from '#/engine/bot/port/BotModelPrompt.js';
 import type { ChatModelMode, LocalPrompt, ModelFallback, ModelModeMessage, ModelReplyMessage, ModelRequestMessage, OnlinePrompt, ReplyVia, Situation } from '#/engine/bot/port/BotModelTypes.js';
 import { MAX_LINE } from '#/engine/bot/port/BotSay.js';
@@ -35,13 +43,19 @@ import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 
 let mode: ChatModelMode = 'rules';
 const present = { local: false, online: false };
+// ---- (bots ideas, round 4: I model) Settings › Bot chat › Bots' own talk, as the page tells it ----
+let ambientSetting = false;
+// ---- end of I model's block ----
 
 /** The page's word (at start and on every change): the player's choice and what is there. Replies waiting on a model no longer there fall back at once. */
-export function setModelMode(msg: Pick<ModelModeMessage, 'mode' | 'local' | 'online'>): void {
+export function setModelMode(msg: Pick<ModelModeMessage, 'mode' | 'local' | 'online'> & { ambient?: boolean }): void {
     mode = msg.mode === 'local' || msg.mode === 'online' ? msg.mode : 'rules';
     present.local = msg.local === true;
     present.online = msg.online === true;
+    ambientSetting = msg.ambient === true; // (bots ideas, round 4: I model)
     if (!modelAvailable()) for (const p of [...inFlight.values()]) settle(p, 'unavailable');
+    // (bots ideas, round 4: I model: the bots' own talk waiting on the on-device model, gone: the rules' lines at once)
+    else if (!present.local) for (const p of [...inFlight.values()]) if (p.ask.ambient) settle(p, 'unavailable');
 }
 
 /** The player's choice. */
@@ -55,6 +69,16 @@ export function modelAvailable(): boolean {
     if (mode === 'online') return present.online || present.local;
     return false;
 }
+
+// ---- (bots ideas, round 4: I model) ----
+/**
+ * The bots' own talk may be the model's now (port/BotModelAmbient): Bots' own talk is Model, a model writes the replies
+ * (modelAvailable) and the on-device model is there (ambient lines never go to Claude). No dice.
+ */
+export function ambientAvailable(): boolean {
+    return ambientSetting && modelAvailable() && present.local;
+}
+// ---- end of I model's block ----
 
 let channel: ((msg: ModelRequestMessage) => void) | null = null;
 
@@ -102,7 +126,7 @@ export function noteCandidate(req: SituationRequest): void {
 export const MODEL_DEADLINE_TICKS = 20;
 /** native gives up after this long and answers null ('timeout'): before the engine's own deadline */
 export const NATIVE_TIMEOUT_MS = 9000;
-/** requests in flight in the world at most; more fall back at once ('busy') */
+/** requests in flight in the world at most; more fall back at once ('busy'). (Bots ideas, round 4 fixes) Replies to the human: a line of the bots' own talk in flight is not counted */
 export const MAX_IN_FLIGHT = 3;
 /**
  * (2026-10-26) a line the guard refuses, or an empty one, is asked for once more when this many ticks are left before the
@@ -203,6 +227,16 @@ export interface ModelLogEntry {
     saidAt?: number;
     /** the tick the answer was handled */
     replyAt?: number;
+    // ---- (bots ideas, round 4: I model) a line of the bots' own talk (port/BotModelAmbient; LM1-LM8) ----
+    /** a line of the bots' own talk: its numbers are modelStats.ambient's, not the replies' */
+    ambient?: true;
+    /** (ambient) the tick the rules' line was due (its rules' timing: LM8) */
+    rulesDue?: number;
+    /** (ambient) the rules' line ends with a counter-question (LM5) */
+    counter?: boolean;
+    /** (ambient) the tick it was settled: answered, or fallen back (LM4) */
+    settledAt?: number;
+    // ---- end of I model's block ----
 }
 
 /** What a model is asked for: port/BotChat's reply, decided, with what to do with the answer. */
@@ -226,6 +260,13 @@ export interface ModelAsk {
     use(text: string, entry: ModelLogEntry): void;
     /** no model line: say the rules' line, or nothing; what it says (null: nothing) */
     fallback(reason: ModelFallback, entry: ModelLogEntry): string | null;
+    // ---- (bots ideas, round 4: I model) ----
+    /**
+     * a line of the bots' own talk (port/BotModelAmbient): the on-device model ('local', whatever the mode), native's
+     * timeout `timeoutMs`, no retry, the guard's ambient checks; `rulesDue` and `counter` for the log
+     */
+    ambient?: { rulesDue: number; counter: boolean; timeoutMs: number };
+    // ---- end of I model's block ----
 }
 
 interface Pending {
@@ -263,8 +304,35 @@ export const modelStats = {
     /** lines the rules left unanswered: sent to the model, said in its words, by the way they came */
     candidates: { eligible: 0, requests: 0, used: 0, byVia: {} as Record<string, number> },
     /** every reply's story, oldest first (the first LOG_MAX) */
-    log: [] as ModelLogEntry[]
+    log: [] as ModelLogEntry[],
+    // ---- (bots ideas, round 4: I model) the bots' own talk's numbers, apart (LM1-LM8): their stories are in `log`, marked ----
+    ambient: emptyAmbientStats()
+    // ---- end of I model's block ----
 };
+
+// ---- (bots ideas, round 4: I model) ----
+/** the bots' own talk's numbers (port/BotModelAmbient): as the replies' (eligible ... latency), and the lines that stayed the rules' by why */
+export interface AmbientStats {
+    eligible: number;
+    requests: number;
+    used: number;
+    fallbacks: Record<string, number>;
+    errors: Record<string, number>;
+    guard: Record<string, number>;
+    latency: number[];
+    /** lines the model could have worded but did not ask for (near no human, a request in flight, the 20 s pace), by why */
+    skipped: Record<string, number>;
+}
+
+function emptyAmbientStats(): AmbientStats {
+    return { eligible: 0, requests: 0, used: 0, fallbacks: {}, errors: {}, guard: {}, latency: [], skipped: {} };
+}
+
+/** the numbers an ask counts in: the bots' own talk's, or the replies' */
+function statsOf(ask: ModelAsk): AmbientStats | typeof modelStats {
+    return ask.ambient ? modelStats.ambient : modelStats;
+}
+// ---- end of I model's block ----
 /** the log and the latencies keep this many (a sim's run has a few hundred; the app's log stops growing there) */
 const LOG_MAX = 5000;
 
@@ -287,12 +355,14 @@ export function setModelOutcomeLog(fn: ((line: string) => void) | null): void {
  * (2026-10-27) No words: neither the human's line nor the bot's reply goes to the log (privacy).
  */
 function logOutcome(entry: ModelLogEntry, said: string | null): void {
+    if (entry.ambient) entry.settledAt = World.currentTick; // (bots ideas, round 4: I model: LM4)
     if (!outcomeLog) return;
     const how = entry.outcome === 'used' ? `said in ${(entry.replyAt ?? World.currentTick) - entry.t} ticks` : `${entry.outcome}${entry.reason ? ` (${entry.reason})` : ''}`;
     const retried = entry.retried ? `, asked again after ${entry.retried}` : '';
     const instead = entry.outcome === 'used' ? '' : said === null ? ' → nothing' : " → the rules' line";
+    // (bots ideas, round 4: I model: the bots' own talk marked "(ambient)", for the phone log's counts; no words either)
     try {
-        outcomeLog(`[bots] model #${entry.id} ${toDisplayName(entry.bot)} ${entry.via}${entry.candidate ? ' (not understood)' : ''}: ${how}${retried}${instead}`);
+        outcomeLog(`[bots] model #${entry.id} ${toDisplayName(entry.bot)} ${entry.via}${entry.ambient ? ' (ambient)' : ''}${entry.candidate ? ' (not understood)' : ''}: ${how}${retried}${instead}`);
     } catch {
         // (a log line never stops a reply)
     }
@@ -315,24 +385,32 @@ export function modelRequestsInFlight(): number {
  */
 export function askModel(ask: ModelAsk): void {
     const entry: ModelLogEntry = { id: 0, t: World.currentTick, bot: ask.bot.username, via: ask.via, intent: ask.intent, candidate: ask.candidate, heard: ask.heard, ruleText: ask.ruleText, outcome: 'pending' };
+    // (bots ideas, round 4: I model: a line of the bots' own talk, marked, counted apart)
+    if (ask.ambient) Object.assign(entry, { ambient: true, rulesDue: ask.ambient.rulesDue, counter: ask.ambient.counter });
+    const counts = statsOf(ask);
     if (modelStats.log.length < LOG_MAX) modelStats.log.push(entry);
-    modelStats.eligible++;
+    counts.eligible++;
     if (ask.candidate) {
         modelStats.candidates.eligible++;
         bump(modelStats.candidates.byVia, ask.via);
     }
     supersedeModelReply(ask.bot);
-    if (!modelAvailable()) return fallBack(ask, entry, 'unavailable');
+    if (!(ask.ambient ? ambientAvailable() : modelAvailable())) return fallBack(ask, entry, 'unavailable');
     if (!channel) return fallBack(ask, entry, 'channel');
-    if (inFlight.size >= MAX_IN_FLIGHT) return fallBack(ask, entry, 'busy');
+    // (bots ideas, round 4 fixes, M3: the replies' cap counts the replies; a line of the bots' own talk in flight never
+    // makes one 'busy')
+    if (inFlightFor(ask) >= MAX_IN_FLIGHT) return fallBack(ask, entry, 'busy');
     const id = ++nextId;
     entry.id = id;
     const p: Pending = { id, ask, entry, sentAt: World.currentTick };
     inFlight.set(id, p);
     byBot.set(ask.bot, p);
-    modelStats.requests++;
+    counts.requests++;
     if (ask.candidate) modelStats.candidates.requests++;
-    const msg: ModelRequestMessage = { type: 'bots-lm', id, mode: mode === 'online' && present.online ? 'online' : 'local', local: ask.local, online: ask.online, maxChars: MAX_LINE, timeoutMs: NATIVE_TIMEOUT_MS };
+    // (bots ideas, round 4: I model: the bots' own talk always to the on-device model, marked; the page sends think false)
+    const msg: ModelRequestMessage = ask.ambient
+        ? { type: 'bots-lm', id, mode: 'local', ambient: true, local: ask.local, online: ask.online, maxChars: MAX_LINE, timeoutMs: ask.ambient.timeoutMs }
+        : { type: 'bots-lm', id, mode: mode === 'online' && present.online ? 'online' : 'local', local: ask.local, online: ask.online, maxChars: MAX_LINE, timeoutMs: NATIVE_TIMEOUT_MS };
     try {
         channel(msg);
     } catch (err) {
@@ -352,6 +430,30 @@ export function supersedeModelReply(bot: Player): void {
     if (p) settle(p, 'superseded');
 }
 
+// ---- (bots ideas, round 4 fixes) ----
+/**
+ * (M5) A line of the bot's to a human (port/BotChat.sayTyped: the vendor's answer, "sry was afk", ...): a line of its own
+ * talk it still waits for falls back (superseded: the rules' line at its rules' time, the keyboard given back), so the
+ * line to the human starts from the rules' time, not the model's deadline. Nothing else: no reply to the human is given
+ * up, and with no line of its own talk waiting nothing is done (no dice).
+ */
+export function supersedeAmbient(bot: Player): void {
+    const p = byBot.get(bot);
+    if (p?.ask.ambient) settle(p, 'superseded');
+}
+
+/**
+ * (M3) The requests in flight that count toward an ask's MAX_IN_FLIGHT: for a reply, the replies' (a line of the bots' own
+ * talk, one at most, apart); for a line of the bots' own talk, all (it is asked only with none in flight).
+ */
+function inFlightFor(ask: ModelAsk): number {
+    if (ask.ambient) return inFlight.size;
+    let n = 0;
+    for (const p of inFlight.values()) if (!p.ask.ambient) n++;
+    return n;
+}
+// ---- end of round 4 fixes' block ----
+
 function remove(p: Pending): void {
     inFlight.delete(p.id);
     if (byBot.get(p.ask.bot) === p) byBot.delete(p.ask.bot);
@@ -364,7 +466,7 @@ function settle(p: Pending, reason: ModelFallback): void {
 }
 
 function fallBack(ask: ModelAsk, entry: ModelLogEntry, reason: ModelFallback): void {
-    bump(modelStats.fallbacks, reason);
+    bump(statsOf(ask).fallbacks, reason);
     entry.outcome = reason;
     let said: string | null = null;
     try {
@@ -381,7 +483,8 @@ function fallBack(ask: ModelAsk, entry: ModelLogEntry, reason: ModelFallback): v
  */
 function retry(p: Pending, why: string): boolean {
     const left = p.ask.deadline - World.currentTick;
-    if (p.entry.retried !== undefined || left < RETRY_MIN_TICKS || !channel || !modelAvailable()) return false;
+    // (bots ideas, round 4: I model: none for the bots' own talk: its fallback is the rules' own line, at its time)
+    if (p.ask.ambient || p.entry.retried !== undefined || left < RETRY_MIN_TICKS || !channel || !modelAvailable()) return false;
     p.entry.retried = why;
     modelStats.retries++;
     inFlight.delete(p.id);
@@ -413,7 +516,8 @@ function handleReply(msg: ModelReplyMessage): void {
         return;
     }
     const now = World.currentTick;
-    if (modelStats.latency.length < LOG_MAX) modelStats.latency.push(now - p.sentAt);
+    const counts = statsOf(p.ask); // (bots ideas, round 4: I model: the bots' own talk's apart)
+    if (counts.latency.length < LOG_MAX) counts.latency.push(now - p.sentAt);
     p.entry.replyAt = now;
     p.entry.raw = typeof msg.text === 'string' ? msg.text : null;
     // (2026-10-26: an empty line, as native words it or as it came, is asked for once more)
@@ -422,15 +526,15 @@ function handleReply(msg: ModelReplyMessage): void {
     if (typeof msg.text !== 'string' || msg.text.trim() === '') {
         remove(p);
         const error = typeof msg.error === 'string' && msg.error ? msg.error : 'failed';
-        bump(modelStats.errors, error);
+        bump(counts.errors, error);
         p.entry.reason = error;
         // (native's own words: its timeout, its queue full, no backend; anything else, 'refused' and 'failed: ...', an error.
         // Native's 'timeout' (9 s) comes before the engine's deadline: its rules' line is typed, not said at once)
         return fallBack(p.ask, p.entry, error === 'timeout' || error === 'busy' || error === 'unavailable' ? error : 'error');
     }
-    const g = guardReply(msg.text, p.ask.situation, { keepName: p.ask.keepName, names: onlineNames() });
+    const g = guardReply(msg.text, p.ask.situation, { keepName: p.ask.keepName, names: onlineNames(), ...(p.ask.ambient ? { ambient: true } : {}) });
     if (!g.ok) {
-        bump(modelStats.guard, g.reason ?? 'unknown');
+        bump(counts.guard, g.reason ?? 'unknown');
         p.entry.reason = g.reason;
         // (2026-10-26: a refused line is asked for once more; a second sample usually passes)
         if (retry(p, g.reason ?? 'guard')) return;
@@ -438,7 +542,7 @@ function handleReply(msg: ModelReplyMessage): void {
         return fallBack(p.ask, p.entry, 'guard');
     }
     remove(p);
-    modelStats.used++;
+    counts.used++;
     if (p.ask.candidate) modelStats.candidates.used++;
     p.entry.outcome = 'used';
     try {
@@ -468,9 +572,13 @@ export interface StubOptions {
     failRate?: number;
     /** the share of answers that are a planted bad line the guard must catch (the default stub's: 0.04) */
     plantRate?: number;
+    // ---- (bots ideas, round 4: I model) ----
+    /** Settings › Bot chat › Bots' own talk as Model (default false: the bots' own talk stays the rules') */
+    ambient?: boolean;
+    // ---- end of I model's block ----
 }
 
-let stub: { model: StubModel; latency: number; failRate: number; plantRate: number; planted: number } | null = null;
+let stub: { model: StubModel; latency: number; failRate: number; plantRate: number; planted: number; late: number } | null = null;
 
 /**
  * (tests and sims) A deterministic model: `'stub'` (replies from the situation: the hint's facts in a 2004 way, or a
@@ -487,9 +595,10 @@ export function setModelForTest(model: StubModel | 'stub' | null, opts: StubOpti
         latency: Math.max(1, Math.round(opts.latencyTicks ?? 2)),
         failRate: Math.max(0, Math.min(1, opts.failRate ?? 0)),
         plantRate: Math.max(0, Math.min(1, opts.plantRate ?? (model === 'stub' ? 0.04 : 0))),
-        planted: 0
+        planted: 0,
+        late: 0
     };
-    setModelMode({ mode: 'local', local: true, online: false });
+    setModelMode({ mode: 'local', local: true, online: false, ambient: opts.ambient === true });
     setModelChannel(msg => {
         const st = stub;
         const p = inFlight.get(msg.id);
@@ -526,6 +635,7 @@ function hash(text: string): number {
 
 /** the default stub's words: the hint's facts in a 2004 way, or a shrug, its place or its activity; the human's name now and then */
 function stubReply(s: Situation, msg: ModelRequestMessage): string {
+    if (msg.ambient) return stubAmbient(s, msg); // (bots ideas, round 4: I model)
     const h = hash(`${msg.id}|${s.heard.text}|${s.bot.name}`);
     let line: string;
     if (s.hint && s.hint.text) {
@@ -542,15 +652,32 @@ function stubReply(s: Situation, msg: ModelRequestMessage): string {
     return line;
 }
 
+// ---- (bots ideas, round 4: I model) ----
+/**
+ * the default stub's words for a line of the bots' own talk: the rules' line in a 2004 way, its counter-question kept at
+ * the end ("ya 41 u?", "lol 41 u?"; a line without one may get a "lol" or a smiley after it), no name
+ */
+function stubAmbient(s: Situation, msg: ModelRequestMessage): string {
+    const h = hash(`${msg.id}|${s.heard.text}|${s.bot.name}|ambient`);
+    const base = (s.hint?.text ?? 'lol').toLowerCase();
+    const forms = AMBIENT_COUNTER_RX.test(base) ? [base, `ya ${base}`, `lol ${base}`, base] : [base, `ya ${base}`, `${base} lol`, `lol ${base}`, `${base} :)`, base];
+    return forms[h % forms.length];
+}
+// ---- end of I model's block ----
+
+/** (bots ideas, Track B) the planted anachronisms, in turn: two of the late terms and the old one */
+const PLANTED_LATE = ['nice whip lol', 'just check the wiki lol', 'doing pest control'];
+
 /** places a planted line may claim (one the bot is not at) */
 const ELSEWHERE = ['yanille', 'entrana', 'shilo village', 'burthorpe'];
 
 /** the next planted bad line that fits the situation: [the reason the guard should give, the line], or null */
-function plantedLine(s: Situation, st: { planted: number }): [string, string] | null {
+function plantedLine(s: Situation, st: { planted: number; late: number }): [string, string] | null {
     const numbers = new Set<number>((`${s.hint?.text ?? ''} ${s.heard.text}`.match(/\d+/g) ?? []).map(Number));
     const kinds: [string, () => string | null][] = [
         ['assistant', () => "Certainly! I'd be happy to help you with that."],
-        ['anachronism', () => 'just check the wiki lol'],
+        // (bots ideas, Track B: the late terms in turn with the old one, so MD3 sees them caught)
+        ['anachronism', () => PLANTED_LATE[st.late++ % PLANTED_LATE.length]],
         ['confession', () => 'lol im a bot'],
         ['promise', () => 'sure ill give u 5k'],
         ['effect', () => 'brb'],
@@ -615,6 +742,7 @@ export function resetModelForTest(): void {
     mode = 'rules';
     present.local = false;
     present.online = false;
+    ambientSetting = false; // (bots ideas, round 4: I model)
     channel = null;
     stub = null;
     inFlight.clear();
@@ -631,4 +759,5 @@ export function resetModelForTest(): void {
     modelStats.latency = [];
     modelStats.candidates = { eligible: 0, requests: 0, used: 0, byVia: {} };
     modelStats.log = [];
+    modelStats.ambient = emptyAmbientStats(); // (bots ideas, round 4: I model)
 }

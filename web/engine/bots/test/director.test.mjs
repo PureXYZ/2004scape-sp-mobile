@@ -28,6 +28,12 @@ const args = Object.fromEntries(
         return m ? [m[1], m[2] ?? 'true'] : [a, 'true'];
     })
 );
+// (2026-10-30, bots ideas round 1: the default 5 -> 7 with track B, back to 5 with its fixes (B8). The director drew a
+// kind over the registry in its modules' load order, and the loot track's imports loaded the Duel Arena's piece before
+// the fake drop party's: the same dice, another sample (at 5 the Seers' Party Room 17 % of 200 hours' pieces, over its
+// 1.6 × 10 %). The registry is by kind now (port/BotSetPieces registeredSetPieces), whatever loads first. Seeds 1-10
+// with it: 1-3, 5 and 7-9 pass; 6 and 10 fail as before track B ("...and it comes then"), 4 the share (the fake drop
+// party 4 % of the sample, under its 0.5 × 10 %))
 const SEED = Number(args.seed ?? 5);
 const out = (s = '') => process.stdout.write(s + '\n');
 function mulberry(seed) {
@@ -340,7 +346,8 @@ for (const k of KINDS) SetPieces.register(stub(k));
     check('a piece forced early starts (the runner\'s --director-first) and ends', !!rec && rec.end > rec.start && rec.outcome === 'done', rec ? `${rec.kind}@${rec.venue} ${rec.start}-${rec.end} ${rec.outcome}` : 'none');
     check('its recruits came from freeBots: no sub-task, no part, within 60 tiles; never a newbie, a vendor or a PKer', !!freeBefore && freeBefore.every(f => f.sub === false && f.role === null && f.d <= 60 && !f.newbie && !['extras_vendor', 'extras_pker', 'extras_edgeville_pker'].includes(f.planner)), freeBefore);
     check('each had its part during it (a role, its sub-task), noted by the director', !!during && during.every(d => d.role === 'guest' && d.sub === true) && rec?.recruits.length === recruitsAtStart.length, { during, noted: rec?.recruits.length });
-    const after = recruitsAtStart.map(p => ({ role: SetPieces.eventRoleOf(p), sub: sim.botPlayer(p)?.hasSubTask() ?? null }));
+    // (the piece's own sub-task, the Gather: 1200 ticks on, a recruit back at its doings may have begun a hang-out of its own)
+    const after = recruitsAtStart.map(p => ({ role: SetPieces.eventRoleOf(p), sub: sim.botPlayer(p)?.subTask instanceof Gather, own: sim.botPlayer(p)?.subTask?.name ?? null }));
     check('after its end: no part, the sub-task gone', after.every(a => a.role === null && a.sub === false), after);
     const looked = rec?.recruits.filter(r => r.back !== undefined && r.back !== null) ?? [];
     const back = looked.filter(r => r.back === true).length;

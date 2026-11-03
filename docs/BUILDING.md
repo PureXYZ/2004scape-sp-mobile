@@ -303,6 +303,7 @@ same phone. The soaks:
 | `startup`, `startup-500` | 0, 500 | 5 clean launches, no phases: each launch's start-up marks |
 | `startup-memory` | 0 | 3 launches, each recorded with Instruments from before it starts (the boot's peak footprint) |
 | `smoke` | 0 (`--bots N`) | a short run of every kind of phase, to check the harness |
+| `lm-ambient-500`, `lm-ambient-1000` | 500, 1000 | (bots ideas, round 4) the heat test of Bots' own talk: Varrock West, a 5-minute baseline (Rules), then Model with the player's reply every 30 s (Think first): 45 min at 500 (then 30 min at the cap: a reply every 12 s, no note), 30 min at 1000; Settings › Bot chat set by the phase's `settings` and set back at the end ((round 4 fixes) also when the page comes back after a reload mid-phase: the values before are kept in sessionStorage); the pass bars in the files' `notes` |
 
 What a phase measures:
 - **from inside the page** (`web/test/autotest.js`): the client's frames (rate, interval p50/p95/p99/max, frames over

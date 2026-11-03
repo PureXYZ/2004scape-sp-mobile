@@ -15,7 +15,7 @@ export { personaOf } from '#/engine/bot/port/BotPersona.js';
 export { chatDice, isQuestionText, BOT_CHAT_LINES, gzChanceForTest, answerFor } from '#/engine/bot/port/BotChat.js';
 export { setHabitRatesForTest } from '#/engine/bot/port/BotHabits.js';
 export { setHangoutRateForTest } from '#/engine/bot/port/BotHangout.js';
-export { setDirectorForTest } from '#/engine/bot/port/BotDirector.js';
+export { setDirectorForTest, resetDirectorForTest } from '#/engine/bot/port/BotDirector.js';
 export { default as WordEnc } from '#/cache/wordenc/WordEnc.js';
 export { default as ObjType } from '#/cache/config/ObjType.js';
 export { PlayerStat } from '#/engine/entity/PlayerStat.js';

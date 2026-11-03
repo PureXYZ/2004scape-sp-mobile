@@ -9,7 +9,13 @@
 //   `fallback: false` (the page's Test button) gets Claude's answer or its error, never the on-device model's.
 // - `think` (Settings › Bot chat › Think first; absent: false): the on-device model writes its short note before the reply,
 //   when it is a model that offers the choice ([ThinkSupport]); also on Claude's fallback to it. Claude online ignores it.
-// - At most 3 requests at a time; more are answered 'busy' at once. Each has the page's `timeoutMs` (9 s) in all.
+// - At most 3 requests at a time; more are answered 'busy' at once. Each has the page's `timeoutMs` (9 s) in all. (Bots
+//   ideas, round 4 fixes) A line of the bots' own talk is not counted toward the replies' 3 (`ambientInFlight`).
+// - (bots ideas, round 4: I model) `ambient: true` (Settings › Bot chat › Bots' own talk: a line of the bots' talk near the
+//   player, the engine's port/BotModelAmbient): always the on-device model, never the note, and refused at once ('hot' at
+//   thermal FAIR or above, where a reply's gate is SERIOUS; 'unavailable' while the model rests for memory; 'busy' while a
+//   reply to the player waits or runs on the model). It may load the model. The model's queue serves the replies first
+//   ([LocalModel.generate]'s `ambient`); (round 4 fixes) one running when a reply comes is stopped and answered 'busy'.
 // - Memory: after a memory warning (onTrimMemory), the system low on memory, or a load refused for memory, the on-device
 //   model rests ([MEMORY_REST_MS], 10 min, then until the system is not low on memory): requests get 'unavailable' at
 //   once and the status says `local.rest: 'memory'`, so the page tells the engine there is no on-device model meanwhile,
@@ -71,6 +77,18 @@ class BotChatModel(
 
     private val tooHot: Boolean get() = thermal.level() >= ThermalLevel.SERIOUS
 
+    // (bots ideas, round 4: I model)
+    /** The phone is warm for the bots' own talk (thermal FAIR or above): the heat's headroom stays the player's replies'. */
+    private val warmForAmbient: Boolean get() = thermal.level() >= ThermalLevel.FAIR
+
+    /** Why a line of the bots' own talk is not written now (the page's error, and the log's words), or null. */
+    private fun ambientRefusal(): Pair<String, String>? = when {
+        warmForAmbient -> "hot" to thermal.describe()
+        restingUntilMs != null -> "unavailable" to "the model rests for memory"
+        local.queuedReplies > 0 -> "busy" to "a reply to the player is on the model"
+        else -> null
+    }
+
     /** The clock of the rest, monotonic ms (a test's stand-in). */
     var nowMs: () -> Long = { System.nanoTime() / 1_000_000 }
 
@@ -93,6 +111,9 @@ class BotChatModel(
 
     private var inFlight = 0
 
+    /** (bots ideas, round 4 fixes) of them, lines of the bots' own talk: not counted toward the replies' [MAX_IN_FLIGHT] */
+    private var ambientInFlight = 0
+
     /** bumped when the page goes away ([pageReset]): a reply asked by an older page is dropped */
     private var generation = 0
 
@@ -108,6 +129,9 @@ class BotChatModel(
         var busy = 0
         var hot = 0
         var memory = 0
+        var ambient = 0
+        var ambientRefused = 0
+        var ambientStopped = 0
     }
 
     private val stats = Stats()
@@ -273,11 +297,13 @@ class BotChatModel(
         }
         val started = System.nanoTime()
         val gen = generation
-        val mode = message["mode"] as? String ?: "local"
+        // (bots ideas, round 4: I model: the bots' own talk, the on-device model's alone and never with the note)
+        val ambient = SwiftCast.bool(message["ambient"]) ?: false
+        val mode = if (ambient) "local" else message["mode"] as? String ?: "local"
         val localPrompt = SwiftCast.map(message["local"]) ?: emptyMap()
         val onlinePrompt = SwiftCast.map(message["online"]) ?: emptyMap()
         val fallback = SwiftCast.bool(message["fallback"]) ?: true
-        val think = SwiftCast.bool(message["think"]) ?: false  // (the on-device model's note: Settings › Bot chat › Think first)
+        val think = !ambient && (SwiftCast.bool(message["think"]) ?: false)  // (the on-device model's note: Settings › Bot chat › Think first)
         val timeoutMs = min(30_000, max(1000, SwiftCast.intValue(message["timeoutMs"]) ?: DEFAULT_TIMEOUT_MS))
         val deadline = started + timeoutMs * 1_000_000L
         stats.requests += 1
@@ -299,22 +325,41 @@ class BotChatModel(
             reply(null, null, "unavailable")  // ('rules': the page answers those itself)
             return
         }
-        if (inFlight >= MAX_IN_FLIGHT) {
+        // (bots ideas, round 4 fixes: a reply's cap counts the replies; a line of the bots' own talk, all, as before)
+        if ((if (ambient) inFlight else inFlight - ambientInFlight) >= MAX_IN_FLIGHT) {
             stats.busy += 1
             reply(null, null, "busy")
             return
         }
+        // (bots ideas, round 4: I model) the bots' own talk: refused when warm, while resting, behind a reply
+        if (ambient) {
+            stats.ambient += 1
+            val refusal = ambientRefusal()
+            if (refusal != null) {
+                stats.ambientRefused += 1
+                log.info("lm", "#$id ambient refused (${refusal.second}): ${refusal.first}")
+                reply(null, null, refusal.first)
+                return
+            }
+        }
         inFlight += 1
+        if (ambient) ambientInFlight += 1
+
+        /** the request answered (or given up): out of the counts (bots ideas, round 4 fixes: the bots' own talk's too) */
+        fun finished() {
+            inFlight -= 1
+            if (ambient) ambientInFlight -= 1
+        }
 
         val runLocal: (String?) -> Unit = runLocal@{ onlineError ->
             if (!(fallback || mode == "local") || !local.available) {
-                inFlight -= 1
+                finished()
                 stats.failed += 1
                 reply(null, null, onlineError ?: "unavailable")
                 return@runLocal
             }
             if (tooHot) {
-                inFlight -= 1
+                finished()
                 stats.hot += 1
                 log.info("lm", "#$id the phone is hot (${thermal.describe()}): no on-device reply")
                 reply(null, null, onlineError ?: "busy")
@@ -322,14 +367,14 @@ class BotChatModel(
             }
             val refusal = memoryRefusal()
             if (refusal != null) {
-                inFlight -= 1
+                finished()
                 stats.memory += 1
                 log.info("lm", "#$id the phone is short of memory ($refusal): no on-device reply")
                 reply(null, null, onlineError ?: "unavailable")
                 return@runLocal
             }
-            local.generate(localPrompt["system"] as? String ?: "", localPrompt["user"] as? String ?: "", think, deadline) { result ->
-                inFlight -= 1
+            local.generate(localPrompt["system"] as? String ?: "", localPrompt["user"] as? String ?: "", think, deadline, ambient) { result ->
+                finished()
                 val output = result.getOrNull()
                 if (output != null) {
                     stats.local += 1
@@ -338,16 +383,21 @@ class BotChatModel(
                     val asked = if (t.think != think) " (asked ${if (think) "on" else "off"})" else ""
                     val load = t.loadMs?.let { " (load ${it.toInt()} ms)" } ?: ""
                     val note = if (t.think) ", note ${t.noteTokens} tokens in ${t.noteMs.toInt()} ms" else ""
-                    log.info("lm", "#$id local, think ${if (t.think) "on" else "off"}$asked, in ${t.totalMs.toInt()} ms$load: " +
+                    log.info("lm", "#$id local${if (ambient) " (ambient)" else ""}, think ${if (t.think) "on" else "off"}$asked, in ${t.totalMs.toInt()} ms$load: " +
                         "prompt ${t.promptTokens} tokens at ${t.promptTokensPerSecond.toInt()}/s$note, ${t.generatedTokens} tokens at ${t.generateTokensPerSecond.toInt()}/s")
                     val empty = output.text.isEmpty()
                     reply(if (empty) null else output.text, if (empty) null else "local", if (empty) "failed: empty" else null,
                         mapOf("timings" to t.dictionary))
+                } else if (result.exceptionOrNull() is LocalModel.Failure.Preempted) {
+                    // (bots ideas, round 4 fixes: a line of the bots' own talk stopped for a reply to the player)
+                    stats.ambientStopped += 1
+                    log.info("lm", "#$id local (ambient): stopped for a reply to the player: busy")
+                    reply(null, null, LocalModel.Failure.Preempted.description)
                 } else {
                     val failure = result.exceptionOrNull() as? LocalModel.Failure ?: LocalModel.Failure.Failed(result.exceptionOrNull().toString())
                     stats.failed += 1
                     val after = onlineError?.let { " (after Claude: $it)" } ?: ""
-                    log.info("lm", "#$id local, think ${if (local.thinkSupport.writesNote(think)) "on" else "off"}, failed: ${failure.description}$after")
+                    log.info("lm", "#$id local${if (ambient) " (ambient)" else ""}, think ${if (local.thinkSupport.writesNote(think)) "on" else "off"}, failed: ${failure.description}$after")
                     if (failure is LocalModel.Failure.Unavailable && failure.why == "memory") rest("not loaded: too little free memory")
                     reply(null, null, failure.description)  // (the last try's reason; Claude's is in the status)
                 }
@@ -357,7 +407,7 @@ class BotChatModel(
         val key = if (mode == "online") readKey() else null
         if (key == null) {
             if (mode == "online" && !fallback) {
-                inFlight -= 1
+                finished()
                 reply(null, null, "unavailable")
                 return
             }
@@ -367,7 +417,7 @@ class BotChatModel(
         // (signed: the key's read on this thread may have run past the deadline)
         val remaining = (deadline - System.nanoTime()) / 1e9
         if (remaining <= 0.5) {
-            inFlight -= 1
+            finished()
             reply(null, null, "timeout")
             return
         }
@@ -375,7 +425,7 @@ class BotChatModel(
             onlinePrompt["user"] as? String ?: "", min(8.0, remaining)) { result ->
             val output = result.getOrNull()
             if (output != null) {
-                inFlight -= 1
+                finished()
                 stats.online += 1
                 val u = output.usage
                 log.info("lm", "#$id Claude in ${output.ms.toInt()} ms (input ${u.input}, cache read ${u.cacheRead}, write ${u.cacheWrite}, output ${u.output} tokens)")
@@ -398,7 +448,7 @@ class BotChatModel(
                 if (fallback) {
                     runLocal(failure.reason)
                 } else {
-                    inFlight -= 1
+                    finished()
                     stats.failed += 1
                     reply(null, null, failure.reason)
                 }
@@ -410,7 +460,8 @@ class BotChatModel(
     val counters: Map<String, Any?>
         get() = linkedMapOf(
             "requests" to stats.requests, "local" to stats.local, "online" to stats.online, "failed" to stats.failed,
-            "busy" to stats.busy, "hot" to stats.hot, "memory" to stats.memory, "inFlight" to inFlight,
+            "busy" to stats.busy, "hot" to stats.hot, "memory" to stats.memory, "ambient" to stats.ambient, "ambientRefused" to stats.ambientRefused,
+            "ambientStopped" to stats.ambientStopped, "inFlight" to inFlight,
         )
 }
 

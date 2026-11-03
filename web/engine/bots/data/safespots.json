@@ -1,0 +1,15 @@
+{
+    "about": "Safespot tiles (bots ideas round 1, track B: A7): where 2004's rangers and mages stood to shoot monsters that could not reach them. Each tile with the spawn of the monster it is safe from, found in the real 274 world by a sweep (a probe's --sweep, then --strict): every walkable tile of the Edgeville dungeon's hill giant room within 9 of a giant's spawn, the giant started from every tile of its wander (spawn ± 3) from which the tile shoots it, every giant home before each trial; safe when a ranger on it shot the giant 80 ticks, the giant kept alive and chasing it, and was never moved off it nor hit. Of 1,821 tile-and-giant pairs 3 held (the research hoped for 8: 274's giants walk round most of the room's corners); port/BotSafespots stops a shot whose giant has left its sight, and walks a ranger back that the engine's approach stepped a tile or two off at its first shot (from some of the giant's places it does); test/loot.test.mjs checks that the ranger holds its tile and is not hit. One bot a tile; a ranger there shoots only its tile's giant.",
+    "spots": [
+        {
+            "key": "edgeville-hill-giants",
+            "level": 0,
+            "centre": [3112, 9840],
+            "tiles": [
+                { "at": [3103, 9825], "giants": [[3106, 9827]] },
+                { "at": [3115, 9829], "giants": [[3117, 9835]] },
+                { "at": [3121, 9839], "giants": [[3122, 9844]] }
+            ]
+        }
+    ]
+}

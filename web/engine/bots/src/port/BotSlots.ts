@@ -66,7 +66,10 @@ export const SLOT_PLACES: readonly SlotPlace[] = [
     { say: 'ardy', x: 2662, z: 3305, r: 40, members: true },
     { say: 'yanille', x: 2560, z: 3090, r: 25, members: true },
     { say: 'camelot', x: 2757, z: 3500, r: 18, members: true },
-    { say: 'taverley', x: 2900, z: 3440, r: 18, members: true }
+    { say: 'taverley', x: 2900, z: 3440, r: 18, members: true },
+    // ---- (bots ideas, round 3: G buzz) the update's town ("in rellekka atm", "heading to rellekka") ----
+    { say: 'rellekka', x: 2660, z: 3670, r: 25, members: true }
+    // ---- end of G buzz's place ----
 ];
 /** a {dest} is said within this many reaches of it (and not inside it) */
 const DEST_REACH = 1.6;

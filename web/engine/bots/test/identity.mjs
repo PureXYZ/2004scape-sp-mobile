@@ -15,6 +15,9 @@
 // --base: a git ref (default HEAD: the working tree against its last commit) or a library folder (src, with data beside
 // it, as LC_BOTS_SRC takes). --worlds: all (default) is 1000 bots × 300 ticks at Lumbridge, 500 × 1000 at Varrock West,
 // 250 × 600 at Edgeville and 500 × 300 at Lumbridge castle (most of an hour, a few GB of memory); quick is 100 × 300.
+// --on=period,movement (the bots ideas work, round 3): test/lib/simworld's switches set true in both worlds (a staged
+// world has themes C, D, G and H and the outings off unless asked for: lives, word, period, movement, outings), so a
+// theme's foundation proves itself neutral with its theme on too (a library without the theme ignores its switch).
 import { spawnSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -43,6 +46,15 @@ const worlds = (WORLDS[args.worlds ?? 'all'] ?? args.worlds).split(';').map(w =>
     const [bots, ticks, seed, at] = w.split(':');
     return { bots: Number(bots), ticks: Number(ticks), seed: Number(seed), at: at.split(',').map(Number) };
 });
+const SWITCHES = ['lives', 'word', 'period', 'movement', 'outings'];
+const on = args.on && args.on !== 'true' ? String(args.on).split(',').filter(Boolean) : [];
+for (const k of on) {
+    if (!SWITCHES.includes(k)) {
+        out(`identity: --on takes ${SWITCHES.join(', ')} (got ${k})`);
+        process.exit(2);
+    }
+}
+for (const w of worlds) w.on = on;
 
 // ---- the other library ----
 let base = args.base ?? 'HEAD';
@@ -60,7 +72,7 @@ if (!fs.existsSync(base)) {
 } else {
     base = path.resolve(base);
 }
-out(`identity: ${BOTS_SRC} against ${args.base ?? 'HEAD'}${extracted ? ` (${base})` : ''}`);
+out(`identity: ${BOTS_SRC} against ${args.base ?? 'HEAD'}${extracted ? ` (${base})` : ''}${on.length ? `, with ${on.join(', ')} on` : ''}`);
 
 let failed = 0;
 for (const w of worlds) {
@@ -87,7 +99,7 @@ for (const w of worlds) {
 process.exit(failed ? 1 : 0);
 
 // ---- one world with the library in LC_BOTS_SRC ----
-async function child({ bots: N, ticks: TICKS, seed, at }) {
+async function child({ bots: N, ticks: TICKS, seed, at, on = [] }) {
     let draws = 0;
     {
         let s = seed >>> 0 || 1;
@@ -115,7 +127,7 @@ async function child({ bots: N, ticks: TICKS, seed, at }) {
     const epoch = 1_760_000_000_000;
     Date.now = () => epoch + World.currentTick * 600;
 
-    const sim = await lib.Sim.create({ bots: N, members: true, debug: false, ageNewBots: true, ackLogouts: true, extra: { timing: {} } });
+    const sim = await lib.Sim.create({ bots: N, members: true, debug: false, ageNewBots: true, ackLogouts: true, extra: { timing: {} }, ...Object.fromEntries(on.map(k => [k, true])) });
     const bytes = crypto.createHash('sha256');
     let humanBytes = 0;
     const send = sim.socket.send.bind(sim.socket);

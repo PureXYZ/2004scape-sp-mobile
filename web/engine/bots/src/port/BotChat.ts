@@ -110,13 +110,23 @@ import { botConsole } from '#/engine/bot/port/BotLog.js';
 import { isRude } from '#/engine/bot/port/BotPersona.js';
 import { noteRudeReply, rudeReply, RUDE_LINES } from '#/engine/bot/port/BotRude.js';
 import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
-import { askModel, CANDIDATE_CHANCE, MODEL_DEADLINE_TICKS, noteCandidate, noteComposed, supersedeModelReply, unansweredChance, wantsModel, type ModelLogEntry, type ModelScopeRequest } from '#/engine/bot/port/BotModel.js';
+import { askModel, CANDIDATE_CHANCE, MODEL_DEADLINE_TICKS, noteCandidate, noteComposed, supersedeAmbient, supersedeModelReply, unansweredChance, wantsModel, type ModelLogEntry, type ModelScopeRequest } from '#/engine/bot/port/BotModel.js';
 import { notePrivateLine, notePublicLine } from '#/engine/bot/port/BotModelHistory.js';
 import { renderLocal, renderOnline, situationOf } from '#/engine/bot/port/BotModelPrompt.js';
 import { styleLine } from '#/engine/bot/port/BotStyle.js';
 import chatResponsesJson from '../../data/chat_responses.json';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
 import { botFilter } from '#/engine/bot/port/BotFilter.js';
+// ---- (bots ideas, round 2: arcs foundation) what a typed line's 'said' event carries (port/BotArcsEvents, port/BotArcsSay) ----
+import type { SaidTags } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- (bots ideas, round 2: C arcs) theme C's hooks (port/BotLives: a tilted bot's rude replies, an elated bot's gz) ----
+import { LIVES } from '#/engine/bot/port/BotLives.js';
+import { rudeRates } from '#/engine/bot/port/BotRude.js';
+// ---- end of C's block ----
+// ---- end of the arcs foundation's block ----
+// ---- (bots ideas, round 4: I model) a bot's answer to a bot near the human in the on-device model's words ----
+import { ambientWords } from '#/engine/bot/port/BotModelAmbient.js';
+// ---- end of I model's block ----
 
 interface Reply {
     text: string;
@@ -369,6 +379,8 @@ interface BotMemory {
     emote?: Emote;
     /** port (the realism work): the tick the line it is typing is said (the next one waits for it) */
     typingUntil?: number;
+    /** (bots ideas, round 2: C arcs) the tick its reply to a human is said, or the model's deadline for one (owesHumanReply) */
+    humanReplyUntil?: number;
     /** port (the realism work): the tick it last answered another bot, and said gz to one (cooldowns) */
     botTalkAt?: number;
     gzAt?: number;
@@ -533,6 +545,25 @@ export const BotChat = {
         return (memories.get(bot)?.typingUntil ?? 0) > World.currentTick || inPractice(bot);
     },
 
+    // ---- (bots ideas, round 2: C arcs) a reply the bot owes the human (the review's C-1) ----
+    /**
+     * The bot owes the human a reply: a human's line it heard lately (not read yet, or its answer not begun: HEAR_TICKS
+     * and a notice, OWED_HEARD_TICKS), a reply to a human it types or a model's words it waits for (humanReplyUntil: the
+     * model's deadline is in it; not a line to a bot, whose typing a leave cuts as before), or a line kept for its return
+     * from a break (missedLines). A leave waits for it (port/BotLeaving's rage-quit and hop, BotManager._endSession):
+     * never seem ignored. midTalk alone missed the first and the last. (Its reply due this tick too: the line due now may
+     * be said after the sessions' pass, which would log it out first.)
+     */
+    owesHumanReply(bot: Player): boolean {
+        const now = World.currentTick;
+        if ((memories.get(bot)?.humanReplyUntil ?? 0) >= now) return true;
+        const heard = humanLineAt.get(bot);
+        if (heard !== undefined && now - heard <= OWED_HEARD_TICKS) return true;
+        const missed = missedLines.get(bot);
+        return missed !== undefined && missed.human.slot !== -1 && now - missed.tick <= MISSED_TICKS;
+    },
+    // ---- end of C's block ----
+
     /**
      * port (the realism work, phase 2): a bot said `line` (of `kind`) where other bots may hear it: a question to anyone,
      * a level-up line, a greeting. Nearby bots answer it as they answer a human (bots talk to each
@@ -676,6 +707,21 @@ function speakerName(player: Player): string {
 
 // ── Public chat → nearby bots ────────────────────────────────────────────────
 
+// ---- (bots ideas, round 2: C arcs) a human's line heard: the tick, per bot in earshot (BotChat.owesHumanReply) ----
+const humanLineAt = new WeakMap<Player, number>();
+/** port/BotTiming's longest 'notice' (REACTION_MAX) and typed line (MAX_TYPING_TICKS) */
+const NOTICE_MOST = 8;
+const TYPING_MOST = 20;
+/** a heard line is owed its reading this long: HEAR_TICKS, a tick, a notice at the most */
+const OWED_HEARD_TICKS = HEAR_TICKS + 1 + NOTICE_MOST;
+/**
+ * the longest a leave waits for a reply it owes from the reply's start (port/BotLeaving, BotManager._endSession): the
+ * reading, the model's deadline and two typed parts of a long line (71 ticks, 43 s); a line kept for a break's end waits
+ * for its return instead
+ */
+export const OWED_REPLY_MOST = OWED_HEARD_TICKS + MODEL_DEADLINE_TICKS + 2 * TYPING_MOST;
+// ---- end of C's block ----
+
 /** port (the realism work): each human's lines, numbered: a bot that takes one (its name, its conversation, the reply window) keeps the crowd out of it */
 let lineCount = 0;
 const lineTaken = new WeakMap<Player, number>();
@@ -702,7 +748,10 @@ function sendMessageToNearbyBots(human: Player, name: string, mes: string, marke
         }
 
         // port: only bots that could still be in earshot when the check runs (it tests HEARING_DISTANCE)
-        if (chebyshev(bot, human) > HEARING_DISTANCE * 2) continue;
+        const d = chebyshev(bot, human);
+        if (d > HEARING_DISTANCE * 2) continue;
+        // (bots ideas, round 2: C arcs: a line it heard, owed its reading: owesHumanReply)
+        if (d <= HEARING_DISTANCE) humanLineAt.set(bot, World.currentTick);
         // port (the realism work): it reads the line the next tick; its answer takes its typing time (sayTyped)
         scheduleInTicks(HEAR_TICKS, () => botChatCheck(human, name, mes, bot, lineId));
     }
@@ -1136,10 +1185,10 @@ function namedBotIn(crowd: Player[], text: string): Player | null {
  * round 2) or, when the answer asks back (`question`: what was asked), the asker's own answer (answerBack). (The fixes, B1:
  * `askAfter`, the question back as a line of its own after an answer of upstream's, "I'm alright" / "u?".)
  */
-function botAnswer(bot: Player, to: Player, text: string, ack: { chance: number; lines: readonly string[] } | null, question?: string, askAfter?: string): void {
+function botAnswer(bot: Player, to: Player, text: string, ack: { chance: number; lines: readonly string[] } | null, question?: string, askAfter?: string, heard?: { text: string; intent: string | null }): void {
     const now = World.currentTick;
     memoryOf(bot).botTalkAt = now;
-    sayTyped(bot, text, {
+    const line: TypedLine = {
         to,
         kind: 'botreply',
         then: () => {
@@ -1154,7 +1203,15 @@ function botAnswer(bot: Player, to: Player, text: string, ack: { chance: number;
             if (!ack || BotManager.botFor(to) === null || isAway(to) || chebyshev(bot, to) > HEARING_DISTANCE || chatDice.roll() >= ack.chance) return;
             sayTyped(to, ack.lines[Math.floor(Math.random() * ack.lines.length)], { to: bot, kind: 'botreply' });
         }
-    }, reactionTicks(botPersona(bot), 'notice'));
+    };
+    const extra = reactionTicks(botPersona(bot), 'notice');
+    // ---- (bots ideas, round 4: I model) an answer to a bot's line (`heard`: its line, and the intent the rules read in
+    // it) near the human in the on-device model's words, the rules' answer its hint and fallback (port/BotModelAmbient;
+    // with Bots' own talk on Rules, or far from the human, nothing of it: no dice). The "ty", the question back and
+    // answerBack's counter turn stay the rules' (`then`) ----
+    if (heard !== undefined && ambientWords({ kind: 'botanswer', bot, partner: to, heard: heard.text, hint: text, ruleText: text, intent: heard.intent, extra }, line)) return;
+    // ---- end of I model's block ----
+    sayTyped(bot, text, line, extra);
 }
 
 /**
@@ -1202,8 +1259,10 @@ function botQuestion(asker: Player, text: string, newbie: boolean, inEarshot: Pl
     // (asked back only when the asker has an answer of its own to give)
     // (the fixes, B1: an answer of upstream's keeps its words, its question back a line of its own: askBack)
     const said = askBack(botFill(answer, asker), intent, () => botIntent(text, asker, bot) !== null);
-    if (said.after !== undefined || COUNTER_RX.test(said.text.trim())) return void botAnswer(bot, asker, said.text, null, text, said.after);
-    botAnswer(bot, asker, said.text, noAnswer(answer) ? null : { chance: newbie ? NEWBIE_THANKS_CHANCE : BOT_ACK_CHANCE, lines: newbie ? NEWBIE_THANKS : BOT_ACK });
+    // (bots ideas, round 4: I model: the question it answers, for the model's words near the human)
+    const heard = { text, intent: intent?.id ?? null };
+    if (said.after !== undefined || COUNTER_RX.test(said.text.trim())) return void botAnswer(bot, asker, said.text, null, text, said.after, heard);
+    botAnswer(bot, asker, said.text, noAnswer(answer) ? null : { chance: newbie ? NEWBIE_THANKS_CHANCE : BOT_ACK_CHANCE, lines: newbie ? NEWBIE_THANKS : BOT_ACK }, undefined, undefined, heard);
 }
 
 /**
@@ -1282,8 +1341,10 @@ function botNamed(speaker: Player, bot: Player, text: string): void {
     // (variety round 2, S2-1: an answer that asks back gets the asker's own: the counter-question rule)
     // (the fixes, B1: an answer of upstream's keeps its words, its question back a line of its own: askBack)
     const said = intent && !greeting ? askBack(botFill(answer, speaker), intent, () => botIntent(line, speaker, bot) !== null) : { text: botFill(answer, speaker) };
-    if (intent && !greeting && (said.after !== undefined || COUNTER_RX.test(said.text.trim()))) return void botAnswer(bot, speaker, said.text, null, line, said.after);
-    botAnswer(bot, speaker, said.text, greeting || noAnswer(answer) ? null : { chance: BOT_ACK_CHANCE * 0.6, lines: BOT_ACK });
+    // (bots ideas, round 4: I model: the line it answers, for the model's words near the human; a hello back stays the rules')
+    const heard = greeting ? undefined : { text, intent: intent?.id ?? null };
+    if (intent && !greeting && (said.after !== undefined || COUNTER_RX.test(said.text.trim()))) return void botAnswer(bot, speaker, said.text, null, line, said.after, heard);
+    botAnswer(bot, speaker, said.text, greeting || noAnswer(answer) ? null : { chance: BOT_ACK_CHANCE * 0.6, lines: BOT_ACK }, undefined, undefined, heard);
 }
 
 /** a bot's hello to everyone ("hi all"): one bot near it says hello back, now and then */
@@ -1314,7 +1375,9 @@ function botLevelUp(leveller: Player): void {
     if (chatDice.roll() >= any) return;
     const weight = (bot: Player): number => {
         const persona = botPersona(bot);
-        return (0.1 + 0.4 * persona.sociability + (persona.friendliness > 0.3 ? 0.1 : 0)) * (chatting(bot) ? 2 : 1) * (sameClique(bot.username, leveller.username) ? 3 : 1);
+        // ---- (bots ideas, round 2: C arcs) an elated bot is the likelier responder (x1.5; the same number of gz: port/BotMoods) ----
+        return (0.1 + 0.4 * persona.sociability + (persona.friendliness > 0.3 ? 0.1 : 0)) * (chatting(bot) ? 2 : 1) * (sameClique(bot.username, leveller.username) ? 3 : 1) * (LIVES.gzWeight?.(bot) ?? 1);
+        // ---- end of C's block ----
     };
     // (variety round 2, S2-2: one under its share of a busy place's talk; the fixes, B4: checked on the one drawn, the
     // second too)
@@ -1429,7 +1492,7 @@ function askInWhat(asker: Player, leveller: Player, now: number): boolean {
 
 // ── Typing (the realism work): a line takes its sayer's time ─────────────────────────────────────────────────────
 
-interface TypedLine {
+export interface TypedLine {
     /** whom it answers (a human or a bot), for the say listeners */
     to: Player | null;
     kind: LineKind;
@@ -1446,6 +1509,9 @@ interface TypedLine {
     /** once the whole line is said */
     then?: () => void;
     // (no colour or effect: typed talk is plain yellow, 2026-10-18: 2004's players dressed up their adverts, not their talk)
+    // ---- (bots ideas, round 2: arcs foundation) what its 'said' event carries, on its first part (port/BotArcsSay) ----
+    tags?: SaidTags;
+    // ---- end of the arcs foundation's block ----
 }
 
 /** a bot's persona (its name and planner: port/BotPersona), kept with its Player (personaOf normalises the name each call) */
@@ -1465,6 +1531,11 @@ export function botPersona(bot: Player): Persona {
  * turn, one line at a time (a second waits for the first). Dropped if the bot left or went away meanwhile.
  */
 export function sayTyped(bot: Player, text: string, line: TypedLine, extra = 0): void {
+    // (bots ideas, round 4 fixes, M5: a line to a human, the vendor's answer, "sry was afk", a reaction, ...: a line of the
+    // bot's own talk waiting on the model given up first, its rules' line at its rules' time, so this one is typed after
+    // that, not after the model's deadline; nothing when none waits: port/BotModel supersedeAmbient)
+    const human = line.to ?? line.pm;
+    if (human && human.is_bot !== true) supersedeAmbient(bot);
     const persona = botPersona(bot);
     const memory = memoryOf(bot);
     const now = World.currentTick;
@@ -1473,6 +1544,8 @@ export function sayTyped(bot: Player, text: string, line: TypedLine, extra = 0):
     let due = Math.max(now, memory.typingUntil ?? 0) + extra;
     const dues = parts.map((part, i) => (due += i === 0 ? typingTicks(persona, part, { busy }) : partTicks(persona, part)));
     memory.typingUntil = due;
+    // (bots ideas, round 2: C arcs: a reply to a human, owed before a leave: owesHumanReply)
+    if (line.to && line.to.is_bot !== true) memory.humanReplyUntil = due;
     sayParts(bot, parts, dues, line, null);
 }
 
@@ -1481,18 +1554,60 @@ export function sayTyped(bot: Player, text: string, line: TypedLine, extra = 0):
  * its first part said at `firstDue` (at once when that is now), the rest each typed in turn after it, one line at a time
  * (the bot's typingUntil); `correction` (a typo's "*word", port/BotStyle) 2-4 ticks after the line.
  */
-function sayTypedAt(bot: Player, text: string, line: TypedLine, firstDue: number, correction: string | null = null): void {
+export function sayTypedAt(bot: Player, text: string, line: TypedLine, firstDue: number, correction: string | null = null, random: () => number = chatDice.roll): void {
     const persona = botPersona(bot);
     const memory = memoryOf(bot);
     const parts = splitLine(text);
     let due = Math.max(World.currentTick, firstDue);
     const dues = parts.map((part, i) => (i === 0 ? due : (due += partTicks(persona, part))));
     memory.typingUntil = Math.max(memory.typingUntil ?? 0, due);
-    sayParts(bot, parts, dues, line, correction);
+    // (bots ideas, round 2: C arcs: a reply to a human, owed before a leave: owesHumanReply)
+    if (line.to && line.to.is_bot !== true) memory.humanReplyUntil = Math.max(memory.humanReplyUntil ?? 0, due);
+    sayParts(bot, parts, dues, line, correction, random);
 }
 
-/** a line's parts said at their ticks (sayTyped, sayTypedAt) */
-function sayParts(bot: Player, parts: string[], dues: number[], line: TypedLine, correction: string | null): void {
+// ---- (bots ideas, round 4: I model) port/BotModelAmbient's keyboard ----
+/** a line of the bots' own talk waiting on the on-device model: the rules' timing, the keyboard held, and its release */
+export interface AmbientKeyboard {
+    /** the tick the bot's typing starts (after the line it types now, if any) */
+    start: number;
+    /** the tick the rules' line (its first part) would be said: sayTyped's timing */
+    due: number;
+    /** the tick the bot's keyboard is held to (the model's deadline) */
+    deadline: number;
+    /** the bot is busy (a fight, a trade, a window): typing is slower */
+    busy: boolean;
+    /** the keyboard given back (the answer or the fallback came): the line said then sets it again */
+    release(): void;
+}
+
+/**
+ * The rules' timing of `text` typed after `extra` ticks, as sayTyped would type it now (the same dice, in the same order:
+ * the thinking and typing time of its first part), with the bot held at its keyboard `hold` ticks past it (no line of its
+ * own meanwhile, as when it types one), until release(). Nothing is said.
+ */
+export function ambientKeyboard(bot: Player, text: string, extra: number, hold: number): AmbientKeyboard {
+    const persona = botPersona(bot);
+    const memory = memoryOf(bot);
+    const busy = isBusy(bot);
+    const start = Math.max(World.currentTick, memory.typingUntil ?? 0);
+    const due = start + extra + typingTicks(persona, splitLine(text)[0] ?? text, { busy });
+    const deadline = due + hold;
+    memory.typingUntil = deadline;
+    return {
+        start,
+        due,
+        deadline,
+        busy,
+        release: () => {
+            if (memory.typingUntil === deadline) memory.typingUntil = start;
+        }
+    };
+}
+// ---- end of I model's block ----
+
+/** a line's parts said at their ticks (sayTyped, sayTypedAt); `random`: the correction's delay (bots ideas, round 4: the model's own words' dice) */
+function sayParts(bot: Player, parts: string[], dues: number[], line: TypedLine, correction: string | null, random: () => number = chatDice.roll): void {
     const memory = memoryOf(bot);
     const now = World.currentTick;
     parts.forEach((part, i) => {
@@ -1504,7 +1619,8 @@ function sayParts(bot: Player, parts: string[], dues: number[], line: TypedLine,
                 privateMessage(bot, line.pm, part);
                 memory.privateAt = World.currentTick;
             } else {
-                botSay(bot, part, undefined, line.kind, line.to);
+                // (bots ideas, round 2: arcs foundation: its tags on the first part)
+                botSay(bot, part, undefined, line.kind, line.to, i === 0 ? line.tags : undefined);
             }
             if (i === 0) {
                 // port: and the emote with it (port/BotEmote: not while the bot is busy)
@@ -1521,7 +1637,7 @@ function sayParts(bot: Player, parts: string[], dues: number[], line: TypedLine,
                 // port: the conversation's 30 s run from when the reply is said
                 if (line.talk && line.to && memory.state === 'engaged' && memory.lastSpeakerId === speakerName(line.to)) memory.lastInteractionTime = World.currentTick;
                 line.then?.();
-                if (correction !== null) sayCorrection(bot, correction, line);
+                if (correction !== null) sayCorrection(bot, correction, line, random);
             }
         };
         if (dues[i] <= now) say();
@@ -1530,8 +1646,8 @@ function sayParts(bot: Player, parts: string[], dues: number[], line: TypedLine,
 }
 
 /** (phase 7) a typo's "*word" a moment after the line (port/BotStyle), the same way (out loud or in the private message) */
-function sayCorrection(bot: Player, text: string, line: TypedLine): void {
-    scheduleInTicks(2 + Math.floor(chatDice.roll() * 3), () => {
+function sayCorrection(bot: Player, text: string, line: TypedLine, random: () => number = chatDice.roll): void {
+    scheduleInTicks(2 + Math.floor(random() * 3), () => {
         if (BotManager.botFor(bot) === null || isAway(bot)) return;
         if (line.pm) {
             if (line.pm.slot !== -1) privateMessage(bot, line.pm, text);
@@ -1689,7 +1805,9 @@ function composeRulesReply(req: ReplyRequest): RulesReply {
         return rulesReply(plain, true);
     }
     if (RUDE_VIAS.has(req.via)) {
-        const rude = rudeReply(req.bot, intent.id, nameless, intent.follow === true);
+        // ---- (bots ideas, round 2: C arcs) a tilted rude talker's rude replies x1.5 (port/BotMoods: 0.5 to 0.75) ----
+        const rude = rudeReply(req.bot, intent.id, nameless, intent.follow === true, Math.random, Math.min(1, rudeRates.reply * (LIVES.rudeReplyScale?.(req.bot) ?? 1)));
+        // ---- end of C's block ----
         if (rude !== null && isClean(rude)) {
             noteRudeReply(req.bot, rude);
             return rulesReply(rude, true);
@@ -1754,8 +1872,12 @@ function requestModelReply(req: ReplyRequest, reply: RulesReply, line: TypedLine
     const start = Math.max(now, memory.typingUntil ?? 0);
     const deadline = start + extra + MODEL_DEADLINE_TICKS;
     memory.typingUntil = deadline;
+    // (bots ideas, round 2: C arcs: the model's words for a human, owed before a leave: owesHumanReply)
+    const forHuman = !!req.to && req.to.is_bot !== true;
+    if (forHuman) memory.humanReplyUntil = deadline;
     const release = (): void => {
         if (memory.typingUntil === deadline) memory.typingUntil = start;
+        if (forHuman && memory.humanReplyUntil === deadline) memory.humanReplyUntil = start;
     };
     const situation = situationOf(req, now);
     askModel({

@@ -39,10 +39,15 @@ import { FishingTask } from '#/engine/bot/tasks/FishingTask.js';
 import { ThievingTask } from '#/engine/bot/tasks/ThievingTask.js';
 import { OutingTask } from '#/engine/bot/tasks/OutingTask.js';
 import { SHILO_FARES_BOTH } from '#/engine/bot/port/BotExits.js';
+import { periodOn } from '#/engine/bot/port/BotPeriod.js'; // (bots ideas, round 3: G buzz: Rellekka's weight, theme G on)
 import { RangingGuildTask, mayCompete } from '#/engine/bot/tasks/RangingGuildTask.js';
 import { TrawlerTask, crewExists, crewForming, mayTrawl } from '#/engine/bot/tasks/TrawlerTask.js';
 import { TreasureTrailTask, holdsEasyClue } from '#/engine/bot/tasks/TreasureTrailTask.js';
 import { AgilityArenaTask, mayRunArena } from '#/engine/bot/tasks/AgilityArenaTask.js';
+// ---- (bots ideas, round 3: G period) the Games Room's Runelink (and Gnomeball): their entries and the room's join ----
+import { gamesRoomJoinFor, gamesRoomLiking, gamesRoomTaskFor } from '#/engine/bot/tasks/GamesRoomTask.js';
+import { gnomeballTaskFor } from '#/engine/bot/tasks/GnomeballTask.js';
+// ---- end of G period's block ----
 
 /** a levelling bot asked for its next plan while the budget has room is offered an outing this often */
 export const OFFER_CHANCE = 0.35;
@@ -84,6 +89,9 @@ interface CatalogueEntry {
     skills: readonly string[];
     /** the task, or null when the bot may not do it now */
     make(player: Player): BotTask | null;
+    // ---- (bots ideas, round 3: G period) an entry's own liking (the Games Room's: no skill; sociability, youth) ----
+    liking?: (player: Player) => number;
+    // ---- end of G period's block ----
 }
 
 /** a combat outing: the skill of the three the bot trains least, in the step's band, with its weapon and fit to fight */
@@ -114,6 +122,9 @@ const LIKING_MAX = 3;
 function liking(player: Player, entry: CatalogueEntry): number {
     const theme = themeOf(player.username);
     if (theme) return entry.skills.includes(theme.skills[0]) ? THEMED_MATCH : THEMED_OTHER;
+    // ---- (bots ideas, round 3: G period) an entry's own liking, within the same bounds ----
+    if (entry.liking) return Math.min(LIKING_MAX, Math.max(LIKING_MIN, entry.liking(player)));
+    // ---- end of G period's block ----
     // (a fighter's outings are mostly its fights, a skiller's the Trawler and the arena: the planner's own liking, so an
     // outing takes the place of what the bot would have trained anyway, and the 2004 mix holds (AM1's combat share))
     const weights = Object.values(plannerWeights(player)).filter((w): w is number => typeof w === 'number' && w > 0);
@@ -151,6 +162,15 @@ function stays(player: Player, previous: string | null): boolean {
     return fishingAtCatherby(player, previous);
 }
 
+// ---- (bots ideas, round 3: G period) theme G's members minigames: the Games Room's
+// Runelink under Burthorpe (weight 2, its own liking; the room's cap is its make()'s) and Gnomeball at the Gnome
+// Stronghold (weight 1). Theme G off: each make() is null at once (no dice), so the catalogue's draw is as before ----
+const PERIOD_CATALOGUE: readonly CatalogueEntry[] = [
+    { key: 'GamesRoom', town: 'burthorpe', weight: 2, skills: [], liking: gamesRoomLiking, make: p => gamesRoomTaskFor(p) },
+    { key: 'Gnomeball', town: 'stronghold', weight: 1, skills: ['RANGED', 'AGILITY'], make: p => gnomeballTaskFor(p) }
+];
+// ---- end of G period's block ----
+
 /** the catalogue (weights: the minigames a little above the towns; "all four" extras) */
 const CATALOGUE: readonly CatalogueEntry[] = [
     { key: 'Trawler', town: 'khazard', weight: 3.5, skills: ['FISHING'], make: p => (!crewExists() && mayTrawl(p) ? new TrawlerTask('leader') : null) },
@@ -162,7 +182,11 @@ const CATALOGUE: readonly CatalogueEntry[] = [
     {
         key: 'rellekka-fishing',
         town: 'rellekka',
-        weight: 1.5,
+        // (bots ideas, round 3: G buzz: 1.5 → 2.5 while theme G is on, the update's draw; off,
+        // as before it)
+        get weight(): number {
+            return periodOn() ? 2.5 : 1.5;
+        },
         skills: ['FISHING'],
         make: p => {
             const step: SkillStep = OUTING_STEPS['rellekka-fishing'];
@@ -194,13 +218,21 @@ const CATALOGUE: readonly CatalogueEntry[] = [
             const task = new ThievingTask(step);
             return task.shouldRun(p) ? new OutingTask('yanille-watchmen', 'yanille', task) : null;
         }
-    }
+    },
+    // ---- (bots ideas, round 3: G period) ----
+    ...PERIOD_CATALOGUE
+    // ---- end of G period's block ----
 ];
 
 /** (tests) how much the bot likes the catalogue's entry `key` (its theme's, else its planner's weights), or null */
 export function likingOf(player: Player, key: string): number | null {
     const entry = CATALOGUE.find(e => e.key === key);
     return entry ? liking(player, entry) : null;
+}
+
+/** (tests; bots ideas, round 3: G buzz) the catalogue's weight for the entry `key` now (theme G on or off), or null */
+export function catalogueWeightForTest(key: string): number | null {
+    return CATALOGUE.find(e => e.key === key)?.weight ?? null;
 }
 
 /** is this task one of the hook's (an outing, a minigame) */
@@ -263,6 +295,18 @@ export function membersTaskFor(player: Player, previous: string | null): BotTask
         notePick('members', 'Trawler-crew', previous);
         return new TrawlerTask('member');
     }
+    // ---- (bots ideas, round 3: G period) a bot waiting alone in the Games Room: a bot near Burthorpe that may play
+    // comes, past the budget (as a Trawler crew's); theme G off, none waiting: null at once, no dice ----
+    {
+        const join = gamesRoomJoinFor(player, OUTING_GAP);
+        if (join) {
+            minigamePlanStats.offered++;
+            minigamePlanStats.byKey['GamesRoom-join'] = (minigamePlanStats.byKey['GamesRoom-join'] ?? 0) + 1;
+            notePick('members', 'GamesRoom-join', previous);
+            return join;
+        }
+    }
+    // ---- end of G period's block ----
     if (outCount('far') >= farBudget()) {
         minigamePlanStats.why.budget++;
         return null;

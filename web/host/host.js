@@ -117,6 +117,11 @@
         // Settings › Bot chat › Think first: the model in the app plans each reply in a short note first (offered only for
         // a model trained both ways: native's status local.think 'option'); applied at once, with every request
         botThink: BOT_THINK_DEFAULT,
+        // (bots ideas, round 4: I model) Settings › Bot chat › Bots' own talk: 'rules' (the default until the phone heat
+        // test passes and the player's word), or 'model': the model in the app words the bots' talk between themselves
+        // near you (the engine's port/BotModelAmbient), never Claude and never with Think first; used only with the
+        // on-device model in the app and a chat model chosen (lm.ambientUsable), applied at once (lm.sendMode)
+        botAmbient: 'rules',
         // Online (docs/ONLINE.md): where the world is, 'offline' (this phone) or the id of one of `servers`, the game
         // servers the player added ({id, name, url, nodeId, members, rsa, added}: checkServerSettings); `accounts` the
         // names played on each (usernames only: a password the player asked to keep stays in the Keychain or the
@@ -3778,6 +3783,12 @@
         testSeq: 0,
         tests: new Map(), // (negative ids) the Bot chat page's Test -> resolve
 
+        // (bots ideas, round 4: I model) Bots' own talk can be the model's: the on-device model is in the app and a chat
+        // model is chosen (not Rules); its requests always go to the on-device model (the engine's ambientAvailable)
+        ambientUsable() {
+            return this.status.local.available && settings.botChat !== 'rules';
+        },
+
         // whether the chosen backend, or its fallback, is there (the engine's own test: port/BotModel modelAvailable)
         usable(mode) {
             if (mode === 'local') {
@@ -3791,7 +3802,8 @@
                 return;
             }
             // (while the model in the app rests for memory the engine hears there is none: the rules' lines, no requests)
-            engine.postMessage({ type: 'bots-lm-mode', mode: settings.botChat, local: this.status.local.available && !this.status.local.rest, online: this.status.online.keySet });
+            // (bots ideas, round 4: I model: ambient, Bots' own talk as Model where it can be used)
+            engine.postMessage({ type: 'bots-lm-mode', mode: settings.botChat, local: this.status.local.available && !this.status.local.rest, online: this.status.online.keySet, ambient: settings.botAmbient === 'model' && this.ambientUsable() });
         },
 
         // Whether the bots in this world talk with the model in the app (On-device, or Claude online with no key, which
@@ -3869,8 +3881,12 @@
             if (!Number.isInteger(id) || id < 0) {
                 return;
             }
-            const mode = settings.botChat;
-            if (!isNative || !this.usable(mode)) {
+            // (bots ideas, round 4: I model) a line of the bots' own talk (msg.ambient): the model in the app only, while
+            // Bots' own talk is Model and usable and the model does not rest; else answered 'unavailable' at once
+            const ambient = msg.ambient === true;
+            const mode = ambient ? 'local' : settings.botChat;
+            const usable = ambient ? settings.botAmbient === 'model' && this.ambientUsable() && !this.status.local.rest : this.usable(mode);
+            if (!isNative || !usable) {
                 this.toEngine({ id, text: null, source: null, error: 'unavailable', ms: 0 });
                 return;
             }
@@ -3880,8 +3896,9 @@
             this.pending.set(id, { sent: performance.now(), timer });
             // (think: Settings › Bot chat › Think first as it is now: the model in the app writes its note first, when it
             // is one that offers the choice; only with On-device, where the page shows it as in use: Claude online never
-            // thinks, and its fallback to the model in the app answers without the note)
-            postNative({ type: 'lm', id, mode, think: mode === 'local' && settings.botThink === true, local: msg.local, online: msg.online, maxChars: msg.maxChars, timeoutMs });
+            // thinks, and its fallback to the model in the app answers without the note; the bots' own talk never does:
+            // native refuses it when the phone is warm, while it rests and behind a reply to the human)
+            postNative({ type: 'lm', id, mode, ...(ambient ? { ambient: true } : {}), think: !ambient && mode === 'local' && settings.botThink === true, local: msg.local, online: msg.online, maxChars: msg.maxChars, timeoutMs });
         },
 
         // native -> page (LostCityHost.bots.lmReply)
@@ -3933,9 +3950,11 @@
     };
 
     // Settings › Bot chat: who writes the bots' replies to you (Rules, On-device, Claude online), the model in the app (and,
-    // for a model trained both ways, Think first: its note before each reply), the Claude key (typed into native's own
-    // secure box: the page never sees it, only whether one is set and how it ends), what Claude online sends, and a Test of
-    // the key. A choice applies at once (the engine hears the chat model: lm.sendMode; Think first goes with each request).
+    // for a model trained both ways, Think first: its note before each reply), Bots' own talk (bots ideas, round 4: Rules
+    // or Model, the model in the app wording the bots' talk near you), the Claude key (typed into native's own secure box:
+    // the page never sees it, only whether one is set and how it ends), what Claude online sends, and a Test of the key. A
+    // choice applies at once (the engine hears the chat model and Bots' own talk: lm.sendMode; Think first goes with each
+    // request).
     const botChat = {
         el: null,
         testing: false,
@@ -3978,6 +3997,19 @@
             document.getElementById('botchat-think-hint').textContent = thinkUsed
                 ? 'The bots plan each reply first: about a second slower.'
                 : 'Only with the On-device chat model.';
+            // (bots ideas, round 4: I model) Bots' own talk: greyed out, its choice kept, unless the on-device model is in
+            // the app and a chat model is chosen (lm.ambientUsable: its requests go to the on-device model only)
+            const ambient = document.getElementById('botchat-ambient');
+            const ambientUsed = lm.ambientUsable();
+            ambient.classList.toggle('unused', !ambientUsed);
+            for (const button of ambient.querySelectorAll('.seg button')) {
+                button.disabled = !ambientUsed;
+            }
+            // (round 4 fixes: stage 1 words no reactions to the player; with stage 2's, the design's "Reactions to you and
+            // talk between bots near you")
+            document.getElementById('botchat-ambient-hint').textContent = ambientUsed
+                ? 'Talk between bots near you'
+                : !local.available ? (isNative ? 'Only with the on-device model.' : T.onlyInApp) : 'Only with a chat model (not Rules).';
             let key;
             if (!isNative) {
                 key = T.onlyInApp;
@@ -4144,6 +4176,8 @@
                         lm.sendMode(); // (at once: no restart)
                         lm.warm('world');
                         botChat.render();
+                    } else if (group.dataset.setting === 'botAmbient') {
+                        lm.sendMode(); // (bots ideas, round 4: I model: at once)
                     }
                 });
             }

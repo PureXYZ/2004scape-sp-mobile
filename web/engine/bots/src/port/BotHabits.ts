@@ -17,6 +17,8 @@
 //     (sorting the bank, chatting by PM, a look at its stats: a player with input, whom 274 does not log out): the
 //     humanlike report's H19 counts stands of 2-10 min, which a break under 90 s never is. LINGERS_PER_HOUR sets it
 //     (0: none).
+//   - (bots ideas, round 4 fixes) between two of them (a linger and a break, or two breaks) a minute at least back at its
+//     task (SPELL_GAP_TICKS): never a linger and at once a break on the same tile.
 // A stand of its own (the realism work, phase 3: port/BotTiles): a linger on a tile another player stands on (a bank
 // booth's, a range's) steps first to a free tile within 2 of it, held until the linger ends (the humanlike report's H4:
 // idle bots stacked on one tile); a short break is taken where the bot stands.
@@ -55,6 +57,7 @@ import { claimStandTile, releaseStandTile, sharesTile, stepToTile } from '#/engi
 import { hangoutAtBank, hangoutOf } from '#/engine/bot/port/BotHangout.js';
 import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+import { tickTalkHold } from '#/engine/bot/port/BotTalkMoves.js'; // (bots ideas, round 3: H move: stop to talk)
 
 const TICKS_PER_HOUR = 6000;
 
@@ -76,6 +79,13 @@ const LINGER_TICKS: [number, number] = [200, 250];
 const LINGERS_PER_HOUR = 0.23;
 /** "back" after a "brb": this share */
 const BACK_CHANCE = 0.4;
+/**
+ * (bots ideas, round 4 fixes) After a break or a linger ends, none of either for this long: a minute back at its task
+ * first, as no player stands 2 minutes at its tree and then goes AFK there at once. A break began 5 ticks after a linger,
+ * and the woodcutter stood 323 ticks on one tile with nothing done (sim.mjs's aged free world, a stall: each alone stays
+ * under its 300 ticks by design, LINGER_TICKS above). A compare, no draw: a break or linger due waits out the gap
+ */
+const SPELL_GAP_TICKS = 100;
 
 /** How near a spectacle a bot must be to look (tiles), how long it looks (ticks), how often at most. */
 const WATCH_RANGE = 8;
@@ -148,6 +158,8 @@ interface Habits {
     leaving: Leaving | null;
     /** a phase from its slot: bots check a due break on different ticks */
     phase: number;
+    /** (bots ideas, round 4 fixes) no break or linger before this world tick (SPELL_GAP_TICKS after the last one ended) */
+    quietUntil: number;
     /** the last break or linger that ended, and how (tests) */
     lastBreak: { kind: SpellKind; start: number; end: number; reason: BreakEnd } | null;
     /** (tests) the test rates' version its draws were made with */
@@ -201,6 +213,7 @@ function habitsOf(bot: Player): Habits {
             nextWatch: now,
             leaving: null,
             phase: (bot.slot >>> 0) % 5,
+            quietUntil: -1,
             lastBreak: null,
             ratesVersion
         };
@@ -265,10 +278,15 @@ export function tickHabits(bot: BotPlayer): boolean {
         if (!(breaksPerHour(h.persona) > 0)) h.nextBreak = Infinity;
         if (!(lingersPerHour(h.persona) > 0)) h.nextLinger = Infinity;
     }
+    // ---- (bots ideas, round 3: H move) a talk hold (port/BotTalkMoves: a thread's stop, a walk-up's walk) holds the
+    // bot as a look does: its task waits, it still answers a line said to it ----
+    if (tickTalkHold(p)) return true;
+    // ---- end of H move's hold ----
     if (h.spell) return tickSpell(p, h, now);
     if (h.watch) return tickWatch(p, h, now);
     // (port, the realism work's phase 5b: no break or linger in a set piece: a host, a duellist, a clan walk's member)
-    if (h.levelling && (now >= h.nextBreak || now >= h.nextLinger) && (now + h.phase) % 5 === 0 && !eventRoleOf(p)) return tryBreak(bot, h, now);
+    // ((bots ideas, round 4 fixes) and none in the gap after the last: SPELL_GAP_TICKS)
+    if (h.levelling && now >= h.quietUntil && (now >= h.nextBreak || now >= h.nextLinger) && (now + h.phase) % 5 === 0 && !eventRoleOf(p)) return tryBreak(bot, h, now);
     return false;
 }
 
@@ -378,6 +396,7 @@ function endSpell(p: Player, h: Habits, now: number, reason: BreakEnd): void {
     // (the tile it stepped to for a linger, back)
     if (spell.claimed) releaseStandTile(p);
     h.lastBreak = { kind: spell.kind, start: spell.start, end: now, reason };
+    h.quietUntil = now + SPELL_GAP_TICKS; // (bots ideas, round 4 fixes)
     if (spell.kind === 'linger') h.nextLinger = now + gap(lingersPerHour(h.persona));
     else h.nextBreak = now + gap(breaksPerHour(h.persona));
     if (done && spell.brb && Math.random() < BACK_CHANCE) sayOccasion(p, 'back');
@@ -419,7 +438,8 @@ export function bankStop(bot: Player): number {
             return ticks;
         }
     }
-    if (h.levelling && !h.spell && !h.leaving && (now >= h.nextLinger || now >= h.nextBreak) && free(bot)) startSpell(bot, h, now >= h.nextLinger ? 'linger' : 'bank', now);
+    // ((bots ideas, round 4 fixes) and none in the gap after the last: SPELL_GAP_TICKS)
+    if (h.levelling && !h.spell && !h.leaving && now >= h.quietUntil && (now >= h.nextLinger || now >= h.nextBreak) && free(bot)) startSpell(bot, h, now >= h.nextLinger ? 'linger' : 'bank', now);
     return ticks;
 }
 
@@ -477,7 +497,8 @@ function tickWatch(p: Player, h: Habits, now: number): boolean {
 // ── leaving like a player ──────────────────────────────────────────────────────
 
 /** What a gatherer keeps in its pack at the bank before it logs out: its tools, coins, bait, food. */
-function keepIds(bot: BotPlayer): number[] {
+// (bots ideas, Track B: loot: exported, a vulture's bank trip keeps the same, tasks/LootPileTask)
+export function keepIds(bot: BotPlayer): number[] {
     const step = bot.currentTask?.activityStep() ?? null;
     const keep = [Items.COINS, Items.KNIFE, Items.TINDERBOX, ...FOOD_IDS, ...(step?.toolItemIds ?? [])];
     if (step?.itemConsumed) keep.push(step.itemConsumed);

@@ -146,7 +146,9 @@ Settings › **Bot chat** chooses who writes the bots' replies when you talk to 
   On a landscape phone the box first shows whole with the keyboard down; tap the field to type (the keyboard then opens
   its own full-screen editor with a Save key).
 
-**Think first** works as on the iPhone (On-device only).
+**Think first** works as on the iPhone (On-device only), and so does **Bots' own talk** (Rules or Model: the
+on-device model words the bots' talk between themselves near you; it is refused while the phone is warm, thermal
+status light or worse, and behind a reply to you).
 
 ## Developing
 

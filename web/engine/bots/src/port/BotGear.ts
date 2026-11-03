@@ -302,8 +302,11 @@ export interface GearPurchase {
  * any piece of the slot it owns; no helm over a signature hat), then (port, phase 4) an accessory it likes. Null when
  * there is none. `scimitars` is CombatTask's table (best first).
  */
-export function nextGearUpgrade(player: Player, scimitars: readonly { minAtk: number; itemId: number }[]): GearPurchase | null {
-    const coins = coinsOwned(player) - RESERVE;
+export function nextGearUpgrade(player: Player, scimitars: readonly { minAtk: number; itemId: number }[], coinsOwnedNow?: number): GearPurchase | null {
+    // ---- (bots ideas, round 2: C arcs) `coinsOwnedNow`: the coins it would have (Infinity: what it is saving for, a gear
+    // goal's piece: port/BotGoals); none given, its own as before ----
+    const coins = (coinsOwnedNow ?? coinsOwned(player)) - RESERVE;
+    // ---- end of C's block ----
     if (coins <= 0) return null;
     const affordable = (id: number): GearPurchase | null => {
         const shopKey = nearestShopOf(player, id);

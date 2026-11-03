@@ -392,6 +392,10 @@ function reachLoc(p: Player, loc: Loc, tries: { n: number }): 'go' | 'wait' | 'n
     return 'wait';
 }
 
+/** (bots ideas, the door-walk fix) clickLoc's ticks of clicks a door took in a row before it gives up (a walk on to a door
+ * lasts 60 ticks at most: BotAction's doorWalks) */
+const UNSET_CLICKS = 60;
+
 export function clickLoc(locNames: readonly string[], op: string, at: At, opts: { radius?: number; again?: (p: Player) => boolean; watch?: number; max?: number; wait?: number } = {}): Step {
     let walking: Step | null = null;
     let clicks = 0;
@@ -399,6 +403,7 @@ export function clickLoc(locNames: readonly string[], op: string, at: At, opts: 
     let waitTicks = 0;
     let last = -1;
     let noEffect = 0;
+    let unset = 0;
     const reachTries = { n: 0 };
     const end = (r: StepResult): StepResult => {
         walking = null;
@@ -407,6 +412,7 @@ export function clickLoc(locNames: readonly string[], op: string, at: At, opts: 
         waitTicks = 0;
         last = -1;
         noEffect = 0;
+        unset = 0;
         reachTries.n = 0;
         return r;
     };
@@ -438,10 +444,14 @@ export function clickLoc(locNames: readonly string[], op: string, at: At, opts: 
             const reach = reachLoc(p, target, reachTries);
             if (reach === 'no') return end(effects > 0 ? 'done' : 'fail');
             if (reach === 'wait') {
+                // (round 4 review, left: this wait counts as an effect above: an unreachable loc ends 'done', not 'fail')
                 waitTicks = 4;
                 return 'run';
             }
-            interactLocOp(p, target, n as 1 | 2 | 3 | 4 | 5);
+            // (bots ideas, the door-walk fix) a click a door took (a walk on to one under way, one on the way opened:
+            // interactLocOp false) is none: again the next tick, the door first; at most UNSET_CLICKS ticks of it
+            if (!interactLocOp(p, target, n as 1 | 2 | 3 | 4 | 5)) return ++unset > UNSET_CLICKS ? end(effects > 0 ? 'done' : 'fail') : 'run';
+            unset = 0;
             clicks++;
             last = count;
             waitTicks = (opts.wait ?? 6) + humanDelay(p, 'next');

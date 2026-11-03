@@ -1,4 +1,7 @@
 
+// (bots ideas, Track A: the endgame's flood of Taverley's deep part, inTaverleyDeep)
+import { canTravel, CollisionType } from '#/engine/routefinder/index.js';
+
 export const Items = {
     // Currency
     COINS: 995,
@@ -838,7 +841,11 @@ export const Locations = {
     // at 2804-2824, 3506-3514), which no walk reaches; the ice giant steps use the Asgarnian ice dungeon's (ICE_GIANTS_ICE_DUNGEON)
     ICE_GIANTS_ASGARNIA_DUNGEON: [2884, 9950, 0] as [number, number, number], // 🚪 port: the Ice Queen's lair under White Wolf Mountain (not the Asgarnian ice dungeon) — 6 spawns; NOT in active progression
     ICE_GIANTS_WILDERNESS:   [2954, 3915, 0] as [number, number, number], // ⚠ deep Wilderness (~level 50) — 9 spawns; NOT in active progression, too dangerous for unsupervised bot combat
-    FIRE_GIANTS_WATERFALL_DUNGEON: [3049, 10342, 0] as [number, number, number], // 🚪 Waterfall Dungeon — 5 spawns; NOT in active progression, same Taverley-only dungeon routing limitation
+    // ---- (bots ideas, Track A: endgame) the label fix: 3049,10342 is the deep Wilderness dungeon's fire giants (its stairs
+    // 3044,3924 at Wilderness 51-53), not the Waterfall Dungeon's (2562-2581,9886-9897, behind the raft and Glarial's amulet);
+    // the name is kept (its users) ----
+    FIRE_GIANTS_WATERFALL_DUNGEON: [3049, 10342, 0] as [number, number, number], // 🚪 the deep Wilderness dungeon's fire giants (not the Waterfall Dungeon) — 5 spawns; not in the progression: a Wilderness trip's (port/BotWildTrips 'firegiants')
+    // ---- end of Track A's label fix ----
     // ── Taverley Dungeon — chaos druids ──────────────────────────────────────
     // port: the way down is the ladder at (2884,3397), the ladder up at (2884,9797) (upstream's 2884,3450 and 2884,9848
     // were 50 tiles off: no ladder near, so every trip was a jump both ways).
@@ -985,7 +992,62 @@ export const Locations = {
     COSMIC_ALTAR: [2162, 4833, 0] as [number, number, number], // 🚪 Inside cosmic altar
     CHAOS_ALTAR: [2269, 4843, 0] as [number, number, number], // 🚪 Inside chaos altar
     NATURE_ALTAR: [2400, 4835, 0] as [number, number, number], // 🚪 Inside nature altar
-    LAW_ALTAR: [2464, 4818, 0] as [number, number, number] // 🚪 Inside law altar
+    LAW_ALTAR: [2464, 4818, 0] as [number, number, number], // 🚪 Inside law altar
+    // ---- (bots ideas, Track A: the period endgame) the endgame's places on the 274 map (probes in the round's notes:
+    // the spawns from content/maps, the ways in and the doors on the real collision) ----
+    // Taverley's deep part, behind the dusty-key door (deepdungeondoor 2924,9803: its outer side 2924, inner 2923): the 3
+    // blue dragons (2897-2904, 9797-9802), the 5 hellhounds (2856-2867, 9837-9851), the 4 black demons (2854-2869,
+    // 9769-9781), the 2 black dragons (2829-2835, 9824-9826); the jail (dungeonjail 2931,9690: outer 9690, inner 9689),
+    // Velrak in its cell (2931,9685), the jailer outside it (2933,9693)
+    TAVERLEY_DEEP_DOOR: [2924, 9803, 0] as [number, number, number],
+    TAVERLEY_BLUE_DRAGONS: [2900, 9800, 0] as [number, number, number],
+    TAVERLEY_HELLHOUNDS: [2861, 9844, 0] as [number, number, number],
+    TAVERLEY_BLACK_DEMONS: [2861, 9776, 0] as [number, number, number],
+    TAVERLEY_BLACK_DRAGONS: [2832, 9825, 0] as [number, number, number],
+    TAVERLEY_JAILER: [2933, 9693, 0] as [number, number, number],
+    TAVERLEY_JAIL_DOOR: [2931, 9690, 0] as [number, number, number],
+    TAVERLEY_VELRAK: [2931, 9686, 0] as [number, number, number],
+    // the Heroes' Guild (its door herodoor 2902,3510: Heroes' Quest, every bot's): its cellar ladder (2892,3507) to the
+    // basement (its ladder up 2892,9907), the blue dragon behind the gate (loc_1558 2909,9910); the altar upstairs
+    // (2889,3510,1, by the spiral stairs 2895,3513)
+    HEROES_GUILD_LADDER: [2892, 3508, 0] as [number, number, number],
+    HEROES_BASEMENT_FLOOR: [2893, 9907, 0] as [number, number, number],
+    HEROES_BLUE_DRAGON: [2907, 9905, 0] as [number, number, number],
+    // the Edgeville dungeon's black demons (3084-3092, 9957-9961; Wilderness 5): the druids' way, then the door north
+    // (loc_1558 3106,9944)
+    EDGEVILLE_BLACK_DEMONS: [3089, 9959, 0] as [number, number, number],
+    // the deep Wilderness dungeon (stairs_cellar 3044,3924, Wilderness 51; its stairs up loc_1734 3044,10324): the fire
+    // giants (3046-3054, 10338-10347) past three gates (loc_1557 3040,10308, loc_1558 3022,10311, loc_1557 3044,10342)
+    DEEP_WILD_STAIRS: [3044, 3927, 0] as [number, number, number],
+    DEEP_WILD_FLOOR: [3044, 10322, 0] as [number, number, number],
+    // the Demonic Ruins' greater demons (3282-3304, 3872-3894, Wilderness 45-47), the red dragons (3181-3223, 3819-3850, 38-42)
+    DEMONIC_RUINS: [3290, 3882, 0] as [number, number, number],
+    RED_DRAGONS_WILDERNESS: [3200, 3836, 0] as [number, number, number],
+    // the King Black Dragon: the west Lava Maze ladder (wildymirrorladdertop1 3017,3849, Wilderness 42: down to 3069,10255),
+    // the lever room's lever in (dragonkinginlever 3067,10253, to 2717,9802), the lair's lever out (dragonkingoutlever
+    // 2717,9801, to 3067,10254) and the lever room's ladder up (loc_1766 3069,10256, to 3016,3849); the KBD (2716,9817)
+    KBD_LADDER: [3017, 3850, 0] as [number, number, number],
+    KBD_LEVER_ROOM: [3068, 10255, 0] as [number, number, number],
+    KBD_LAIR: [2717, 9803, 0] as [number, number, number],
+    KBD: [2716, 9815, 0] as [number, number, number],
+    // the Mage Arena: the ruined building (its webs bigweb_slashable 3093,3957 and 3095,3957, its ladder down
+    // magearena_ladder_to_cellar 3091,3957, Wilderness 55), the cellar (Kolodion 2541,4715, the ladder up 2542,4713, the
+    // pool magearena_waterportal1 2541,4719, a banker), the chamber (the pool out magearena_waterportal2 2508,4686, the
+    // Chamber Guardian 2508,4696, the statues 2500-2516, 4721-4724)
+    MAGE_ARENA_BUILDING: [3092, 3956, 0] as [number, number, number],
+    MAGE_ARENA_CELLAR: [2540, 4714, 0] as [number, number, number],
+    MAGE_ARENA_CHAMBER: [2508, 4692, 0] as [number, number, number],
+    // the Kalphite lair: the burrow (3227,3108, past the Shantay Pass), the tunnels (level 2: the burrow's rope up 3483,9509),
+    // the chamber's way down (3509,9497,2) and up (kalphite_chamber_exit 3508,9494), the Queen (3474,9496)
+    KALPHITE_BURROW: [3228, 3109, 0] as [number, number, number],
+    KALPHITE_TUNNELS: [3483, 9510, 2] as [number, number, number],
+    KALPHITE_CHAMBER: [3507, 9493, 0] as [number, number, number],
+    KALPHITE_QUEEN: [3478, 9496, 0] as [number, number, number],
+    // the altars a bosser recharges its prayer at (Pray-at): the Chaos Temple's on the Falador-Taverley road, Varrock's church,
+    // Lumbridge's church
+    CHAOS_TEMPLE_ALTAR: [2934, 3514, 0] as [number, number, number],
+    VARROCK_CHURCH_ALTAR: [3253, 3484, 0] as [number, number, number]
+    // ---- end of Track A's places ----
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2889,7 +2951,8 @@ export const SkillProgression: Record<string, SkillStep[]> = {
             ticksPerAction: 5,
             successRate: 0.85,
             itemConsumed: Items.MIND_RUNE,
-            extra: { spell: 'wind_strike', npcType: 'giant', dungeon: true }
+            // (bots ideas, Track B: A7) its safespots (port/BotSafespots, data/safespots.json)
+            extra: { spell: 'wind_strike', npcType: 'giant', dungeon: true, safespots: 'edgeville-hill-giants' }
         },
         // Level 35-99: moss giants (two coastal areas) + Al Kharid warriors
         {
@@ -3130,7 +3193,8 @@ export const SkillProgression: Record<string, SkillStep[]> = {
             ticksPerAction: 5,
             successRate: 0.85,
             itemConsumed: Items.BRONZE_ARROW,
-            extra: { npcType: 'giant', dungeon: true }
+            // (bots ideas, Track B: A7) its safespots (port/BotSafespots, data/safespots.json)
+            extra: { npcType: 'giant', dungeon: true, safespots: 'edgeville-hill-giants' }
         },
         // Level 35-99: moss giants (two coastal areas) — oak shortbow + iron arrows
         {
@@ -3963,9 +4027,11 @@ export const MembersPlaces = {
     WATCHMEN_YANILLE: [2546, 3114, 1] as [number, number, number],
     JOGRES_KARAMJA: [2924, 3054, 0] as [number, number, number],
     BURTHORPE_SOLDIERS: [2898, 3536, 0] as [number, number, number],
-    // (Rellekka's rock crabs (274's horror_rockcrab) wake only for a player 274's NPC info lists: its hunt runs for NPCs
-    // with observers, and bots have no client; their fighters would stand at the rocks. Rellekka's piers' cage and
-    // harpoon spots instead, the Fremennik Trials' town's other draw)
+    // ---- (bots ideas, round 3: G buzz) Rellekka's rock crabs (274's horror_rockcrab) wake only for a player 274's NPC
+    // info lists: its hunt runs for NPCs with observers, and bots have no client. So the crabs are the update buzz's
+    // (tasks/CrabTask: OUTING_STEPS' crab steps below): its fighters rock-hop between the "Rocks" as 2004's players did,
+    // and the crabs wake and fight when the human is in view (unobserved, no fight and no XP: nothing faked). Rellekka's
+    // piers' cage and harpoon spots are its fishing outing's ----
     FISH_RELLEKKA: [2640, 3697, 0] as [number, number, number],
     RELLEKKA_SQUARE: [2660, 3660, 0] as [number, number, number],
     // Shilo Village: the carts (Hajedy at Brimhaven, Vigroy at Shilo), the river's fly-fishing spots
@@ -3995,7 +4061,13 @@ export const OUTING_STEPS: Readonly<Record<string, SkillStep>> = {
     'karamja-jogres': { minLevel: 45, maxLevel: 85, action: 'combat', location: MembersPlaces.JOGRES_KARAMJA, levelBand: true, toolItemIds: [Items.STEEL_SCIMITAR], xpPerAction: 600, ticksPerAction: 4, successRate: 1.0, itemGained: Items.BIG_BONES, extra: { npcType: 'jogre', hitsToKill: 15 } },
     'burthorpe-soldiers': { minLevel: 35, maxLevel: 70, action: 'combat', location: MembersPlaces.BURTHORPE_SOLDIERS, levelBand: true, toolItemIds: [Items.STEEL_SCIMITAR], xpPerAction: 500, ticksPerAction: 4, successRate: 1.0, itemGained: Items.BONES, extra: { npcTypes: ['death_ig_solider_wander', 'death_guard1', 'death_guard2'], hitsToKill: 12 } },
     'rellekka-fishing': { minLevel: 40, maxLevel: 99, action: 'fish', location: MembersPlaces.FISH_RELLEKKA, toolItemIds: [Items.LOBSTER_POT], xpPerAction: 900, ticksPerAction: 5, successRate: 0.5, itemGained: Items.RAW_LOBSTER },
-    'shilo-fishing': { minLevel: 20, maxLevel: 99, action: 'fish', location: MembersPlaces.SHILO_RIVER, toolItemIds: [Items.FLY_FISHING_ROD, Items.FEATHER], xpPerAction: 500, ticksPerAction: 5, successRate: 0.55, itemGained: Items.RAW_TROUT, itemConsumed: Items.FEATHER, extra: { shilo: true } }
+    'shilo-fishing': { minLevel: 20, maxLevel: 99, action: 'fish', location: MembersPlaces.SHILO_RIVER, toolItemIds: [Items.FLY_FISHING_ROD, Items.FEATHER], xpPerAction: 500, ticksPerAction: 5, successRate: 0.55, itemGained: Items.RAW_TROUT, itemConsumed: Items.FEATHER, extra: { shilo: true } },
+    // ---- (bots ideas, round 3: G buzz) the rock crabs' two groups north of Rellekka (PeriodPlaces' boxes: 20 west, 14
+    // east), the woken crab the fight's NPC (horror_rockcrab[_small]: level 13, 50 HP, its drops the game's), combat
+    // 15-60; tasks/CrabTask works them (a fight only when one woke: the human's view) ----
+    'rellekka-crabs-west': { minLevel: 15, maxLevel: 60, action: 'combat', location: [2676, 3719, 0], levelBand: true, toolItemIds: [Items.IRON_SCIMITAR], xpPerAction: 500, ticksPerAction: 4, successRate: 1.0, itemGained: Items.COINS, extra: { npcTypes: ['horror_rockcrab', 'horror_rockcrab_small'], hitsToKill: 12, rocks: ['horror_rockcrab_inactive', 'horror_rockcrab_small_inactive'] } },
+    'rellekka-crabs-east': { minLevel: 15, maxLevel: 60, action: 'combat', location: [2700, 3726, 0], levelBand: true, toolItemIds: [Items.IRON_SCIMITAR], xpPerAction: 500, ticksPerAction: 4, successRate: 1.0, itemGained: Items.COINS, extra: { npcTypes: ['horror_rockcrab', 'horror_rockcrab_small'], hitsToKill: 12, rocks: ['horror_rockcrab_inactive', 'horror_rockcrab_small_inactive'] } }
+    // ---- end of G buzz's crab steps ----
 };
 
 /** Is (x, z) inside Shilo Village's walls (the cart's side)? */
@@ -4004,6 +4076,123 @@ export function inShilo(x: number, z: number): boolean {
     return x >= x0 && x <= x1 && z >= z0 && z <= z1;
 }
 // ── end of Track M's (round 2) block ─────────────────────────────────────────────────────────────────────────────────
+
+// ---- (bots ideas, round 3: G period) theme G's places on the 274 map (the probes'
+// tiles, and the content's scripts as cited): nothing reads them yet. The builders
+// use them (the G builder: Gertrude, the Gnomeball pitch, the Games Room; the H builder: the crabs, the causeway and the
+// lighthouse, Feldip and Rantz) and add what their content needs in their own blocks: the place names (port/BotPlaces),
+// the directions (port/BotAnswers TOWNS), the topics, the members catalogue, MINIGAME_KINDS, OUTING_STEPS and the crab
+// note in MembersPlaces stay theirs. Boxes are [x0, z0, x1, z1] inclusive; tiles [x, z, level] ----
+export const PeriodPlaces = {
+    // Rellekka's rock crabs: 20 west (maps/m41_58) and 14 east (m42_58), NPC 1266/1268 horror_rockcrab[_small]_inactive
+    // ("Rocks", no op) that wake for a player only while a client observes them (engine World.ts: the human)
+    CRABS_WEST_BOX: [2663, 3713, 2687, 3733] as [number, number, number, number],
+    CRABS_EAST_BOX: [2694, 3715, 2719, 3730] as [number, number, number, number],
+    // the lighthouse's basalt causeway (quest_horror basalt_rocks.rs2: the tile each jump starts from, by the spot's
+    // number: north 1, 3, 5, 7, 9; south 10, 8, 6, 4, 2; spot 3 north and spot 8 south can slip: stat_random(agility,
+    // 5, 255)), its south end on the Rellekka side, the door (horror_lighthouse_doorway: the quest done, it lets you in;
+    // never Jossik, whose talk hands out the quest's reward) and the box PC1 counts
+    CAUSEWAY_SOUTH_END: [2522, 3593, 0] as [number, number, number],
+    CAUSEWAY_NORTH: [
+        [1, 2522, 3595],
+        [3, 2522, 3600],
+        [5, 2518, 3611],
+        [7, 2514, 3613],
+        [9, 2514, 3617]
+    ] as [number, number, number][],
+    CAUSEWAY_SOUTH: [
+        [10, 2514, 3619],
+        [8, 2514, 3615],
+        [6, 2516, 3611],
+        [4, 2522, 3602],
+        [2, 2522, 3597]
+    ] as [number, number, number][],
+    CAUSEWAY_SLIPS: [3, 8] as number[],
+    LIGHTHOUSE_DOOR: [2509, 3636, 0] as [number, number, number],
+    LIGHTHOUSE_BOX: [2495, 3585, 2530, 3645] as [number, number, number, number],
+    // Gertrude (west of Varrock, maps/m49_53): her door (loc_1530, a normal door a bot clicks open: openGateToward did
+    // not), the tile outside it and the one inside; a kitten for 100 coins with Gertrude's Cat done (gertrude.rs2)
+    GERTRUDE: [3150, 3410, 0] as [number, number, number],
+    GERTRUDE_DOOR: [3150, 3412, 0] as [number, number, number],
+    GERTRUDE_OUTSIDE: [3150, 3413, 0] as [number, number, number],
+    GERTRUDE_INSIDE: [3150, 3411, 0] as [number, number, number],
+    // the Gnome Stronghold's Gnomeball pitch (game_gnomeball: gnomeball.dbrow's zones, the gate that unequips both
+    // hands, the referee, the goal "Shoot" is aimed at, the pitch-side tile the probe needed, the green wingers, the
+    // tacklers' three lines, which hunt only while the human observes)
+    GNOMEBALL_PITCH_BOX: [2383, 3481, 2406, 3496] as [number, number, number, number],
+    GNOMEBALL_GATE: [2383, 3488, 0] as [number, number, number],
+    GNOMEBALL_SIDE: [2381, 3488, 0] as [number, number, number],
+    GNOMEBALL_REFEREE: [2384, 3487, 0] as [number, number, number],
+    GNOMEBALL_GOAL: [2404, 3488, 0] as [number, number, number],
+    GNOMEBALL_WINGERS: [
+        [2393, 3483],
+        [2393, 3493]
+    ] as [number, number][],
+    GNOMEBALL_TACKLER_LINES: [2391, 2396, 2400] as number[],
+    // the Games Room under Burthorpe (game_gamesroom; stairs.rs2): the stairs down (board_game_stairs_grey_all) and where
+    // they land on level 1 (± a tile), the stairs back up (board_game_stairs_grey_base2, to Burthorpe at 2899,3564), the
+    // stairs between levels 1 and 0 (board_game_stairs_top on 1, _base on 0, in pairs), the room's box (no walking graph
+    // in it: a way out in port/BotExits) and the Runelink room's (a challenge there opens its options at once)
+    GAMES_STAIRS_DOWN: [2899, 3566, 0] as [number, number, number],
+    GAMES_ARRIVAL: [2206, 4933, 1] as [number, number, number],
+    GAMES_STAIRS_UP: [2205, 4935, 1] as [number, number, number],
+    GAMES_STAIRS_TOP: [
+        [2207, 4935, 1],
+        [2212, 4942, 1]
+    ] as [number, number, number][],
+    GAMES_STAIRS_BASE: [
+        [2207, 4935, 0],
+        [2212, 4941, 0]
+    ] as [number, number, number][],
+    GAMES_ROOM_BOX: [2176, 4928, 2239, 4991] as [number, number, number, number],
+    RUNELINK_ROOM_BOX: [2216, 4936, 2223, 4943] as [number, number, number, number],
+    // the Feldip Hills (chompies: quest_chompybird): the hills' centre, where a bloated toad may be placed (mapsquares
+    // 39-41/46) but not on Rantz's turf, the swamp bubbles (bellows), the swamp toads, the achey trees; Rantz (the ogre bow
+    // for 500-550), his cave's entrance (the ogre chest's bellows) and spit roast; the Fremennik wolves on the Rellekka
+    // road (wolf bones for ogre arrow tips: level ~64, cowardly)
+    FELDIP: [2560, 2975, 0] as [number, number, number],
+    FELDIP_TOAD_BOX: [2496, 2944, 2687, 3007] as [number, number, number, number],
+    RANTZ_TURF_BOX: [2631, 2962, 2639, 2971] as [number, number, number, number],
+    SWAMP_BUBBLES_BOXES: [
+        [2525, 2976, 2549, 2989],
+        [2597, 2963, 2599, 2967]
+    ] as [number, number, number, number][],
+    SWAMP_TOADS_BOX: [2523, 2975, 2547, 2988] as [number, number, number, number],
+    ACHEY_TREES_BOX: [2589, 2948, 2629, 2982] as [number, number, number, number],
+    RANTZ: [2630, 2981, 0] as [number, number, number],
+    RANTZ_CAVE_ENTRANCE: [2629, 2998, 0] as [number, number, number],
+    RANTZ_SPIT: [2630, 2990, 0] as [number, number, number],
+    FREMENNIK_WOLVES_BOX: [2626, 3622, 2644, 3637] as [number, number, number, number],
+    // Castle Wars (talk only, in the future tense): its three portals (no script: "Nothing interesting happens.") stand in
+    // a sealed lobby no one reaches in 274 (the nearest walkable tile 45 tiles off): no task's destination may lie in it
+    CASTLE_WARS_PORTALS: [
+        [2436, 3096],
+        [2436, 3082],
+        [2436, 3089]
+    ] as [number, number][],
+    CASTLE_WARS_LOBBY_BOX: [2436, 3082, 2446, 3098] as [number, number, number, number],
+    CASTLE_WARS_NEAREST: [2482, 3134, 0] as [number, number, number]
+};
+// ---- end of G period's block ----
+
+// ---- (bots ideas, round 3: G buzz) the Rellekka buzz's places of the H builder's (tasks/BuzzTask's sightseeing, the
+// crab task's groups): 274's NPCs and tiles at Rellekka (maps/m41_57: the longhall's barkeep 2662,3673, the fish and fur
+// mongers 2646,3675 and 2640,3675, Skulgrimen's weapons salesman 2663,3694), the stops a sightseer stands at (walkable
+// tiles near each: the square, the market, the longhall's door, the piers, Skulgrimen's; a stop on a blocked tile is
+// stood at from the walkable tile nearest it), and the crab groups' middles (walkable tiles among the rocks: the boxes'
+// centres are rock) ----
+export const BuzzPlaces = {
+    RELLEKKA_STOPS: [
+        ['square', 2660, 3660],
+        ['market', 2643, 3679],
+        ['longhall', 2659, 3668],
+        ['piers', 2638, 3694],
+        ['skulgrimen', 2661, 3690]
+    ] as [string, number, number][],
+    LONGHALL_BARKEEP: [2662, 3673, 0] as [number, number, number],
+    CRAB_GROUPS: { west: [2676, 3719], east: [2700, 3726] } as Record<'west' | 'east', [number, number]>
+};
+// ---- end of G buzz's block ----
 
 
 function distanceSq(a: Coord, b: Coord, includeLevel = false): number {
@@ -4075,7 +4264,53 @@ export interface DungeonRoute {
     key?: string;
     enter?: readonly { loc: string; op: number }[];
     exit?: { loc: string; op: number };
+    // ---- (bots ideas, Track A) a room its flood cannot place (a big dungeon's middle, wider than a room's flood) is the
+    // floor's side of the first door (BotAction's doors walk): Taverley's deep part, behind its one key door ----
+    outward?: boolean;
+    // ---- end of Track A's field ----
 }
+
+// ---- (bots ideas, Track A: the period endgame) Taverley's deep part: the tiles behind the dusty-key door (deepdungeondoor
+// 2924,9803: the blue dragons, the black demons, the hellhounds, the black dragons; about 2,500 tiles, the probe's flood),
+// found once by a flood from the door's inner side on the 274 collision (the door shut), and its route: one door, the key
+// door, its unknown rooms outward (the Taverley dungeon's middle is wider than a room's flood). Before it, every tile of
+// x 2800-2989 below was "the Taverley ladder" with no door, and a walk to the deep part pressed against the locked door's
+// far side ----
+let taverleyDeep: Set<number> | null = null;
+export function inTaverleyDeep(x: number, z: number): boolean {
+    if (x < 2800 || x > 2923 || z < 9700 || z > 9900) return false;
+    if (!taverleyDeep) {
+        const seen = new Set<number>([(2923 << 14) | 9803]);
+        const queue: number[] = [2923, 9803];
+        for (let i = 0; i < queue.length && seen.size < 6000; i += 2) {
+            const cx = queue[i];
+            const cz = queue[i + 1];
+            for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+                const nx = cx + dx;
+                const nz = cz + dz;
+                if (nx < 2800 || nx > 2923 || nz < 9700 || nz > 9900) continue;
+                const k = (nx << 14) | nz;
+                if (seen.has(k) || !canTravel(0, cx, cz, dx, dz, 1, 0, CollisionType.NORMAL)) continue;
+                seen.add(k);
+                queue.push(nx, nz);
+            }
+        }
+        taverleyDeep = seen;
+    }
+    return taverleyDeep.has((x << 14) | z);
+}
+const TAVERLEY_KEY = 'taverley-dungeon';
+const TAVERLEY_DEEP_ROUTE: DungeonRoute = { key: TAVERLEY_KEY, entrance: Locations.TAVERLY_DUNGEON_ENTRANCE, floor: Locations.TAVERLY_DUNGEON_FLOOR, doors: [[[2924, 9803, 2923, 9803]]], outward: true };
+// ---- end of Track A's block ----
+
+// ---- (bots ideas, Track A: the period endgame) the key doors: a loc's 274 debugname -> the key a bot uses on it
+// (BotAction's door opener: the item used on the door, 274's [oplocu,...]; op1 from inside opens it without) ----
+export const KEY_DOORS: Readonly<Record<string, string>> = {
+    // Taverley's deep part (the dusty key, Velrak's: port/BotVelrak) and the jail's cell (the jailer's jail key)
+    deepdungeondoor: 'dusty_key',
+    dungeonjail: 'jail_key'
+};
+// ---- end of Track A's key doors ----
 
 /**
  * port (the variety work, round 1, the fixes): the Edgeville dungeon's name (dungeonRoute's `key`), the hill giants'
@@ -4114,6 +4349,32 @@ const EDGEVILLE_HILL_GIANTS_ROUTE: DungeonRoute = {
  * these serve is a walk from its floor.
  */
 export const DUNGEON_ENTRIES: readonly { name: string; box: readonly [number, number, number, number]; route: DungeonRoute }[] = [
+    // ---- (bots ideas, Track A: the period endgame) the endgame's dungeons and lairs, each with its way out, so a bot there
+    // after a relog, a flight or a trip's end walks out by the game's own clicks (no rescue jump across the map). Probed on
+    // the 274 map: the doors on each way, the landing tiles. First: the Edgeville black demons' box lies inside the
+    // Edgeville dungeon's below ----
+    // the Edgeville dungeon's black demons (3084-3092, 9957-9961): the druids' route and the double door north of their room
+    // (loc_1557/1558 3105-3106,9944, its wall on their north side); one dungeon with the giants' and the druids' (the key)
+    { name: 'edgeville_black_demons', box: [3072, 9945, 3112, 9990], route: { key: EDGEVILLE_DUNGEON_KEY, entrance: Locations.EDGEVILLE_TRAPDOOR, floor: Locations.EDGEVILLE_DUNGEON_FLOOR, doors: [EDGEVILLE_FIRST_DOOR, [[3131, 9917, 3131, 9918], [3132, 9917, 3132, 9918]], [[3105, 9944, 3105, 9945], [3106, 9944, 3106, 9945]]], enter: [{ loc: 'trapdoor', op: 1 }, { loc: 'trapdoor_open', op: 1 }], exit: { loc: 'ladder_from_cellar', op: 1 } } },
+    // the Heroes' Guild basement (its ladder down ladder_cellar 2892,3507; up ladder_from_cellar_directional 2892,9907): the blue
+    // dragon past the gate (loc_1557/1558 2909-2910,9910, its wall on the ladder side's south). Before the Taverley rule below
+    // (x 2800-2989), which took it for Taverley's
+    { name: 'heroes_basement', box: [2880, 9895, 2925, 9920], route: { key: 'heroes-basement', entrance: Locations.HEROES_GUILD_LADDER, floor: Locations.HEROES_BASEMENT_FLOOR, doors: [[[2909, 9910, 2909, 9909], [2910, 9910, 2910, 9909]]], enter: [{ loc: 'ladder_cellar', op: 1 }], exit: { loc: 'ladder_from_cellar_directional', op: 1 } } },
+    // the deep Wilderness dungeon (stairs_cellar 3044,3924 down; loc_1734 3044,10324 up): the fire giants past three double gates
+    // (each its wall on its east side: 3040, 3022, 3044)
+    { name: 'deep_wild_dungeon', box: [3000, 10290, 3070, 10360], route: { key: 'deep-wild-dungeon', entrance: Locations.DEEP_WILD_STAIRS, floor: Locations.DEEP_WILD_FLOOR, doors: [[[3041, 10308, 3040, 10308], [3041, 10307, 3040, 10307]], [[3023, 10311, 3022, 10311], [3023, 10312, 3022, 10312]], [[3044, 10342, 3045, 10342], [3044, 10341, 3045, 10341]]], enter: [{ loc: 'stairs_cellar', op: 1 }], exit: { loc: 'loc_1734', op: 1 } } },
+    // the King Black Dragon's lever room (the west Lava Maze ladder's p_teleport lands at 3069,10255; out by its ladder
+    // loc_1766, to 3016,3849) and its lair (the lever in lands at 2717,9802; out by the lever dragonkingoutlever: BotAction
+    // walkTo's exit by the route's `exit` where no ladder is by the floor). Each its own key: the lever between them is the
+    // trip's own click (port/BotEndgameTeams), never a walk's
+    { name: 'kbd_lever_room', box: [3056, 10244, 3080, 10266], route: { key: 'kbd-lever-room', entrance: Locations.KBD_LADDER, floor: [3069, 10255, 0], enter: [{ loc: 'wildymirrorladdertop1', op: 1 }], exit: { loc: 'loc_1766', op: 1 } } },
+    { name: 'kbd_lair', box: [2690, 9790, 2745, 9835], route: { key: 'kbd-lair', entrance: Locations.KBD_LADDER, floor: [2717, 9802, 0], exit: { loc: 'dragonkingoutlever', op: 1 } } },
+    // (bots ideas, the KQ track) the Kalphite lair: its tunnels on level 2 (the burrow's roped entrance lands at 3483,9510,2;
+    // its rope up kalphite_burrow_exit 3483,9509), the Queen's chamber on level 0 below them (up by kalphite_chamber_exit
+    // 3508,9494): BotAction's other-floor exit climbs the chamber's rope, then the burrow's. Entered by the KQ attempt's own
+    // ropes (port/BotKqTeams), never a walk's; the entrance the tile beside the burrow (^kalphite_burrow_exit_coord)
+    { name: 'kalphite_lair', box: [3450, 9460, 3530, 9540], route: { key: 'kalphite-lair', entrance: [3226, 3108, 0], floor: [3483, 9510, 2], exit: { loc: 'kalphite_burrow_exit', op: 1 } } },
+    // ---- end of Track A's dungeons ----
     // (the fixes: the sewers' doors, from the manhole's floor: the door east into the skeletons' tunnels (3246/3247,9892),
     // the door west out of them (3246/3245,9916) to a short passage, its door south into the zombies' (3241,9911/9910),
     // and the sticky web south to the moss giants (3210,9899-9897: its tile a room of its own, cut by the walk with the
@@ -4159,7 +4420,9 @@ export function dungeonRoute(x: number, z: number): DungeonRoute {
     // (the variety work, round 1, Track D: the F2P dungeons of 2004; before the Taverley rule below, as it takes every x
     // of 2800-2989 whatever z, and the Karamja volcano lies in it)
     for (const entry of DUNGEON_ENTRIES) if (x >= entry.box[0] && x < entry.box[2] && z >= entry.box[1] && z < entry.box[3]) return entry.route;
-    if (x >= 2800 && x < 2990) return { entrance: Locations.TAVERLY_DUNGEON_ENTRANCE, floor: Locations.TAVERLY_DUNGEON_FLOOR };
+    // (bots ideas, Track A: Taverley's deep part, its key door; the rest of the Taverley rule one dungeon with it, by its key)
+    if (inTaverleyDeep(x, z)) return TAVERLEY_DEEP_ROUTE;
+    if (x >= 2800 && x < 2990) return { key: TAVERLEY_KEY, entrance: Locations.TAVERLY_DUNGEON_ENTRANCE, floor: Locations.TAVERLY_DUNGEON_FLOOR };
     if (x >= 2990 && x < 3080 && z >= 9520 && z < 9610) return { entrance: Locations.ICE_DUNGEON_ENTRANCE, floor: Locations.ICE_DUNGEON_FLOOR };
     if (isZanaris(x, z)) return { entrance: Locations.ZANARIS_SHED, floor: Locations.ZANARIS_LADDER_FOOT };
     return { entrance: [x, z - 6400, 0], floor: [x, z, 0] };

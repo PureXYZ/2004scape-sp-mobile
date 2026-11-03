@@ -50,6 +50,25 @@ import type { Persona } from '#/engine/bot/port/BotPersona.js';
 import type { SlotValues } from '#/engine/bot/port/BotSlots.js';
 import threadsJson from '../../data/threads.json';
 import { botFilter } from '#/engine/bot/port/BotFilter.js';
+// ---- (bots ideas, round 2: C arcs) theme C's hooks (port/BotLives: the saved goal, port/BotGoals) ----
+import { LIVES } from '#/engine/bot/port/BotLives.js';
+// ---- end of C's block ----
+// ---- (bots ideas, round 2: D word) two bots' saved tie (port/BotTies, through the arcs' bus: arcsTie) ----
+import { arcsTie } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- (bots ideas, round 3: G buzz) the update's topics (theme G's switch; a crabs thread raises the partner's offer) ----
+import { buzzBoost, periodOn, periodTalk } from '#/engine/bot/port/BotPeriod.js'; // (and G period's periodTalk)
+import { saysQuestDone } from '#/engine/bot/port/BotAnswers.js'; // (the KQ fixes, T-3: the update's quests done or not)
+// ---- (bots ideas, round 4: I model) a turn after the opener near the human in the on-device model's words ----
+import { ambientWords } from '#/engine/bot/port/BotModelAmbient.js';
+// ---- end of I model's block ----
+/** Rellekka's square, and the crabs topic's ×4 within this of it */
+const RELLEKKA: [number, number] = [2660, 3670];
+const RELLEKKA_TALK = 60;
+// ---- end of G buzz's imports ----
+// ---- (bots ideas, round 3: H move) walk up to talk, stop to talk (port/BotTalkMoves) ----
+import { holdThread, openerMove, threadEnded, walkUpThen } from '#/engine/bot/port/BotTalkMoves.js';
+// ---- end of H move's imports ----
+// ---- end of D's block ----
 
 // ── the data ─────────────────────────────────────────────────────────────────
 
@@ -144,11 +163,20 @@ class Side {
     }
     /** its next goal: the next unlock of its task's skill ("30 wc for willows"), else the next tool or weapon, else null */
     get goal(): string | null {
+        // ---- (bots ideas, round 2: C arcs) the saved goal when it has one ("60 wc for yews", "rune legs", "100k"): the
+        // pair's follow-up ("u get 60 yet?") is about something that lasts ----
+        const saved = LIVES.sideGoal?.(this.bot) ?? null;
+        if (saved) return saved;
+        // ---- end of C's block ----
         const s = this.slots;
         if (s.next && s.skill) return s.unlock && Math.random() < 0.5 ? `${s.next} ${s.skill} for ${s.unlock}` : `${s.next} ${s.skill}`;
         return s.want ? `a ${s.want}` : null;
     }
     get want(): string | null {
+        // ---- (bots ideas, round 2: C arcs) a saved gear goal's piece ("rune legs") ----
+        const saved = LIVES.sideWant?.(this.bot) ?? null;
+        if (saved) return saved;
+        // ---- end of C's block ----
         return this.slots.want ? `a ${this.slots.want}` : null;
     }
     get place(): string | null {
@@ -240,6 +268,12 @@ export interface ThreadLine {
     speaker: Player;
     to: Player;
     text: string;
+    // ---- (bots ideas, round 4: I model) the turns that stay the rules' with a model (port/BotModelAmbient) ----
+    /** it opens the thread or a topic ("wc lvl?", "still 41?", "btw u members?") */
+    opener?: boolean;
+    /** the closer the thread ends with ("k cya", "gl") */
+    closer?: boolean;
+    // ---- end of I model's block ----
 }
 
 interface Turn {
@@ -249,6 +283,8 @@ interface Turn {
     plain?: string;
     /** a line said only when it opens the thread or a topic (its freshness is checked: the registry) */
     opener?: boolean;
+    /** (bots ideas, round 4: I model) the closer the thread ends with */
+    closer?: boolean;
 }
 
 interface Drawn {
@@ -312,6 +348,8 @@ const CMP_AFTER: Readonly<Record<Cmp, string>> = { lower: 'afterLower', higher: 
  */
 interface Topic {
     weight: number;
+    /** (bots ideas, round 3: G buzz) the weight for these two, in its place (the crabs near Rellekka) */
+    weightFor?: (a: Side, b: Side) => number;
     /** never twice for a pair in a session (asl, where u from: the follow-up would be odd) */
     once?: boolean;
     fits?: (a: Side, b: Side) => boolean;
@@ -447,22 +485,27 @@ function yesNoTopic(id: string, yes: (s: Side) => boolean, after: (a: boolean, b
     };
 }
 
-/** small talk (a's line, b's answer, a's own word, b's after): no state but the persona's */
-function chatTopic(id: string): Topic['draw'] {
-    return (_a, _b, depth) => {
+/**
+ * small talk (a's line, b's answer, a's own word, b's after): no state but the persona's. (The KQ fixes, T-3: `done`, a
+ * quest's talk: each side's answer from 'yes' or 'no' by whether it did the quest, as its answers say (port/BotAnswers
+ * saysQuestDone), the opener's own word from 'own' and, if it did, 'ownYes'; no dice of its own: the draws as before)
+ */
+function chatTopic(id: string, done?: (s: Side) => boolean): Topic['draw'] {
+    return (a, b, depth) => {
+        const said = (s: Side): Pool => pool(id, done ? (done(s) ? 'yes' : 'no') : 'answer');
         const ask = line(pool(id, 'ask'), {});
-        const ans = line(pool(id, 'answer'), {});
+        const ans = line(said(b), {});
         if (!ask || !ans) return null;
         const turns: Turn[] = [{ by: 0, text: ask, opener: true }];
         const hasOwn = pool(id, 'own').length > 0;
         if (hasOwn) {
             turns.push({ by: 1, text: ans });
-            const own = line(pool(id, 'own'), {});
+            const own = line(done?.(a) ? [...pool(id, 'own'), ...pool(id, 'ownYes')] : pool(id, 'own'), {});
             if (own) turns.push({ by: 0, text: own });
         } else {
             turns.push(answer(1, ans, 0.5));
             if (turns[1].plain !== undefined) {
-                const mine = line(pool(id, 'answer'), {});
+                const mine = line(said(a), {});
                 if (mine) turns.push({ by: 0, text: mine });
             }
         }
@@ -633,7 +676,10 @@ const TOPICS: Readonly<Record<string, Topic>> = {
     },
     halo: { weight: 1, draw: yesNoTopic('halo', s => s.owns('halo', young(s) ? 0.45 : 0.3)) },
     wow: { weight: 1, draw: chatTopic('wow') },
-    cw: { weight: 1, draw: chatTopic('cw') },
+    // ---- (bots ideas, round 3: G period) Castle Wars, talk only and always to come (its lobby is sealed in 274): with theme
+    // G on its pools are cwSoon's (cw's and a few more, every one in the future tense: PC9) ----
+    cw: { weight: 1, draw: (a, b, depth, prev) => chatTopic(periodOn() ? 'cwSoon' : 'cw')(a, b, depth, prev) },
+    // ---- end of G period's block ----
     zezima: { weight: 1, draw: chatTopic('zezima') },
     lag: { weight: 1, draw: chatTopic('lag') },
     food: { weight: 1, draw: chatTopic('food') },
@@ -643,8 +689,69 @@ const TOPICS: Readonly<Record<string, Topic>> = {
     hacked: { weight: 1, once: true, draw: chatTopic('hacked') },
     dream: { weight: 1, draw: chatTopic('dream') },
     quest: { weight: 1, fits: (_a, b) => b.cb >= 25, draw: yesNoTopic('quest', s => s.cb >= 32 || s.owns('dragon', 0.2)) },
-    weather: { weight: 1, draw: chatTopic('weather') }
+    weather: { weight: 1, draw: chatTopic('weather') },
+    // ---- (bots ideas, round 3: G period) theme G's topics: the
+    // Games Room (members, 1) and a pet out (1.5, when either of the two has one: port/BotPeriod periodTalk.hasPetOut);
+    // theme G off, neither fits (no weight, no dice: the draw as before). A topic replaces another in a thread: no
+    // thread more. (Round 3's tune, 2026-11-01, PC8 "about 3 %": the period's topics about 1.5 times as often as round 3
+    // had them (gamesroom 0.5, pet 1, update 1.5, fremmy 1, crabs 0.5 / 2), Gnomeball a topic of its own (0.5); Castle
+    // Wars as before (1): its talk is never the bulk) ----
+    gamesroom: { weight: 1, fits: () => periodOn() && isMembersWorld(), draw: chatTopic('gamesroom') },
+    pet: { weight: 1.5, fits: (a, b) => periodOn() && (periodTalk.hasPetOut?.(a.bot) === true || periodTalk.hasPetOut?.(b.bot) === true), draw: (a, b, depth) => petTopic(a, b, depth) },
+    gnomeball: { weight: 0.5, fits: () => periodOn() && isMembersWorld(), draw: chatTopic('gnomeball') },
+    // ---- end of G period's block ----
+    // ---- (bots ideas, round 3: G buzz) the update's talk: Horror from
+    // the Deep (17 Nov) for combat 30+, the Fremennik Trials (2 Nov), the rock crabs (×4 within 60 tiles of Rellekka); a
+    // members world's, theme G on (port/BotPeriod periodOn: off, none fits and topicFor's draw is as before). They take
+    // turns, not threads: the threads' rate is the chatter's. A thread about the crabs is word of them: the partner's buzz
+    // offer is raised for its session (port/BotPeriod buzzBoost, no dice) ----
+    // (round 3's tune: update 1.5 → 2, fremmy 1 → 1.5, crabs 0.5 → 1 and 2 → 3 near Rellekka)
+    // (the KQ fixes, T-3: "ya hftd was so hard" from a bot whose own answer is "not yet" no more: the answers by its
+    // combat level as port/BotAnswers' "did you do X", saysQuestDone)
+    update: { weight: 2, fits: (_a, b) => periodOn() && isMembersWorld() && b.cb >= 30, draw: chatTopic('update', s => saysQuestDone(s.cb, 'horror from the deep')) },
+    fremmy: { weight: 1.5, fits: () => periodOn() && isMembersWorld(), draw: chatTopic('fremmy', s => saysQuestDone(s.cb, 'the fremennik trials')) },
+    crabs: {
+        weight: 1,
+        weightFor: a => (Math.max(Math.abs(a.bot.x - RELLEKKA[0]), Math.abs(a.bot.z - RELLEKKA[1])) <= RELLEKKA_TALK ? 3 : 1),
+        fits: () => periodOn() && isMembersWorld(),
+        draw: (a, b, depth, prev) => {
+            const drawn = chatTopic('crabs')(a, b, depth, prev);
+            if (drawn) buzzBoost(b.bot, 'crabs');
+            return drawn;
+        }
+    }
+    // ---- end of G buzz's topics ----
 };
+
+// ---- (bots ideas, round 3: G period) the topic pet: the one without asks the one with ("is that ur kitten?" / "ya from
+// gertrude" / "how much?" / "100gp west of varrock" / "aww"); a bot with one, to one without, shows it off ("my kitten
+// is so cute lol" / "aww where u get it" / "gertrude west of varrock") ----
+function petTopic(a: Side, b: Side, depth: number): Drawn | null {
+    const has = (s: Side): boolean => periodTalk.hasPetOut?.(s.bot) === true;
+    const turns: Turn[] = [];
+    if (has(b)) {
+        const ask = line(pool('pet', 'ask'), {});
+        const ans = line(pool('pet', 'answer'), {});
+        if (!ask || !ans) return null;
+        turns.push({ by: 0, text: ask, opener: true }, { by: 1, text: ans });
+        if (depth >= 4 && Math.random() < MORE_CHANCE) {
+            const more = line(pool('pet', 'moreAsk'), {});
+            const said = line(pool('pet', 'moreAnswer'), {});
+            if (more && said) turns.push({ by: 0, text: more }, { by: 1, text: said });
+        }
+    } else {
+        const show = line(pool('pet', 'show'), {});
+        const reply = line(pool('pet', 'reply'), {});
+        if (!show || !reply) return null;
+        turns.push({ by: 0, text: show, opener: true }, { by: 1, text: reply });
+        const own = line(pool('pet', 'own'), {});
+        if (own && depth >= 3 && Math.random() < 0.6) turns.push({ by: 0, text: own });
+    }
+    const after = line(pool('pet', 'after'), {});
+    if (after && turns.length < depth && Math.random() < 0.5) turns.push({ by: turns[turns.length - 1].by === 0 ? 1 : 0, text: after });
+    return { turns, facts: {}, followUp: false };
+}
+// ---- end of G period's block ----
 
 /** the topic ids (tests) */
 export const THREAD_TOPICS: readonly string[] = Object.keys(TOPICS);
@@ -661,7 +768,7 @@ function topicFor(a: Side, b: Side, mem: PairMemory, not: string | null): { id: 
             if (t.once || prev.facts.followed || World.currentTick - prev.tick < 1500) continue;
             if (!['level', 'cb', 'total', 'doing'].includes(id)) continue;
         }
-        list.push({ id, w: t.weight * (prev ? 2 : 1), prev });
+        list.push({ id, w: (t.weightFor ? t.weightFor(a, b) : t.weight) * (prev ? 2 : 1), prev });
     }
     if (!list.length) return null;
     let x = Math.random() * list.reduce((s, e) => s + e.w, 0);
@@ -733,7 +840,7 @@ export function drawThread(a: Player, b: Player, depth: number): ThreadLine[] | 
     // (cut on a counter-question: its plain answer, a question nobody answers is no ending)
     const last = kept[kept.length - 1];
     if (last.plain !== undefined) kept[kept.length - 1] = { by: last.by, text: last.plain };
-    if (end < turns.length && kept.length < depth && Math.random() < CLOSER_CHANCE) kept.push({ by: last.by === 0 ? 1 : 0, text: pick(DATA.closers) });
+    if (end < turns.length && kept.length < depth && Math.random() < CLOSER_CHANCE) kept.push({ by: last.by === 0 ? 1 : 0, text: pick(DATA.closers), closer: true });
     for (let i = 0; i < kept.length; i++) {
         if (kept[i].plain === undefined) continue;
         stats.counters++;
@@ -744,7 +851,8 @@ export function drawThread(a: Player, b: Player, depth: number): ThreadLine[] | 
     for (const id of topics) stats.byTopic[id] = (stats.byTopic[id] ?? 0) + 1;
     stats.depths.push(kept.length);
     if (stats.depths.length > 5000) stats.depths.shift();
-    return kept.map(t => ({ speaker: t.by === 0 ? a : b, to: t.by === 0 ? b : a, text: t.text }));
+    // (bots ideas, round 4: I model: the openers and the closer marked, the turns a model never words)
+    return kept.map(t => ({ speaker: t.by === 0 ? a : b, to: t.by === 0 ? b : a, text: t.text, ...(t.opener ? { opener: true } : {}), ...(t.closer ? { closer: true } : {}) }));
 }
 
 /**
@@ -771,8 +879,19 @@ export function levelUpMore(asker: Player, leveller: Player): [string, string] |
 
 /** the most turns for these two: friends (a clique) and hub regulars (social bots) talk longer */
 export function depthFor(a: Player, b: Player): number {
-    return sameClique(a.username, b.username) || a.botPlanner === 'extras_social' || b.botPlanner === 'extras_social' ? DEPTH_FRIENDS : DEPTH_OTHERS;
+    // (bots ideas, round 2: D word: and two who know each other well, an acquaintance of 4+: port/BotTies)
+    return sameClique(a.username, b.username) || a.botPlanner === 'extras_social' || b.botPlanner === 'extras_social' || tiedWell(a, b, TIE_DEEP) ? DEPTH_FRIENDS : DEPTH_OTHERS;
 }
+
+// ---- (bots ideas, round 2: D word) a tied partner (an acquaintance of 2+: port/BotTies) weighs TIE_WEIGHT in the
+// partner pick, and talks as long as friends from TIE_DEEP ----
+const TIE_KNOWN = 2;
+const TIE_DEEP = 4;
+const TIE_WEIGHT = 3;
+function tiedWell(a: Player, b: Player, least: number): boolean {
+    return (arcsTie(a.username, b.username)?.acquaintance ?? 0) >= least;
+}
+// ---- end of D's block ----
 
 // ── running a thread ─────────────────────────────────────────────────────────
 
@@ -784,6 +903,8 @@ interface Running {
     area: string;
     /** the opener whose first turn is its due line (port/BotChatter): that turn is no extra line */
     counted: Set<Player>;
+    /** (bots ideas, round 4: I model) each bot's last line in the thread as it was said (the rules' or the model's) */
+    said?: Map<Player, string>;
 }
 
 const running = new Map<string, Running>();
@@ -853,7 +974,8 @@ function partnerFor(a: Player): Player | null {
     }
     // (one at its keyboard lately, chatting, most of all: talkers talk to each other, and the quiet stay quiet: H6)
     const now = World.currentTick;
-    const w = (o: Player): number => botPersona(o).sociability * (sameClique(a.username, o.username) ? MATE_WEIGHT : 1) * ((BotManager.botFor(o)?.currentTask?.name ?? '').split(':')[0] === kind ? SAME_TASK_WEIGHT : 1) * (o.hasWaypoints() ? 0.5 : 1) * (now - lastChatAt(o) <= CHATTING_TICKS ? CHATTING_WEIGHT : 1);
+    // (bots ideas, round 2: D word: a tied partner x TIE_WEIGHT)
+    const w = (o: Player): number => botPersona(o).sociability * (sameClique(a.username, o.username) ? MATE_WEIGHT : 1) * ((BotManager.botFor(o)?.currentTask?.name ?? '').split(':')[0] === kind ? SAME_TASK_WEIGHT : 1) * (o.hasWaypoints() ? 0.5 : 1) * (now - lastChatAt(o) <= CHATTING_TICKS ? CHATTING_WEIGHT : 1) * (tiedWell(a, o, TIE_KNOWN) ? TIE_WEIGHT : 1);
     // (the pick's voice checked last, a few picks at most: port/BotVoice's count is the costliest step at 500 bots; the
     // fixes, B4: uncounted, a partner passed over holds no line of its own)
     for (let tries = 0; tries < 3 && list.length; tries++) {
@@ -891,6 +1013,31 @@ export function startThread(a: Player, source: string, partner: Player | null = 
     if (!free(b) || b.level !== a.level || Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z)) > APART || parting(a, b)) return fail('partner');
     const lines = drawThread(a, b, depth ?? depthFor(a, b));
     if (!lines) return fail('topic');
+    // ---- (bots ideas, round 3: H move) the opener's move (port/BotTalkMoves openerMove): a standing opener walks up to
+    // a partner 5-12 tiles off (0.3 + 0.5 × sociability; a clique mate 0.8) and the thread begins when it is within 3; a
+    // walking opener opens none with a stranger more than 4 off (its due line is said as before). The lines are drawn
+    // first, so no topic is wasted; a walk-up given up says nothing ----
+    const move = openerMove(a, b);
+    if (move === 'refuse') return fail('walking');
+    if (move === 'walk') {
+        const countOpener = source !== 'chatter';
+        const walking = walkUpThen(
+            a,
+            b,
+            () => {
+                if (free(a) && free(b) && areaFreeForThread(a) && voiceFree(a, World.currentTick, THREAD_SHARE_LINES)) begin(a, b, lines, World.currentTick, countOpener);
+                else stats.fails['walkup'] = (stats.fails['walkup'] ?? 0) + 1;
+            },
+            () => {
+                stats.fails['walkup'] = (stats.fails['walkup'] ?? 0) + 1;
+            }
+        );
+        if (walking) {
+            stats.bySource[source] = (stats.bySource[source] ?? 0) + 1;
+            return true;
+        }
+    }
+    // ---- end of H move's opener ----
     stats.bySource[source] = (stats.bySource[source] ?? 0) + 1;
     // (a thread in place of the opener's due line is that line; one begun elsewhere, a friend's, is one of its own lines too)
     begin(a, b, lines, now, source !== 'chatter');
@@ -907,6 +1054,7 @@ export function begin(a: Player, b: Player, lines: ThreadLine[], now: number = W
     cast.set(b, r);
     areaNext.set(area, now + AREA_GAP[0] + Math.floor(Math.random() * (AREA_GAP[1] - AREA_GAP[0])));
     if (areaNext.size > 4096) areaNext.clear();
+    holdThread(a, b, true); // (bots ideas, round 3: H move: both stop to talk, if walking or idle and holdable: port/BotTalkMoves)
     turn(r, 0);
 }
 
@@ -924,8 +1072,12 @@ function turn(r: Running, i: number): void {
     const l = r.lines[i];
     if (!l || !going(r)) {
         if (running.get(r.area) === r) running.delete(r.area);
+        // ---- (bots ideas, round 3: H move) the holds end: 2-6 ticks after the last line; at once when it stopped ----
+        threadEnded(r.a, r.b, !l);
+        // ---- end of H move's end ----
         return;
     }
+    if (i > 0) holdThread(r.a, r.b); // (bots ideas, round 3: H move: one that began to walk meanwhile stops)
     const persona = botPersona(l.speaker);
     // (each turn takes the place of the speaker's next line of its own (the talk budget, H7): the opener's first, its due
     // line, apart)
@@ -933,7 +1085,16 @@ function turn(r: Running, i: number): void {
     else countAsOwnLine(l.speaker);
     noteSaid(l.speaker, l.text);
     const styled = styleLine(l.text, persona).line;
-    sayTyped(l.speaker, styled, { to: l.to, kind: 'practice', then: () => turn(r, i + 1) }, i === 0 ? 0 : reactionTicks(persona, 'notice'));
+    // ---- (bots ideas, round 4: I model) a turn after the opener, near the human, in the on-device model's words
+    // (port/BotModelAmbient: Bots' own talk on Model; the partner's last line its "heard", the rules' turn its hint and
+    // fallback, said by its rules' time + 4 at the latest); the openers and the closer stay the rules' ----
+    const extra = i === 0 ? 0 : reactionTicks(persona, 'notice');
+    const said = (r.said ??= new Map());
+    said.set(l.speaker, styled);
+    const line = { to: l.to, kind: 'practice' as const, then: () => turn(r, i + 1) };
+    if (i > 0 && !l.opener && !l.closer && ambientWords({ kind: 'thread', bot: l.speaker, partner: l.to, heard: said.get(l.to) ?? r.lines[i - 1].text, hint: l.text, ruleText: styled, extra, onSaid: text => said.set(l.speaker, text) }, line)) return;
+    // ---- end of I model's block ----
+    sayTyped(l.speaker, styled, line, extra);
 }
 
 /**
@@ -996,6 +1157,14 @@ export function threadStats(): { started: number; byTopic: Record<string, number
 let lastTopics: string[] = [];
 export function lastThreadTopicsForTest(): string[] {
     return [...lastTopics];
+}
+
+/**
+ * (the KQ fixes, T-3) Tests only: one topic's turns for a (opening) and b, drawn as a thread draws them (its fits not
+ * asked), or null. Never called by the game.
+ */
+export function drawTopicForTest(id: string, a: Player, b: Player, depth: number): { by: 0 | 1; text: string; plain?: string }[] | null {
+    return TOPICS[id]?.draw(new Side(a), new Side(b), depth, null)?.turns ?? null;
 }
 
 /** Tests only: forget the running threads and the areas' gaps (the pair memory stays: it is the bots' own). Never called by the game. */

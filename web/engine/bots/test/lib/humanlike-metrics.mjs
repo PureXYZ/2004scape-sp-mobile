@@ -96,8 +96,15 @@ export function kindGroup(kind) {
     return 'chatter';
 }
 export const isTrade = line => TRADE_KINDS.has(line.kind);
-/** trade or a set piece's line: out of the chatter measures */
-export const isAside = line => TRADE_KINDS.has(line.kind) || SETPIECE_KINDS.has(line.kind);
+/**
+ * (the ideas work, 2026-10-30) the Edgeville PKers' fight banter (port/BotPkTactics pkBanter, the
+ * ditch calls, the reflex lines: kind 'pk' from the EdgevillePKer task) asked for on 2026-10-19 ("a little too quiet ...
+ * like trash talk"): about 4 lines a bot-hour of the whole world's, all at the ditch, which took H7 from about 7.5 to 11
+ * at 100 bots. Counted on its own (H7e), as a set piece's lines are, and kept out of the chatter measures
+ */
+export const isEdgeBanter = line => line.kind === 'pk' && line.task === 'EdgevillePKer';
+/** trade, a set piece's line or the Edgeville fight banter: out of the chatter measures */
+export const isAside = line => TRADE_KINDS.has(line.kind) || SETPIECE_KINDS.has(line.kind) || isEdgeBanter(line);
 
 /**
  * A line's kind (see the header): `explicit` from the library, `tag` from BotPlayer._say, `reply` from BotChat's reply
@@ -432,6 +439,15 @@ export function quietShare(r) {
     return { value: pct(quiet, windows), detail: `${quiet} of ${windows} ten-minute windows of non-vendor bots without a non-trade line` };
 }
 
+/** H7e: the Edgeville PKers' fight banter (isEdgeBanter) a bot-hour of the whole world, and what the human heard of it */
+export function edgeBanterPerBotHour(r) {
+    const hours = r.botTicks / TICKS_PER_HOUR;
+    if (!hours) return { value: null };
+    const banter = r.lines.filter(isEdgeBanter);
+    const heard = banter.filter(l => l.humanDist !== undefined && l.humanDist <= 15).length;
+    return { value: round(banter.length / hours), detail: `${banter.length} lines in ${round(hours)} bot-hours, ${heard} heard by the human; out of H6, H7 and the other chatter measures` };
+}
+
 export function linesPerBotHour(r) {
     const hours = r.botTicks / TICKS_PER_HOUR;
     if (!hours) return { value: null };
@@ -741,12 +757,16 @@ export function idleHumans(r) {
     // (realism phase 5b: a set piece's own stands are left out as a hang-out's: a party's guest waiting for the drop, a
     // scam caller at its spot (track P: DP and K measure them), a Duel Arena visit's staker waiting for a partner or a
     // watcher at a wall (track A: A1-A5))
-    const stands = all.filter(st => st.kind !== HANGOUT_KIND && st.kind !== DUEL_ARENA_KIND && !SET_PIECE_TASK_KINDS.has(st.kind));
+    // ---- (bots ideas, round 3: G period) and a Games Room visit's seated waits and games (PERIOD_IDLE_KINDS: a seated
+    // Runelink player has no target, no script and no XP: the game's own stand, PC6 measures it) ----
+    const stands = all.filter(st => st.kind !== HANGOUT_KIND && st.kind !== DUEL_ARENA_KIND && !SET_PIECE_TASK_KINDS.has(st.kind) && !PERIOD_IDLE_KINDS.has(st.kind));
+    const inRoom = all.filter(st => PERIOD_IDLE_KINDS.has(st.kind)).length;
+    // ---- end of G period's block ----
     const inBand = stands.filter(st => st.len <= 1000).length;
     const atHangouts = all.filter(st => st.kind === HANGOUT_KIND).length;
     const atArena = all.filter(st => st.kind === DUEL_ARENA_KIND).length;
-    const inPieces = all.length - stands.length - atHangouts - atArena;
-    return { value: round((100 * inBand) / hours), detail: `${inBand} idle stands of 2-10 min (standing, no target, no script, no XP) in ${round(hours)} levelling bot-hours${stands.length > inBand ? `; ${stands.length - inBand} longer` : ''}${atHangouts ? `; ${atHangouts} at a hang-out left out (C16)` : ''}${atArena ? `; ${atArena} at the Duel Arena left out (A1)` : ''}${inPieces ? `; ${inPieces} in a set piece left out` : ''}` };
+    const inPieces = all.length - stands.length - atHangouts - atArena - inRoom;
+    return { value: round((100 * inBand) / hours), detail: `${inBand} idle stands of 2-10 min (standing, no target, no script, no XP) in ${round(hours)} levelling bot-hours${stands.length > inBand ? `; ${stands.length - inBand} longer` : ''}${atHangouts ? `; ${atHangouts} at a hang-out left out (C16)` : ''}${atArena ? `; ${atArena} at the Duel Arena left out (A1)` : ''}${inPieces ? `; ${inPieces} in a set piece left out` : ''}${inRoom ? `; ${inRoom} in the Games Room left out (PC6)` : ''}` };
 }
 
 export function walkingLogouts(r) {
@@ -1325,6 +1345,7 @@ export const METRICS = [
     ['G1', 'presence', 'Levelling bot-time within 3 tiles of a clique-mate for 30 s+', '%', () => null, 'report', cliqueTogether],
     ['H6', 'chat', 'Quiet share: 10-minute windows without a non-trade line', '%', () => between(50, 80), 'proposed', quietShare],
     ['H7', 'chat', 'Non-trade lines per bot-hour', '', () => between(4, 10), 'decided', linesPerBotHour],
+    ['H7e', 'chat', 'Edgeville PKers\' fight banter per bot-hour (the world\'s; counted on its own)', '', () => null, 'report', edgeBanterPerBotHour],
     ['H8', 'chat', 'Context fit: skills and places in idle statements that fit the bot', '%', () => min(60), 'proposed', contextFitShare],
     ['H8b', 'chat', 'Newbie questions ("how do i...") asked by combat 40+', '%', () => max(10), 'decided', veteranNewbieQuestions],
     ['H9', 'chat', "Bots' questions answered by another bot within 30 s", '%', () => between(20, 50), 'proposed', answeredBotQuestions],
@@ -1486,7 +1507,22 @@ export function emptyRecord(meta = {}) {
         wrongTurns: null,
         rescues: null,
         alch: null,
-        alchSightings: []
+        alchSightings: [],
+        // ---- (bots ideas, round 2: arcs foundation) themes C and D: the runner fills each
+        // list from the library's logs at the end (test/humanlike.mjs: C's block goals, moods, leaves, parties, whims,
+        // weddings; D's rumours, ties, slang, logins); null with an older library (no arcs modules: AR and WT n/a) ----
+        arcs: { goals: [], moods: [], leaves: [], parties: [], whims: [], weddings: [], rumours: [], ties: [], slang: [], logins: [] },
+        // ---- end of the arcs foundation's block ----
+        // ---- (bots ideas, round 3: the period foundation) themes G and H: the
+        // runner's blocks fill them (test/humanlike.mjs). period: the G builder's (lib: port/BotPeriod's periodStats at the
+        // end, log its visits, budget the buzz's for N; null lib with an older library); buzz: the H builder's theme G
+        // parts, with PC1's sample every `sample` ticks (bots online, those at Rellekka or the lighthouse, by place and by
+        // what they do: any library); move: theme H's (lib: port/BotMinimap's rates and minimapStats; null with an older
+        // library) ----
+        period: { lib: null, log: [], budget: null },
+        buzz: { sample: 10, samples: 0, online: 0, there: 0, byPlace: { rellekka: 0, lighthouse: 0 }, byKind: {} },
+        move: { lib: null }
+        // ---- end of the period foundation's block ----
     };
 }
 
@@ -2282,7 +2318,8 @@ function everyAnswer(r) {
 
 /** the answers in the model's words (a log entry said by that bot at that tick, or a tick or two before the chat showed it) and the rules' */
 export function modelAnswers(r) {
-    const said = (r.model?.log ?? []).filter(e => e.outcome === 'used' && typeof e.saidAt === 'number');
+    // (bots ideas, round 4: I model: the bots' own talk is no answer to the human)
+    const said = (r.model?.log ?? []).filter(e => e.outcome === 'used' && typeof e.saidAt === 'number' && !e.ambient);
     const model = [];
     const rules = [];
     for (const a of everyAnswer(r)) (said.some(e => e.bot === a.who && a.at >= e.saidAt && a.at - e.saidAt <= 2) ? model : rules).push(a);
@@ -2309,7 +2346,7 @@ export function modelFallbacks(r) {
 
 /** the stub's planted bad lines, and those the guard refused */
 function plantedLines(r) {
-    const planted = (r.model?.log ?? []).filter(e => e.planted);
+    const planted = (r.model?.log ?? []).filter(e => e.planted && !e.ambient); // (bots ideas, round 4: the replies' alone)
     return { planted, caught: planted.filter(e => e.outcome === 'guard') };
 }
 
@@ -2320,7 +2357,7 @@ export function modelGuardRefusals(r) {
     const n = Object.values(s.guard ?? {}).reduce((a, b) => a + b, 0);
     const by = Object.entries(s.guard ?? {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ') || 'none';
     const { planted, caught } = plantedLines(r);
-    const unplanted = (r.model?.log ?? []).filter(e => e.outcome === 'guard' && !e.planted);
+    const unplanted = (r.model?.log ?? []).filter(e => e.outcome === 'guard' && !e.planted && !e.ambient);
     const missed = planted.filter(e => e.outcome !== 'guard');
     const stubText = planted.length ? `; the stub planted ${planted.length} bad lines, ${caught.length} caught (${caught.filter(e => e.reason === e.planted).length} for the planted reason)${missed.length ? `, missed: ${missed.slice(0, 3).map(e => `${e.planted} "${e.raw}" ${e.outcome}`).join('; ')}` : ''}` : '';
     const unplannedText = unplanted.length ? `; refused of the model's own: ${unplanted.length}, e.g. ${unplanted.slice(0, 3).map(e => `"${e.raw}" (${e.reason})`).join('; ')}` : '';
@@ -2355,19 +2392,127 @@ export function modelCandidates(r) {
     return { value: c.used, detail: `${c.used} said in the model's words of ${c.eligible} taken to it (${c.requests} requests; by the way they came: ${by})` };
 }
 
+// ---- (bots ideas, round 4: I model) LM1-LM8: the model for the bots' own talk (port/BotModelAmbient: a thread's turns
+// after the opener, a bot's answer to a bot, near the human), from record.model.stats.ambient and the log's entries
+// marked `ambient` (humanlike --model=... --ambient). Computed with MD1-MD6 (computeModelMetrics), printed apart in their
+// own group, never in the fingerprint; none in a run without --ambient. ----
+GROUPS.ambient = "The model for the bots' own talk (bots ideas, round 4)";
+
+/** a counter-question at a line's end: port/BotThreads' COUNTER_RX (port/BotModelGuard's AMBIENT_COUNTER_RX) */
+export const COUNTER_END = /(?:^|[\s,])(?:u|you)\s*\?+\s*$|\b(?:wbu|hbu)\b\s*\??\s*$|\bwhat about (?:u|you)\b\s*\??\s*$|\band (?:u|you)\s*\??\s*$/i;
+const ambientEntries = r => (r.model?.log ?? []).filter(e => e.ambient);
+const ambientStatsOf = r => r.model?.stats?.ambient ?? null;
+const countOf = o => Object.values(o ?? {}).reduce((a, b) => a + b, 0);
+const byText = o => Object.entries(o ?? {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ') || 'none';
+
+/** LM1: ambient requests an hour of play (the 20 s gap world-wide: 180 at most) */
+export function ambientRequestsPerHour(r) {
+    const s = ambientStatsOf(r);
+    if (!s) return { value: null };
+    const hours = r.meta.ticks / TICKS_PER_HOUR;
+    return { value: round(s.requests / hours), detail: `${s.requests} requests in ${round(hours, 2)} h of play (${s.eligible} lines asked, ${s.used} said in the model's words); left the rules' (why): ${byText(s.skipped)}; latency p50/p90 ${quantile(s.latency ?? [], 0.5) ?? '-'}/${quantile(s.latency ?? [], 0.9) ?? '-'} ticks` };
+}
+
+/** LM2: ambient lines in the model's words, of those asked (judged with the stub failing none) */
+export function ambientUsedShare(r) {
+    const s = ambientStatsOf(r);
+    if (!s || !s.eligible) return { value: null };
+    const list = ambientEntries(r);
+    const via = v => `${v} ${list.filter(e => e.via === v && e.outcome === 'used').length}/${list.filter(e => e.via === v).length}`;
+    return { value: pct(s.used, s.eligible), detail: `${s.used} of ${s.eligible} asked (${via('thread')} thread turns, ${via('botanswer')} bots' answers)` };
+}
+
+/** LM3: the guard's refusals of ambient answers, of the answers that came with words (judged with the real model) */
+export function ambientGuardRefusals(r) {
+    const s = ambientStatsOf(r);
+    if (!s || !s.requests) return { value: null };
+    const n = countOf(s.guard);
+    const answered = s.used + n;
+    const refused = ambientEntries(r).filter(e => e.outcome === 'guard');
+    const planted = refused.filter(e => e.planted).length;
+    const own = refused.filter(e => !e.planted).slice(0, 4).map(e => `"${e.raw}" (${e.reason}; the rules: "${e.ruleText}")`).join('; ');
+    return { value: pct(n, answered), shown: `${n} of ${answered} (${pct(n, answered) ?? 0} %)`, detail: `by reason: ${byText(s.guard)}${planted ? `; ${planted} of them the stub's planted lines` : ''}${own ? `; e.g. ${own}` : ''}` };
+}
+
+/** LM4: replies to the human asked while an ambient request was in flight, and their extra ticks (p90) over the others' answer time */
+export function ambientOverlap(r) {
+    const log = r.model?.log ?? [];
+    const amb = log.filter(e => e.ambient && e.id > 0);
+    if (!amb.length) return { value: null };
+    const replies = log.filter(e => !e.ambient && e.id > 0);
+    if (!replies.length) return { value: 0, shown: '0 % (no reply asked)', ok: true, detail: 'no reply to the human went to the model' };
+    const windows = amb.map(e => [e.t, e.settledAt ?? e.replyAt ?? e.t]);
+    const during = replies.filter(e => windows.some(([a, b]) => e.t >= a && e.t <= b));
+    const answered = e => typeof e.replyAt === 'number';
+    const base = quantile(replies.filter(e => !during.includes(e) && answered(e)).map(e => e.replyAt - e.t), 0.5) ?? 0;
+    const extra = during.filter(answered).map(e => Math.max(0, e.replyAt - e.t - base));
+    const p90 = quantile(extra, 0.9) ?? 0;
+    const share = pct(during.length, replies.length);
+    return { value: share, shown: `${share} %, +${p90} ticks p90`, ok: share <= 5 && p90 <= 3, detail: `${during.length} of ${replies.length} replies to the human asked while one of the ${amb.length} ambient requests was in flight; their answer time over the others' median (${base} ticks): p90 ${p90} (band +3)` };
+}
+
+/** LM5: ambient lines the rules ended with a counter-question that kept it as said (the next turn answers it) */
+export function ambientCountersKept(r) {
+    const list = ambientEntries(r).filter(e => e.counter && typeof e.said === 'string');
+    if (!list.length) return { value: null };
+    const model = list.filter(e => e.outcome === 'used');
+    const kept = list.filter(e => e.outcome !== 'used' || COUNTER_END.test(String(e.raw ?? '').trim()));
+    return { value: pct(kept.length, list.length), detail: `${kept.length} of ${list.length} counter turns (${model.length} in the model's words, the rest the rules' own); the guard's 'counter' refusals: ${r.model?.stats?.ambient?.guard?.counter ?? 0}` };
+}
+
+/** LM6: the ambient fallbacks by reason (the rules' line instead) */
+export function ambientFallbacks(r) {
+    const s = ambientStatsOf(r);
+    if (!s || !s.eligible) return { value: null };
+    const n = countOf(s.fallbacks);
+    return { value: n, shown: `${n} (${pct(n, s.eligible) ?? 0} %)`, detail: `${byText(s.fallbacks)}; native's errors: ${byText(s.errors)}` };
+}
+
+/** LM7: H7 with the model against the same run without it (humanlike --lm7-base=<its --json report>) */
+export function ambientTalkBudget(r) {
+    if (!ambientStatsOf(r)) return { value: null };
+    const h7 = linesPerBotHour(r).value;
+    const base = r.model?.h7Base;
+    if (typeof base !== 'number' || typeof h7 !== 'number') return { value: null, detail: `H7 here ${h7 ?? '-'}; no run without the model to compare (--lm7-base)` };
+    const d = round(h7 - base, 2);
+    return { value: d, shown: `${d > 0 ? '+' : ''}${d} (${h7} against ${base})`, detail: `H7 ${h7} with the model, ${base} without it (the same seed)` };
+}
+
+/** LM8: how much later than the rules' timing ambient lines were said (p95, ticks) */
+export function ambientLate(r) {
+    const list = ambientEntries(r).filter(e => typeof e.saidAt === 'number' && typeof e.rulesDue === 'number');
+    if (!list.length) return { value: null };
+    const late = list.map(e => Math.max(0, e.saidAt - e.rulesDue));
+    const q = p => quantile(late, p);
+    const used = list.filter(e => e.outcome === 'used').map(e => e.saidAt - e.rulesDue);
+    return { value: q(0.95), detail: `p50/p90/p95/max ${q(0.5)}/${q(0.9)}/${q(0.95)}/${Math.max(...late)} ticks after the rules' time (${late.filter(x => x > 0).length} of ${list.length} later); the model's words against the rules' time: p10/p50/p90 ${quantile(used, 0.1) ?? '-'}/${quantile(used, 0.5) ?? '-'}/${quantile(used, 0.9) ?? '-'}` };
+}
+// ---- end of I model's block (its rows in MODEL_METRICS below) ----
+
 export const MODEL_METRICS = [
     ['MD1', 'model', "Replies to the human in the model's words, of its eligible replies", '%', () => min(90), 'proposed', modelUsedShare],
     ['MD2', 'model', 'Fallbacks (deadline, timeout, error, busy, guard, no channel, superseded)', '', () => null, 'report', modelFallbacks],
     ['MD3', 'model', "Guard refusals (the stub: its planted bad lines all caught)", '', r => (plantedLines(r).planted.length ? { min: 0 } : null), 'proposed', modelGuardRefusals],
     ['MD4', 'model', "Reply delay, the human's line to a model reply (the rules' band 2-26)", 'ticks', () => between(2, 26), 'proposed', modelDelay],
     ['MD5', 'model', 'Model requests an hour of play (the cost of online)', '', () => null, 'report', modelRequestsPerHour],
-    ['MD6', 'model', 'Lines the rules left unanswered that got a model reply', '', () => null, 'report', modelCandidates]
+    ['MD6', 'model', 'Lines the rules left unanswered that got a model reply', '', () => null, 'report', modelCandidates],
+    // ---- (bots ideas, round 4: I model) ----
+    ['LM1', 'ambient', 'Ambient requests an hour of play (the 20 s gap: 180 at most)', '', () => max(180), 'proposed', ambientRequestsPerHour],
+    ['LM2', 'ambient', "Ambient lines in the model's words, of those asked (the stub failing none)", '%', r => (r.model?.kind === 'stub' && !r.model.failRate ? min(60) : null), 'proposed', ambientUsedShare],
+    ['LM3', 'ambient', "Guard refusals of ambient answers (the real model, --model=http)", '%', r => (r.model?.kind === 'http' ? max(10) : null), 'proposed', ambientGuardRefusals],
+    ['LM4', 'ambient', 'Replies to the human asked while an ambient request was in flight (and their extra ticks p90 ≤ 3)', '%', () => max(5), 'proposed', ambientOverlap],
+    ['LM5', 'ambient', "Counter turns whose said line kept the counter-question", '%', () => min(100), 'proposed', ambientCountersKept],
+    ['LM6', 'ambient', 'Ambient fallbacks by reason (the rules\' line instead)', '', () => null, 'report', ambientFallbacks],
+    ['LM7', 'ambient', 'H7 with the model against without (the same seed, --lm7-base)', '', () => between(-0.3, 0.3), 'proposed', ambientTalkBudget],
+    ['LM8', 'ambient', "Ambient lines said after the rules' timing, p95", 'ticks', () => max(4), 'proposed', ambientLate]
+    // ---- end of I model's rows ----
 ].map(([id, group, title, unit, band, basis, fn]) => ({ id, group, title, unit, band, basis, fn }));
 
-/** MD1-MD6 of a record with a model (none without one: they are not in the fingerprint) */
+/** MD1-MD6 of a record with a model (none without one: they are not in the fingerprint); (bots ideas, round 4) LM1-LM8 with --ambient */
 export function computeModelMetrics(record) {
     if (!record.model) return [];
-    return MODEL_METRICS.map(m => {
+    const ambient = record.model.ambient === true || !!record.model.stats?.ambient?.eligible; // (bots ideas, round 4: I model)
+    return MODEL_METRICS.filter(m => ambient || m.group !== 'ambient').map(m => {
         const res = m.fn(record) ?? { value: null };
         const band = m.basis === 'report' ? null : m.band(record);
         const ok = res.value === null || res.value === undefined ? null : band ? (res.ok ?? inBand(res.value, band)) : null;
@@ -3847,3 +3992,950 @@ METRICS.push(
     ].map(([id, group, title, unit, band, basis, fn]) => ({ id, group, title, unit, band, basis, fn }))
 );
 // ---- end of Track W2's (variety) block ----
+
+// ---- (bots ideas, round 1: each track's metrics in a block of its own, read from record.tracks.<key>, n/a when it is
+// missing) ----
+// ---- (bots ideas, Track A: the period endgame; ids EG*) ----
+// record.tracks.endgame (test/humanlike.mjs's Track A block): the eligible bossers' samples, the bots on a trip by spot,
+// the library's logs (trips, drops, sales, teams), the god-cape census. n/a without it (an older library). EG7, EG8 and
+// EG10 (the wine crowd, the safespots, the lever camps) are Track B's this round.
+GROUPS.endgame = 'The period endgame (bots ideas round 1, track A)';
+const endgameOf = r => r?.tracks?.endgame ?? null;
+// (the KQ track: the KQ's trips apart, EG13's: its attempts are honest and mostly fail, its deaths expected)
+const EG_SOLO = new Set(['solo', 'kbd', 'arena']);
+
+/** EG1: the eligible bossers' bot-time (levelling, the bosser trait, combat 85+) on an endgame trip */
+export function bossersOnTrips(r) {
+    const e = endgameOf(r);
+    if (!e || !e.eligible) return { value: null, detail: e ? 'no eligible bosser online' : '' };
+    // (fewer than one online on average: too few to judge, as at 100 bots: the research's "nearly absent")
+    if (e.eligible / Math.max(1, e.samples) < 1) return { value: null, detail: `${e.eligibleOnTrip} of ${e.eligible} samples of eligible bossers (${(e.eligible / Math.max(1, e.samples)).toFixed(1)} online on average: too few to judge)` };
+    return { value: pct(e.eligibleOnTrip, e.eligible), detail: `${e.eligibleOnTrip} of ${e.eligible} samples of eligible bossers (${(e.eligible / Math.max(1, e.samples)).toFixed(1)} online on average)` };
+}
+
+/** EG2 (report): bots on endgame trips per 100 online, by spot */
+export function botsOnTripsBySpot(r) {
+    const e = endgameOf(r);
+    if (!e || !e.online) return { value: null };
+    const per100 = n => (100 * n) / e.online;
+    const spots = Object.entries(e.bySpot).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${per100(n).toFixed(2)}`);
+    return { value: Number(per100(e.onTrip).toFixed(2)), detail: spots.join(', ') || 'none' };
+}
+
+/** EG3: deaths per 10 solo endgame trips (solo spots and the KBD's teams; the Wilderness spots' are WT1's, the KQ's EG13's) */
+export function endgameDeaths(r) {
+    const trips = endgameOf(r)?.lib?.trips;
+    if (!trips) return { value: null };
+    const solo = trips.filter(t => EG_SOLO.has(t.kind));
+    if (!solo.length) return { value: null, detail: 'no trip' };
+    const died = solo.filter(t => t.died).length;
+    const wild = trips.filter(t => t.kind === 'wild');
+    const kq = trips.filter(t => t.kind === 'kq');
+    return { value: Number(((10 * died) / solo.length).toFixed(2)), detail: `${died} of ${solo.length} trips (the Wilderness spots: ${wild.filter(t => t.died).length} of ${wild.length}; the KQ's: ${kq.filter(t => t.died).length} of ${kq.length})` };
+}
+
+/** EG4: rescue jumps per 10 endgame trips (the endgame's own task kinds: Endgame, KbdTeam, Velrak, DropSale) */
+export function endgameJumps(r) {
+    const lib = endgameOf(r)?.lib;
+    if (!lib?.trips) return { value: null };
+    const n = lib.trips.filter(t => t.kind !== 'wild').length;
+    if (!n) return { value: null, detail: 'no trip' };
+    const jumps = Object.values(lib.jumps ?? {}).reduce((a, j) => a + j, 0);
+    return { value: Number(((10 * jumps) / n).toFixed(2)), detail: `${jumps} jumps, ${n} trips and errands${jumps ? `: ${Object.entries(lib.jumps).map(([k, j]) => `${k} ${j}`).join(', ')}` : ''}` };
+}
+
+/** EG5: the notable drops with another bot within 15 tiles that got a gz (and the drops by item) */
+export function dropGz(r) {
+    const drops = endgameOf(r)?.lib?.drops;
+    if (!drops) return { value: null };
+    const items = {};
+    for (const d of drops) items[d.item] = (items[d.item] ?? 0) + 1;
+    const near = drops.filter(d => d.said && d.near > 0);
+    const list = Object.entries(items).map(([k, n]) => `${k} ${n}`).join(', ') || 'none';
+    if (!near.length) return { value: null, detail: `drops: ${list}` };
+    return { value: pct(near.filter(d => d.gz > 0).length, near.length), detail: `${near.length} said near another bot; drops: ${list}` };
+}
+
+/** EG6 (report): the sale stints of endgame drops, their adverts and sales */
+export function dropSales(r) {
+    const lib = endgameOf(r)?.lib;
+    if (!lib?.saleStats) return { value: null };
+    const sold = Object.entries(lib.saleStats.sold ?? {}).map(([k, n]) => `${k} ${n}`).join(', ') || 'none';
+    const noted = Object.entries(lib.saleStats.noted ?? {}).map(([k, n]) => `${k} ${n}`).join(', ') || 'none';
+    return { value: lib.saleStats.offered, detail: `${lib.saleStats.adverts} adverts; sold: ${sold}; looted: ${noted}` };
+}
+
+/** EG9: the Magic 60+ bots owning a god cape who wear it (the kits' capes, port/BotAge 'a-godcape') */
+export function godCapesWorn(r) {
+    const c = endgameOf(r)?.capes;
+    if (!c || !c.owners) return { value: null, detail: c ? `${c.mages} bots of Magic 60+, ${c.owners} with a god cape` : '' };
+    return { value: pct(c.wearing, c.owners), detail: `${c.wearing} of ${c.owners} owners wear it; ${c.mages} bots of Magic 60+` };
+}
+
+/** EG11 (report, and the members' nearness): KBD teams called, formed, their size, aborted; members near the leader on the way */
+export function kbdTeams(r) {
+    const t = endgameOf(r)?.lib?.teams;
+    if (!t) return { value: null };
+    const near = t.travelSamples ? pct(t.travelNear, t.travelSamples) : null;
+    return { value: near, detail: `${t.calls} calls, ${t.formed} teams (${t.members.join('/') || '-'} members), ${t.nobody} unanswered, ${t.aborted} aborted, ${t.kills} KBD kills; near the leader ${near ?? 'n/a'} % of ${t.travelSamples} samples` };
+}
+
+/**
+ * EG13 (report; the KQ track): Kalphite Queen attempts formed (calls, unanswered, aborted, sizes), how far they got (the
+ * meeting, Shantay's, the desert, the tunnels, the chamber), form 1's falls ("phase 2"), kills, deaths and leaves, the
+ * members near the leader on the desert's leg (5 tiles). Rare by design (one per 4 hours of play world-wide at most, 4+
+ * of combat 100 free online): n/a with no call.
+ */
+export function kqAttempts(r) {
+    const lib = endgameOf(r)?.lib;
+    const k = lib?.kq;
+    if (!k) return { value: null };
+    if (!k.calls) return { value: null, detail: 'no KQ call' };
+    const log = lib.kqLog ?? [];
+    const reached = {};
+    for (const a of log) reached[a.reached] = (reached[a.reached] ?? 0) + 1;
+    const outcomes = {};
+    for (const a of log) outcomes[a.outcome] = (outcomes[a.outcome] ?? 0) + 1;
+    const fell = log.filter(a => a.reached === 'chamber').map(a => 255 - a.form1Low);
+    const near = k.travelSamples ? pct(k.travelNear, k.travelSamples) : null;
+    return {
+        value: k.formed,
+        detail: `${k.calls} calls (${k.recalls ?? 0} called again), ${k.formed} formed (${k.members.join('/') || '-'}), ${k.nobody} unanswered, ${k.aborted} aborted; reached ${Object.entries(reached).map(([x, n]) => `${x} ${n}`).join(', ') || 'none'}; form 1 dealt ${fell.join('/') || '-'} of 255, phase 2 ${k.phase2}, kills ${k.kills}; deaths ${k.deaths}, fled ${k.fled}, wipes ${k.wipes}; outcomes ${Object.entries(outcomes).map(([x, n]) => `${x} ${n}`).join(', ') || '-'}; near the leader ${near ?? 'n/a'} % of ${k.travelSamples}`
+    };
+}
+
+/** EG12 (report): the endgame's offers, dusty keys, lines and events */
+export function endgameOffers(r) {
+    const lib = endgameOf(r)?.lib;
+    if (!lib?.offers) return { value: null };
+    const offered = Object.values(lib.offers.offered ?? {}).reduce((a, n) => a + n, 0);
+    const ev = Object.entries(lib.events ?? {}).map(([k, n]) => `${k} ${n}`).join(', ') || 'none';
+    return { value: offered, detail: `asked ${lib.offers.asked}; offered ${Object.entries(lib.offers.offered ?? {}).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}; Velrak ${lib.velrak?.keys ?? 0} keys of ${lib.velrak?.begun ?? 0}; the Duke's shields ${lib.offers.shields}; lines ${lib.lines?.said ?? 0}; events ${ev}` };
+}
+
+METRICS.push(
+    ...[
+        ['EG1', 'endgame', "Eligible bossers' time (combat 85+) on endgame trips", '%', () => between(15, 40), 'decided', bossersOnTrips],
+        ['EG2', 'endgame', 'Bots on endgame trips per 100 online, by spot', '', () => null, 'report', botsOnTripsBySpot],
+        ['EG3', 'endgame', 'Deaths per 10 endgame trips (solo spots and teams)', '', () => max(2), 'decided', endgameDeaths],
+        ['EG4', 'endgame', 'Rescue jumps per 10 endgame trips', '', () => max(1), 'decided', endgameJumps],
+        ['EG5', 'endgame', 'Notable drops said near another bot that got a gz', '%', () => min(50), 'decided', dropGz],
+        ['EG6', 'endgame', 'Sale stints of endgame drops (adverts, sales)', '', () => null, 'report', dropSales],
+        ['EG9', 'endgame', 'Magic 60+ owners of a god cape who wear it', '%', () => min(80), 'decided', godCapesWorn],
+        ['EG11', 'endgame', 'KBD teams; members near the leader on the way (5 tiles)', '%', () => null, 'report', kbdTeams],
+        ['EG12', 'endgame', 'Endgame offers, dusty keys, lines, events', '', () => null, 'report', endgameOffers],
+        ['EG13', 'endgame', 'KQ attempts formed; how far, phase 2, kills, deaths (the KQ track)', '', () => null, 'report', kqAttempts]
+    ].map(([id, group, title, unit, band, basis, fn]) => ({ id, group, title, unit, band, basis, fn }))
+);
+// ---- end of Track A's (ideas) block ----
+// ---- (bots ideas, Track B: PKers loot and vultures; the wine crowd, safespots and lever camps; the model guard; ids LV*) ----
+// From record.tracks.loot (test/humanlike.mjs ideasBCollect): the library's lootLog (port/BotLoot: the human's piles,
+// their drops, takes, ends, enrolments, lines and banks), the wine crowd's grabs, samples every 25 ticks, the --die
+// episodes. LV1-LV11 need the human to die (--die=pk:N or npc:N); n/a otherwise, as all without the record.
+
+GROUPS.loot = 'Loot and vultures; the wine crowd, safespots and lever camps (bots ideas, round 1)';
+
+/** the loot record, or null */
+function lootOf(r) {
+    return r?.tracks?.loot ?? null;
+}
+/** each pile of the log: its death, drops, takes, ends, enrolments and lines */
+function lootPiles(r) {
+    const L = lootOf(r);
+    if (!L) return null;
+    const piles = new Map();
+    for (const e of L.log) {
+        if (!e.pile) continue;
+        let p = piles.get(e.pile);
+        if (!p) piles.set(e.pile, (p = { id: e.pile, death: null, drops: [], takes: [], gone: [], enrol: [], lines: [], visible: [] }));
+        if (e.kind === 'death') p.death = e;
+        else if (e.kind === 'drop') p.drops.push(e);
+        else if (e.kind === 'take') p.takes.push(e);
+        else if (e.kind === 'gone') p.gone.push(e);
+        else if (e.kind === 'enrol') p.enrol.push(e);
+        else if (e.kind === 'line') p.lines.push(e);
+        else if (e.kind === 'visible') p.visible.push(e);
+    }
+    return [...piles.values()].filter(p => p.death);
+}
+/** a pile's hero (whose its items were at the drop), or null for a public one */
+function heroOf(p) {
+    const d = p.drops.find(x => x.hero && x.hero !== 'public');
+    return d ? d.hero : null;
+}
+const pvpPiles = r => (lootPiles(r) ?? []).filter(p => p.drops.length && heroOf(p) !== null);
+const npcPiles = r => (lootPiles(r) ?? []).filter(p => p.drops.length && heroOf(p) === null);
+
+/** LV1: the human's PvP deaths to a bot whose hero took a stack before the reveal */
+export function lootKillerTook(r) {
+    const piles = pvpPiles(r);
+    if (!lootOf(r) || !piles.length) return { value: null };
+    const took = piles.filter(p => p.takes.some(t => t.who === heroOf(p) && t.early));
+    return { value: pct(took.length, piles.length), detail: `${took.length} of ${piles.length} PvP piles` };
+}
+/** LV2: the hero's first take, ticks after the drop (median) */
+export function lootKillerFirst(r) {
+    const gaps = pvpPiles(r).map(p => {
+        const first = p.takes.filter(t => t.who === heroOf(p)).sort((a, b) => a.t - b.t)[0];
+        return first ? first.t - p.drops[0].t : null;
+    }).filter(x => x !== null);
+    if (!gaps.length) return { value: null };
+    return { value: median(gaps), detail: `${gaps.length} piles; p10/p90 ${quantile(gaps, 0.1)}/${quantile(gaps, 0.9)}` };
+}
+/** LV3: takes before the reveal by anyone but the hero (274 shows the items to the hero alone) */
+export function lootEarlyOthers(r) {
+    const piles = pvpPiles(r);
+    if (!lootOf(r) || !piles.length) return { value: null };
+    const bad = piles.flatMap(p => p.takes.filter(t => t.early && t.who !== heroOf(p)));
+    return { value: bad.length, detail: bad.slice(0, 3).map(t => `${t.who} pile ${t.pile}`).join(', ') || `${piles.length} PvP piles` };
+}
+/** LV4 (report; 0.5-3 at 500, at most 3): vultures enrolled at a PvP pile (mean; max) */
+export function lootVultures(r) {
+    const piles = pvpPiles(r);
+    if (!lootOf(r) || !piles.length) return { value: null };
+    const n = piles.map(p => p.enrol.length);
+    return { value: round(mean(n), 2), detail: `${piles.length} PvP piles, at most ${Math.max(...n)}; ${npcPiles(r).length} NPC piles, ${npcPiles(r).reduce((a, p) => a + p.enrol.length, 0)} enrolled` };
+}
+/** LV5: the first take by another than the hero after the reveal (median ticks) */
+export function lootVultureFirst(r) {
+    const gaps = pvpPiles(r).map(p => {
+        const rev = p.drops[0].revealAt;
+        const first = p.takes.filter(t => t.who !== heroOf(p) && t.t >= rev).sort((a, b) => a.t - b.t)[0];
+        return first ? first.t - rev : null;
+    }).filter(x => x !== null);
+    if (!gaps.length) return { value: null };
+    return { value: median(gaps), detail: `${gaps.length} piles with a vulture's take` };
+}
+/** LV6: items of a pile that ended unaccounted or twice (each dropped item one take or one end), the piles closed */
+export function lootUnaccounted(r) {
+    const piles = (lootPiles(r) ?? []).filter(p => p.drops.length);
+    if (!lootOf(r) || !piles.length) return { value: null };
+    let off = 0;
+    let open = 0;
+    for (const p of piles) {
+        const ends = p.takes.length + p.gone.length;
+        if (ends < p.drops.length) open++;
+        const by = new Map();
+        for (const d of p.drops) by.set(d.item, (by.get(d.item) ?? 0) + d.count);
+        for (const e of [...p.takes, ...p.gone]) by.set(e.item, (by.get(e.item) ?? 0) - e.count);
+        if (ends > p.drops.length || (ends === p.drops.length && [...by.values()].some(n => n !== 0))) off++;
+    }
+    return { value: off, detail: `${piles.length} piles, ${open} still on the ground at the end` };
+}
+/**
+ * LV7: the human's items a PKer took that are in neither its bank, its ledger, nor used through play (eaten); (round 1's
+ * fixes) nor gone with a bot that left the pool for good ('quit'), nor taken after its last save and lost with the app's
+ * kill ('unsaved')
+ */
+export function lootDeleted(r) {
+    const L = lootOf(r);
+    if (!L) return { value: null };
+    const pkTakes = L.log.filter(e => e.kind === 'take' && (e.role === 'killer' || e.role === 'vulture'));
+    if (!pkTakes.length) return { value: null };
+    const owed = new Map();
+    const key = (who, item) => `${who}|${item}`;
+    const ledgered = new Set(Object.keys(L.ledgers ?? {}));
+    for (const e of pkTakes) owed.set(key(e.who, e.item), (owed.get(key(e.who, e.item)) ?? 0) + e.count);
+    for (const e of L.log) if ((e.kind === 'bank' && e.role === 'item') || e.kind === 'used' || e.kind === 'quit' || e.kind === 'unsaved') owed.set(key(e.who, e.item), (owed.get(key(e.who, e.item)) ?? 0) - e.count);
+    for (const [name, list] of Object.entries(L.ledgers ?? {})) for (const [item, n] of list) owed.set(key(name, item), (owed.get(key(name, item)) ?? 0) - n);
+    // (a vulture that is no PKer keeps or banks its take its own way: only the PKers' ledgers are counted)
+    const pkers = new Set(L.log.filter(e => e.kind === 'bank' && e.role === 'item').map(e => e.who).concat([...ledgered]));
+    let lost = 0;
+    for (const [k, n] of owed) if (pkers.has(k.split('|')[0]) && n > 0) lost += n;
+    return { value: lost, detail: `${pkTakes.length} takes, ${L.log.filter(e => e.kind === 'bank' && e.role === 'item').length} items banked, ${ledgered.size} ledgers held at the end` };
+}
+/** LV8: loot and vulture lines a human death (mean; most a pile, at most 4) */
+export function lootLinesPerDeath(r) {
+    const piles = lootPiles(r) ?? [];
+    if (!lootOf(r) || !piles.length) return { value: null };
+    const n = piles.map(p => p.lines.length);
+    return { value: round(mean(n), 2), ok: Math.max(...n) <= 4 ? undefined : false, detail: `${piles.length} deaths, at most ${Math.max(...n)} a pile` };
+}
+/** LV9 (report; 10-50 % at 500): the human's NPC-death piles with a bot taker */
+export function lootNpcTaken(r) {
+    const piles = npcPiles(r);
+    if (!lootOf(r) || !piles.length) return { value: null };
+    const taken = piles.filter(p => p.takes.some(t => t.role === 'vulture' || t.role === 'other'));
+    return { value: pct(taken.length, piles.length), detail: `${taken.length} of ${piles.length} NPC piles` };
+}
+/** LV10: bots that are not PKers enrolled into or deeper into the Wilderness for a pile */
+export function lootDeeper(r) {
+    const piles = lootPiles(r);
+    if (!lootOf(r) || !piles?.length) return { value: null };
+    const bad = piles.flatMap(p => p.enrol.filter(e => !e.pk && e.wild > 0 && (e.botWild <= 0 || e.wild > e.botWild)));
+    return { value: bad.length, detail: `${piles.reduce((a, p) => a + p.enrol.length, 0)} enrolments` };
+}
+/** LV11: loot lines to the human within one minute (the most in any minute) */
+export function lootLinesToHuman(r) {
+    const L = lootOf(r);
+    if (!L || !(lootPiles(r) ?? []).length) return { value: null };
+    const ts = L.log.filter(e => e.kind === 'line' && e.to).map(e => e.t).sort((a, b) => a - b);
+    let most = 0;
+    for (let i = 0; i < ts.length; i++) {
+        let j = i;
+        while (j + 1 < ts.length && ts[j + 1] - ts[i] < 100) j++;
+        most = Math.max(most, j - i + 1);
+    }
+    return { value: most, detail: `${ts.length} lines to the human` };
+}
+/** LV12: the telegrabbers at the Asgarnian Chaos Temple (mean of the samples), against the crowd's number (band: ± 1) */
+export function wineCrowd(r) {
+    const L = lootOf(r);
+    const s = (L?.samples ?? []).filter(x => x.target !== null && x.target !== undefined);
+    if (!L || !s.length) return { value: null };
+    const target = mean(s.map(x => x.target));
+    const ends = Object.entries(L.wineEnds ?? {}).map(([k, n]) => `${k} ${n}`).join(', ');
+    // (round 1's left-overs: T1) the grabs' cadence as H18 counts it (shown there only among its worst six)
+    const c = r.cadence?.Telegrab;
+    const cadence = c?.pairs ? `; H18's Telegrab ${pct(c.identical, c.pairs)} % of ${c.pairs} pairs alike` : '';
+    return { value: round(mean(s.map(x => x.grabbers)), 2), data: { target }, detail: `the number ${round(target, 1)}; at most ${Math.max(...s.map(x => x.grabbers))} at once; ${L.wine.length} grabs; stints ended: ${ends || 'none'}${cadence}` };
+}
+/** LV13: grabs lost to another's ("Too late - it's gone!") of those made with 2 or more there */
+export function wineLost(r) {
+    const L = lootOf(r);
+    const g = (L?.wine ?? []).filter(e => e.grabbers >= 2);
+    if (!L || g.length < 5) return { value: null };
+    return { value: pct(g.filter(e => e.outcome === 'lost').length, g.length), detail: `${g.length} grabs with 2+ there` };
+}
+/**
+ * LV14: the safespot tiles in use when rangers and mages are at the Edgeville dungeon's hill giants: on a tile, of as many
+ * as the tiles hold (min(at the giants, tiles)). The research's 70 % of their time was for 8 tiles; 274's room has 3
+ * (data/safespots.json), so with more rangers than tiles the rest queue or fight as before: their raw share is the detail.
+ * (round 1's left-overs: the band kept, the measure revised) "at the giants" is at work there: on a tile, or a ranger of
+ * the room's step in a fighting state (patrol, scan, interact, loot: the runner's LOOT_WORK). The 40 tiles round the room
+ * took in the walk from the trapdoor's ladder (28 tiles off) and back, the bank trips, and a task that had gone on to
+ * another step (its watchdog's) on its way out: at m100 seed 7 10x, 58 of 282 samples (21 %; 31 of them the other step),
+ * none of them a ranger that could have stood on a tile; with them the share was 65.2 %, at work 82.1 %. Over the left-
+ * overs' after runs at 100 bots, all there 67.8-85.5 %, at work 78.2-89.1 %. The old share (all there) is in the
+ * detail; a record without the runner's `work` count measures as before.
+ */
+export function safespotTime(r) {
+    const L = lootOf(r);
+    const s = L?.samples ?? [];
+    const tiles = (L?.safespotTiles ?? []).length || 3;
+    const giants = s.reduce((a, x) => a + x.giants, 0);
+    if (!L || giants < 10) return { value: null };
+    const onSafe = s.reduce((a, x) => a + x.onSafe, 0);
+    const counted = s.every(x => x.work !== undefined);
+    const room = s.reduce((a, x) => a + Math.min(counted ? x.work : x.giants, tiles), 0);
+    const allRoom = s.reduce((a, x) => a + Math.min(x.giants, tiles), 0);
+    const worked = s.reduce((a, x) => a + (x.work ?? 0), 0);
+    const stands = L.stands ? `; H19's 2-10 minute stands: RangedMagic ${L.stands.RangedMagic ?? 0}, Telegrab ${L.stands.Telegrab ?? 0} of ${Object.values(L.stands).reduce((a, n) => a + n, 0)}` : '';
+    // (round 1's left-overs) the others: their safespot state / their task's state (port/BotSafespots.safespotStateOf)
+    const off = Object.entries(L.offSafe ?? {}).sort((a, b) => b[1] - a[1]);
+    const offN = off.reduce((a, [, n]) => a + n, 0);
+    const offText = offN ? `; off a tile ${offN}: ${off.slice(0, 8).map(([k, n]) => `${k} ${n}`).join(', ')}` : '';
+    const st = L.safeStats && Object.keys(L.safeStats).length ? `; ${Object.entries(L.safeStats).map(([k, n]) => `${k} ${n}`).join(', ')}` : '';
+    return { value: pct(onSafe, room), detail: `${giants} ranger and mage samples there${counted ? `, ${worked} at work (all there: ${pct(onSafe, allRoom)} %)` : ''}, ${pct(onSafe, giants)} % of them on one of the ${tiles} tiles${offText}${st}${stands}` };
+}
+/** LV15: deep PKers' time by the lever camps (the west Lava Maze ladder, the Demonic Ruins) */
+export function campTime(r) {
+    const L = lootOf(r);
+    const s = L?.samples ?? [];
+    const deep = s.reduce((a, x) => a + x.deep, 0);
+    if (!L || deep < 50) return { value: null };
+    // (round 1's left-overs) the run's halves (a short run's fill: the deep PKers' first walks out), and the samples by
+    // where they were (at a camp or off one) : the zone they were bound for (a camp's, another's) / their task's state
+    const half = (lo, hi) => {
+        const h = s.filter(x => x.t >= lo && x.t < hi);
+        const d = h.reduce((a, x) => a + x.deep, 0);
+        return d ? `${pct(h.reduce((a, x) => a + x.camp, 0), d)} %` : '-';
+    };
+    const mid = s.length ? s[Math.floor(s.length / 2)].t : 0;
+    const why = Object.entries(L.pkWhy ?? {}).sort((a, b) => b[1] - a[1]);
+    const whyText = why.length ? `; by zone/state ${why.slice(0, 8).map(([k, n]) => `${k} ${pct(n, deep)} %`).join(', ')}` : '';
+    return { value: pct(s.reduce((a, x) => a + x.camp, 0), deep), detail: `${deep} deep-PKer samples (${round(deep / s.length, 1)} online); first half ${half(-Infinity, mid)}, second ${half(mid, Infinity)}${whyText}` };
+}
+/** LV16 (report): deep PKers by the Chaos Temple (within 25 tiles of its altar), a sample's mean */
+export function templePkers(r) {
+    const L = lootOf(r);
+    const s = L?.samples ?? [];
+    if (!L || !s.length) return { value: null };
+    return { value: round(mean(s.map(x => x.temple)), 2), detail: `at most ${Math.max(...s.map(x => x.temple))} at once, of ${round(mean(s.map(x => x.deep)), 1)} deep PKers online` };
+}
+
+const lootBand = (r, lo, hi) => (lootOf(r) ? between(lo, hi) : null);
+METRICS.push(
+    ...[
+        ['LV1', 'loot', "The human's PvP deaths whose bot killer took a stack before the reveal", '%', r => lootBand(r, 80, 100), 'decided', lootKillerTook],
+        ['LV2', 'loot', "The killer's first take after the drop (median)", 'ticks', r => lootBand(r, 3, 15), 'proposed', lootKillerFirst],
+        ['LV3', 'loot', 'Takes before the reveal by any but the hero', '', () => max(0), 'decided', lootEarlyOthers],
+        ['LV4', 'loot', 'Vultures enrolled at a PvP pile (mean)', '', () => null, 'report', lootVultures],
+        ['LV5', 'loot', "A vulture's first take after the reveal (median)", 'ticks', r => lootBand(r, 1, 8), 'proposed', lootVultureFirst],
+        ['LV6', 'loot', 'Pile items unaccounted or counted twice', '', () => max(0), 'decided', lootUnaccounted],
+        ['LV7', 'loot', "The human's items a PKer took that vanished (not banked, held or eaten)", '', () => max(0), 'decided', lootDeleted],
+        ['LV8', 'loot', 'Loot and vulture lines a human death (mean)', '', r => lootBand(r, 0.5, 3), 'proposed', lootLinesPerDeath],
+        ['LV9', 'loot', "The human's NPC-death piles with a bot taker", '%', () => null, 'report', lootNpcTaken],
+        ['LV10', 'loot', 'Bots that are not PKers sent into or deeper into the Wilderness for a pile', '', () => max(0), 'decided', lootDeeper],
+        ['LV11', 'loot', 'Loot lines to the human in a minute (the most)', '', () => max(1), 'proposed', lootLinesToHuman],
+        ['LV12', 'loot', 'Telegrabbers at the Chaos Temple (the crowd: clamp(N/120, 1, 5), ± 1)', '', r => { const t = wineCrowd(r).data?.target; return t === undefined ? null : between(t - 1, t + 1); }, 'proposed', wineCrowd],
+        ['LV13', 'loot', 'Wine grabs lost to another with 2+ grabbing ("Too late")', '%', () => min(20), 'proposed', wineLost],
+        ['LV14', 'loot', "Safespot tiles in use while rangers and mages are at the hill giants (of what the tiles hold)", '%', () => min(70), 'proposed', safespotTime],
+        ['LV15', 'loot', "Deep PKers' time at the lever camps", '%', () => between(8, 20), 'proposed', campTime],
+        ['LV16', 'loot', 'Deep PKers by the Chaos Temple (mean)', '', () => null, 'report', templePkers]
+    ].map(([id, group, title, unit, band, basis, fn]) => ({ id, group, title, unit, band, basis, fn }))
+);
+// ---- end of Track B's (ideas) block ----
+
+// ---- (bots ideas, round 2: each theme's metrics in a block of its own, read from record.arcs (the runner's: n/a when it is
+// null, an older library) with record.lines and record.sessions) ----
+// ---- C arcs: theme C's metrics (lives with arcs; ids AR*) ----
+// record.arcs (the runner's C collector, test/humanlike.mjs ideasCTick/ideasCCollect): goals (port/BotGoals goalLog: set,
+// done, dropped, changed, asked), goalSamples (every 100 ticks after the warm-up: the levelling bots online out of newbie
+// time and those with a goal; the level-goal holders and those at their goal's skill), cLines (port/BotLives livesLines:
+// theme C's lines said, their event and kind), moods (port/BotMoods tiltEpisodes: tilt 0.35+ from, to), moodStats, leaves
+// (port/BotLeaving leaveLog), whims (port/BotWhims whimLog), parties (port/BotNinetyNine's 99s and mini parties).
+GROUPS.arcs = 'Lives with arcs (bots ideas round 2, theme C)';
+const arcsC = r => (r.arcs && Array.isArray(r.arcs.goals) && r.arcs.goalSamples ? r.arcs : null);
+const GOAL_QUESTION_RX = /\b(what|wat|whats|wuts)\b.*\b(goal|goals|going for|training for|saving for|saving up)\b|^goals?\??$/i;
+
+/** AR1: of the levelling bots online (out of newbie time), the share with a saved goal (samples every 100 ticks) */
+export function goalHolders(r) {
+    const a = arcsC(r);
+    const s = a?.goalSamples ?? [];
+    const n = s.reduce((x, e) => x + e.n, 0);
+    if (!a || !n) return { value: null };
+    const kinds = {};
+    for (const e of a.goals) if (e.ev === 'set') kinds[e.kind] = (kinds[e.kind] ?? 0) + 1;
+    return { value: pct(s.reduce((x, e) => x + e.with, 0), n), detail: `${s.length} samples, ${n} bot-samples; goals set by kind ${Object.entries(kinds).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}` };
+}
+
+/** AR2: the human's goal questions to a levelling bot that were answered with its own goal (the goal log's 'asked') */
+export function goalAnswered(r) {
+    const a = arcsC(r);
+    if (!a) return { value: null };
+    const levelling = new Set(r.sessions.filter(s => LEVELLING.has(s.planner)).map(s => s.name));
+    const askedOf = p => a.goals.find(e => e.ev === 'asked' && e.name === p.bot && e.t >= p.t && e.t <= p.t + 40);
+    // (a newbie keeps no goal: its question is upstream's, left out)
+    const goalQ = p => levelling.has(p.bot) && GOAL_QUESTION_RX.test(String(p.line));
+    const qs = r.probes.filter(p => goalQ(p) && !(askedOf(p) && askedOf(p).answer === undefined));
+    if (!qs.length) return { value: null, detail: 'no goal questions to levelling bots (--probe asks "whats ur goal")' };
+    const answered = qs.filter(p => askedOf(p)?.answer);
+    return { value: pct(answered.length, qs.length), detail: `${answered.length} of ${qs.length} goal questions answered with the bot's goal${answered.length ? `; e.g. ${a.goals.filter(e => e.ev === 'asked').slice(0, 3).map(e => JSON.stringify(e.answer)).join(', ')}` : ''}` };
+}
+
+/** AR3: goals done per 100 levelling bot-hours (by kind in the detail; the band at 10x XP) */
+export function goalsDone(r) {
+    const a = arcsC(r);
+    const hours = r.levellingTicks / TICKS_PER_HOUR;
+    if (!a || !hours) return { value: null };
+    const done = a.goals.filter(e => e.ev === 'done');
+    const by = {};
+    for (const e of done) by[e.kind] = (by[e.kind] ?? 0) + 1;
+    const dropped = a.goals.filter(e => e.ev === 'dropped').length;
+    const changed = a.goals.filter(e => e.ev === 'changed').length;
+    return { value: round((100 * done.length) / hours), detail: `${done.length} goals done in ${round(hours)} levelling bot-hours (${Object.entries(by).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}); ${dropped} dropped, ${changed} changed; e.g. ${done.slice(0, 4).map(e => e.words).join(', ') || '-'}` };
+}
+
+/** AR4: of the goals done with company within 15 tiles, the share celebrated within 2 minutes */
+export function goalCelebrated(r) {
+    const a = arcsC(r);
+    const done = (a?.goals ?? []).filter(e => e.ev === 'done' && (e.company ?? 0) > 0 && e.t <= r.meta.ticks - 200);
+    if (!a || !done.length) return { value: null };
+    const said = done.filter(e => typeof e.said === 'number' && e.said - e.t <= 200);
+    return { value: pct(said.length, done.length), detail: `${said.length} of ${done.length} goals done with company celebrated (alone: ${(a.goals ?? []).filter(e => e.ev === 'done' && !e.company && typeof e.said === 'number').length} of ${(a.goals ?? []).filter(e => e.ev === 'done' && !e.company).length})` };
+}
+
+/** AR5: the level-goal holders' time at their goal's skill (samples) */
+export function goalSkillShare(r) {
+    const a = arcsC(r);
+    const s = a?.goalSamples ?? [];
+    const n = s.reduce((x, e) => x + (e.lHolders ?? 0), 0);
+    if (!a || !n) return { value: null };
+    const by = {};
+    for (const e of s) for (const [stat, [h, m]] of Object.entries(e.byStat ?? {})) {
+        const b = by[stat] ?? (by[stat] = [0, 0]);
+        b[0] += h;
+        b[1] += m;
+    }
+    const STAT_NAMES = ['att', 'def', 'str', 'hp', 'range', 'pray', 'mage', 'cook', 'wc', 'fletch', 'fish', 'fm', 'craft', 'smith', 'mine', 'herb', 'agil', 'thiev', '', '', 'rc'];
+    const list = Object.entries(by).sort((a, b) => b[1][0] - a[1][0]).map(([stat, [h, m]]) => `${STAT_NAMES[Number(stat)] ?? stat} ${pct(m, h)} % of ${h}`);
+    return { value: pct(s.reduce((x, e) => x + (e.lMatch ?? 0), 0), n), detail: `${n} level-goal holder samples (at the goal's skill: its task's skill, a fight for a combat skill); by goal skill ${list.join(', ')}` };
+}
+
+/** AR6: rage-quits, hops and big-drop leaves per 100 bot-hours */
+export function leavesForReasons(r) {
+    const a = arcsC(r);
+    const hours = r.botTicks / TICKS_PER_HOUR;
+    if (!a || !hours) return { value: null };
+    const by = reason => (a.leaves ?? []).filter(e => e.reason === reason);
+    const rate = list => round((100 * list.length) / hours, 2);
+    const rage = by('rage');
+    // (the tilt behind them: episodes of 0.35+, their peaks, what fed them; the hops' crowds)
+    const eps = a.moods ?? [];
+    const why = {};
+    for (const e of eps) for (const w of e.why ?? []) why[w] = (why[w] ?? 0) + 1;
+    const ms = a.moodStats ?? {};
+    const ls = a.leaveStats ?? {};
+    return { value: rate(rage), detail: `rage-quits ${rage.length} (${rate(rage)}), hops ${by('hop').length} (${rate(by('hop'))}), big-drop leaves ${by('bank-drop').length} per 100 of ${round(hours)} bot-hours; held back ${(a.leaves ?? []).filter(e => e.held).length}; tilt episodes ${eps.length} (peak 0.55+ ${eps.filter(e => e.peak >= 0.55).length}, 0.75+ ${eps.filter(e => e.peak >= 0.75).length}; ${Object.entries(why).map(([k, v]) => `${k} ${v}`).join(', ') || '-'}), rage rolls ${ms.rageRolls ?? 0}, big drops ${ms.bigDrops ?? 0}; crowded gatherer looks ${ls.crowded ?? 0} of ${ls.hopChecks ?? 0}`, data: { rage: rate(rage), hop: rate(by('hop')), drop: rate(by('bank-drop')) } };
+}
+
+/** AR6b: hops per 100 bot-hours (AR6's detail, banded) */
+export function hopsPerHour(r) {
+    const v = leavesForReasons(r);
+    return v.value === null ? v : { value: v.data.hop, detail: v.detail };
+}
+
+/** AR7: rage and hop lines followed by the logout within 60 s */
+export function leaveLinesFollowed(r) {
+    const a = arcsC(r);
+    const said = (a?.leaves ?? []).filter(e => e.line && (e.reason === 'rage' || e.reason === 'hop') && e.t <= r.meta.ticks - 100);
+    if (!a || !said.length) return { value: null };
+    const out = said.filter(e => e.logout >= 0 && e.logout - e.t <= 100);
+    return { value: pct(out.length, said.length), detail: `${out.length} of ${said.length} rage and hop lines followed by the logout within 60 s${said.length > out.length ? `; not: ${said.filter(e => !out.includes(e)).slice(0, 3).map(e => `${e.name} ${e.reason}${e.held ? ' (held)' : ''}`).join(', ')}` : ''}` };
+}
+
+/** AR8: sessions begun in the run with an off-role plan (a whim) */
+export function whimSessions(r) {
+    const a = arcsC(r);
+    const begun = r.sessions.filter(s => s.first > (r.meta.fillTick ?? 0) + 50);
+    if (!a || !Array.isArray(a.whims) || !begun.length) return { value: null };
+    const names = new Set(begun.map(s => `${s.name}@${s.first}`));
+    const whims = a.whims.filter(w => w.started && begun.some(s => s.name === w.name && w.t >= s.first && w.t <= s.last + 1));
+    const by = {};
+    for (const w of whims) by[w.what] = (by[w.what] ?? 0) + 1;
+    void names;
+    const lost = {};
+    for (const w of a.whims) if (w.lost) lost[w.lost] = (lost[w.lost] ?? 0) + 1;
+    return { value: pct(whims.length, begun.length), detail: `${whims.length} whims in ${begun.length} sessions begun in the run (${Object.entries(by).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}); rolled ${a.whims.length} (all logins), begun ${a.whims.filter(w => w.started).length}, lost ${Object.entries(lost).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}` };
+}
+
+/** AR9 (report): 99s and their parties: count, guests at the last action, gz said */
+export function ninetyNines(r) {
+    const a = arcsC(r);
+    const list = (a?.parties ?? []).filter(p => p.kind === 'ninety_nine');
+    const minis = (a?.parties ?? []).filter(p => p.kind === 'mini_party');
+    if (!a) return { value: null };
+    return { value: list.length, detail: `${list.length} 99s (guests at the last action ${list.map(p => p.guestsAt ?? 0).join('/') || '-'}, gz ${list.map(p => p.gz ?? 0).join('/') || '-'}, drop parties ${list.filter(p => p.party).length}); mini parties ${minis.length}` };
+}
+
+/** AR10: theme C's mood lines' share of the non-trade lines */
+export function moodLineShare(r) {
+    const a = arcsC(r);
+    const nonTrade = r.lines.filter(l => !isAside(l)).length;
+    if (!a || !nonTrade) return { value: null };
+    const moods = (a.cLines ?? []).filter(l => l.event === 'arcs-mood');
+    const by = {};
+    for (const l of moods) by[l.kind] = (by[l.kind] ?? 0) + 1;
+    return { value: pct(moods.length, nonTrade), detail: `${moods.length} mood lines of ${nonTrade} non-trade (${Object.entries(by).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}); tilt episodes ${(a.moods ?? []).length}` };
+}
+
+/** AR11: the human's lines to a bot tilted 0.35+ at the time that were answered (never ignored) */
+export function tiltedAnswered(r) {
+    const a = arcsC(r);
+    if (!a) return { value: null };
+    const tilted = (name, t) => (a.moods ?? []).some(e => e.name === name && t >= e.from && t <= e.to);
+    const asked = r.probes.filter(p => (p.kind === 'public' || p.kind === 'pm') && tilted(p.bot, p.t));
+    if (!asked.length) return { value: null, detail: 'no lines to a tilted bot' };
+    const answered = asked.filter(p => (p.kind === 'pm' ? r.pms.some(m => m.from === p.bot && m.t > p.t && m.t <= p.t + 600) : r.lines.some(l => l.name === p.bot && l.t > p.t && l.t <= p.t + 600 && l.to === 'human')));
+    return { value: pct(answered.length, asked.length), detail: `${answered.length} of ${asked.length} lines to tilted bots answered` };
+}
+
+const arcsBand = (r, band) => (arcsC(r) ? band : null);
+METRICS.push(
+    ...[
+        ['AR1', 'arcs', 'Levelling bots online with a saved goal', '%', r => arcsBand(r, between(85, 100)), 'decided', goalHolders],
+        ['AR2', 'arcs', "Goal questions to bots answered with the bot's own goal", '%', r => arcsBand(r, min(95)), 'proposed', goalAnswered],
+        ['AR3', 'arcs', 'Goals completed per 100 levelling bot-hours (band at 10x XP)', '', r => (arcsC(r) && r.meta.xpRate >= 10 ? between(10, 40) : null), 'proposed', goalsDone],
+        ['AR4', 'arcs', 'Goals done with company celebrated within 2 minutes', '%', r => arcsBand(r, between(40, 90)), 'proposed', goalCelebrated],
+        ['AR5', 'arcs', "Level-goal holders' time at the goal's skill", '%', r => arcsBand(r, between(20, 45)), 'proposed', goalSkillShare],
+        ['AR6', 'arcs', 'Rage-quits per 100 bot-hours (hops, big-drop leaves in the detail)', '', r => arcsBand(r, between(0.5, 3)), 'proposed', leavesForReasons],
+        ['AR6b', 'arcs', 'Hops from a crowded spot per 100 bot-hours', '', r => arcsBand(r, between(0.2, 2)), 'proposed', hopsPerHour],
+        ['AR7', 'arcs', 'Rage and hop lines followed by a logout within 60 s', '%', r => arcsBand(r, min(95)), 'proposed', leaveLinesFollowed],
+        ['AR8', 'arcs', 'Sessions with an off-role plan (a whim)', '%', r => arcsBand(r, between(10, 25)), 'decided', whimSessions],
+        ['AR9', 'arcs', '99s: count, guests at the last action, gz (report)', '', () => null, 'report', ninetyNines],
+        ['AR10', 'arcs', "Mood lines' share of non-trade lines", '%', r => arcsBand(r, max(8)), 'proposed', moodLineShare],
+        ['AR11', 'arcs', "Tilted bots' replies to the human that were answers", '%', r => arcsBand(r, min(100)), 'decided', tiltedAnswered]
+    ].map(([id, group, title, unit, band, basis, fn]) => ({ id, group, title, unit, band, basis, fn }))
+);
+// ---- end of C's block ----
+// ---- D word: theme D's metrics (word that travels; ids WT2 on: WT1 is taken, the levelling bots in the Wilderness) ----
+// record.arcs.word (the runner's D collect) marks a run with theme D's modules; without it every WT metric is n/a (an older
+// library, the foundation alone). The rumours (record.arcs.rumours: port/BotRumours' records), the ties' log (.ties), the
+// adoptions (.slang), the clique logins (.logins).
+if (!GROUPS.word) GROUPS.word = 'Word that travels (bots ideas, round 2)';
+const wordOf = r => r.arcs?.word ?? null;
+const partyRumours = r => (r.arcs?.rumours ?? []).filter(x => x.kind === 'party' && (x.sub === 'drop_party' || x.sub === 'party_room' || x.sub === 'mini_party' || x.sub === 'ninety_nine' || x.sub === 'wedding'));
+/** WT2 (20-60 % at 500 bots; report at 100 or fewer): the parties' guests who came by word of mouth, of all who came */
+export function wordGuestShare(r) {
+    if (!wordOf(r)) return { value: null };
+    const parties = partyRumours(r).filter(x => x.guestsCame > 0);
+    if (!parties.length) return { value: null };
+    const word = parties.reduce((a, x) => a + x.wordGuests.filter(g => g.came).length, 0);
+    const all = parties.reduce((a, x) => a + x.guestsCame, 0);
+    const far = parties.flatMap(x => x.wordGuests.filter(g => g.came).map(g => g.from));
+    return { value: pct(word, all), detail: `${word} of ${all} guests in ${parties.length} parties; word guests asked ${parties.reduce((a, x) => a + x.wordGuests.length, 0)}${far.length ? `, from ${Math.min(...far)}-${Math.max(...far)} tiles` : ''}` };
+}
+/** WT3 (15-45 %): knowers who acted on a party (came as word guests, or went to a wrong place) of those free and in range */
+export function wordActed(r) {
+    if (!wordOf(r)) return { value: null };
+    const parties = partyRumours(r);
+    const eligible = parties.reduce((a, x) => a + x.eligible, 0);
+    if (eligible < 3) return { value: null };
+    const acted = parties.reduce((a, x) => a + x.acted, 0);
+    const knowers = parties.reduce((a, x) => a + x.knowers, 0);
+    return { value: pct(acted, eligible), detail: `${acted} of ${eligible} free and in range; ${knowers} knowers in ${parties.length} parties (by: ${['seed', 'heard', 'pm', 'friend'].map(k => `${k} ${parties.reduce((a, x) => a + (x.via?.[k] ?? 0), 0)}`).join(', ')})` };
+}
+/** WT4 (at most 2 a party): wrong-place trips of a distorted party (the most at one), and its "fake dp" lines */
+export function wordWrong(r) {
+    if (!wordOf(r)) return { value: null };
+    const parties = partyRumours(r);
+    if (!parties.length) return { value: null };
+    const trips = parties.map(x => x.wrong.length);
+    const fake = parties.reduce((a, x) => a + x.fake, 0);
+    const distorted = parties.reduce((a, x) => a + x.distorted, 0);
+    return { value: Math.max(...trips), detail: `${trips.reduce((a, n) => a + n, 0)} wrong-place trips in ${parties.length} parties, ${fake} "fake dp" lines; ${distorted} distorted tellings; ${parties.reduce((a, x) => a + (x.missed ?? 0), 0)} late "missed the dp"` };
+}
+/** WT5 (report): bots online with an acquaintance after an hour (a known one, 2+); tie greetings per 100 bot-hours */
+export function wordAcquainted(r) {
+    const w = wordOf(r);
+    if (!w) return { value: null };
+    const hours = r.botTicks / TICKS_PER_HOUR;
+    const late = (w.acquainted ?? []).filter(s => s.t >= TICKS_PER_HOUR && s.online > 0);
+    const last = late.at(-1) ?? (w.acquainted ?? []).at(-1);
+    if (!last || !last.online) return { value: null };
+    const greets = (r.arcs.ties ?? []).filter(e => e.kind === 'greet').length;
+    const heard = (r.arcs.ties ?? []).filter(e => e.kind === 'greet' || e.kind === 'greet-back').length;
+    return { value: pct(last.any, last.online), detail: `at ${round(last.t / TICKS_PER_HOUR, 2)} h: ${last.any} of ${last.online} online with an acquaintance, ${last.known} known (2+); greetings ${greets} (${hours ? round((greets / hours) * 100, 1) : '-'} per 100 bot-hours), with answers ${heard}, waves ${w.tieStats?.waves ?? 0}; ties formed ${w.tieStats?.formed ?? 0} of ${w.tieStats?.rolled ?? 0} rolls` };
+}
+/** WT6 (report): grudge lines an hour of play; bot-bot KS between a grudge pair of all bot-bot KS */
+export function wordGrudges(r) {
+    const w = wordOf(r);
+    if (!w) return { value: null };
+    const hours = (r.meta.ticks - (r.meta.warmup ?? 0)) / TICKS_PER_HOUR;
+    const lines = (r.arcs.ties ?? []).filter(e => e.kind === 'grudge').length;
+    const i = w.incidents ?? {};
+    return { value: hours > 0 ? round(lines / hours, 1) : null, detail: `${lines} grudge lines (answers ${(r.arcs.ties ?? []).filter(e => e.kind === 'grudge-back').length}), grudges fed ${w.tieStats?.grudges ?? 0}; KS between a grudge pair ${i.war ?? 0} of ${i.botBot ?? 0} bot-bot KS, rocks ${i.rocksWar ?? 0} of ${i.rocks ?? 0}; KS war rolls ${w.tieStats?.warRolls ?? 0}; Edgeville rivals picked ${w.tieStats?.rivalPicks ?? 0} (lines ${w.tieStats?.rivalLines ?? 0})` };
+}
+/** WT7 (report; 10 %+ expected after 2 h): borrowed catchphrases' share of the catchphrase lines (after the first hour) */
+export function wordSlang(r) {
+    const w = wordOf(r);
+    const c = w?.catchLines;
+    if (!c) return { value: null };
+    const late = c.ownLate + c.borrowedLate;
+    const all = c.own + c.borrowed;
+    if (!all) return { value: null };
+    const hubs = Object.entries(c.byHub ?? {}).filter(([, h]) => h.own + h.borrowed >= 5).map(([k, h]) => `${k} ${pct(h.borrowed, h.own + h.borrowed)} %`);
+    return { value: late ? pct(c.borrowedLate, late) : pct(c.borrowed, all), detail: `${late ? `after the first hour ${c.borrowedLate} of ${late}; ` : ''}all told ${c.borrowed} of ${all}; adoptions ${(r.arcs.slang ?? []).length} (heard ${w.slangStats?.heard ?? 0}, again ${w.slangStats?.again ?? 0}, faded ${w.slangStats?.faded ?? 0})${hubs.length ? `; by hub ${hubs.join(', ')}` : ''}` };
+}
+/** WT8 (at most 25 %): clique members' logins after the fill with a mate's login within 2 minutes (either side) */
+export function wordCliqueLogins(r) {
+    // (the logins are collected with the arcs' foundation alone too: an A/B run's before)
+    const logins = r.arcs?.logins ?? [];
+    const after = logins.filter(l => l.afterFill);
+    if (after.length < 5) return { value: null };
+    const near = (e, ticks) => logins.some(o => o !== e && o.clique === e.clique && o.name !== e.name && Math.abs(o.t - e.t) <= ticks);
+    const n2 = after.filter(e => near(e, 200)).length;
+    const n72 = after.filter(e => near(e, 120)).length;
+    const s = wordOf(r)?.staggerStats;
+    return { value: pct(n2, after.length), detail: `${n2} of ${after.length} clique logins after the fill (the research probe's 120 ticks: ${pct(n72, after.length)} %)${s ? `; the stagger asked ${s.asked ?? 0}: past it ${s.ok ?? 0}, too soon ${s.soon ?? 0}, its own schedule ${s.own ?? 0}` : '; no stagger (a library without it)'}` };
+}
+/** WT9 (report): rumour tellings the human heard (within 15 tiles) an hour of play */
+export function wordHeard(r) {
+    if (!wordOf(r)) return { value: null };
+    const hours = (r.meta.ticks - (r.meta.warmup ?? 0)) / TICKS_PER_HOUR;
+    const rumour = r.lines.filter(l => l.kind === 'rumour');
+    const heard = rumour.filter(l => l.humanDist !== undefined && l.humanDist <= 15).length;
+    const s = wordOf(r).rumourStats ?? {};
+    return { value: hours > 0 ? round(heard / hours, 1) : null, detail: `${heard} of ${rumour.length} rumour lines; the knowers' own tellings ${s.tellings ?? 0}, the director's ${s.directorTellings ?? 0} and near the human ${s.nearHuman ?? 0}; rumours ${s.seeded ?? 0} (${Object.entries((r.arcs.rumours ?? []).reduce((a, x) => ((a[`${x.kind}/${x.sub}`] = (a[`${x.kind}/${x.sub}`] ?? 0) + 1), a), {})).map(([k, n]) => `${k} ${n}`).join(', ')}); learnt ${s.learnt ?? 0} (heard ${s.heard ?? 0}, PM ${s.pm ?? 0}, a friend ${s.friend ?? 0}); answers ${s.answers ?? 0}` };
+}
+/** WT10 (0, decided): ties, rumours or phrases that hold the human's name */
+export function wordHuman(r) {
+    const w = wordOf(r);
+    if (!w) return { value: null };
+    const human = String(w.human ?? '').toLowerCase();
+    const hits = (w.names ?? []).filter(n => String(n).toLowerCase() === human);
+    return { value: hits.length, detail: `${(w.names ?? []).length} names in the arcs, the rumours and the slang` };
+}
+const wordBand = (r, lo, hi) => (wordOf(r) ? between(lo, hi) : null);
+METRICS.push(
+    ...[
+        ['WT2', 'word', 'Party guests who came by word of mouth', '%', r => (wordOf(r) && r.meta.bots > 100 ? between(20, 60) : null), 'proposed', wordGuestShare],
+        ['WT3', 'word', 'Knowers who acted on a party (of those free and in range)', '%', r => wordBand(r, 15, 45), 'proposed', wordActed],
+        ['WT4', 'word', 'Wrong-place trips a party (the most); "fake dp" lines', '', r => (wordOf(r) ? max(2) : null), 'proposed', wordWrong],
+        ['WT5', 'word', 'Bots online with an acquaintance after 1 h; tie greetings', '%', () => null, 'report', wordAcquainted],
+        ['WT6', 'word', 'Grudge lines an hour; KS between a grudge pair', '', () => null, 'report', wordGrudges],
+        ['WT7', 'word', "Borrowed catchphrases' share of catchphrase lines", '%', () => null, 'report', wordSlang],
+        ['WT8', 'word', "Clique logins within 2 min of a mate's (after the fill)", '%', r => (r.arcs ? max(25) : null), 'proposed', wordCliqueLogins],
+        ['WT9', 'word', 'Rumour tellings the human heard an hour', '', () => null, 'report', wordHeard],
+        ['WT10', 'word', "Ties, rumours or phrases with the human's name", '', r => (wordOf(r) ? max(0) : null), 'decided', wordHuman]
+    ].map(([id, group, title, unit, band, basis, fn]) => ({ id, group, title, unit, band, basis, fn }))
+);
+// ---- end of D's block ----
+
+// ---- (bots ideas, round 3: each theme's metrics in a block of its own, read from record.period, record.buzz and
+// record.move (the runner's) with record.lines (PC1-PC10, MV1-MV9). A slot
+// a builder has not filled reads n/a. The PC rows print in id order, whichever block pushed them (below the blocks) ----
+if (!GROUPS.period) GROUPS.period = 'Period content (bots ideas, round 3)';
+if (!GROUPS.move) GROUPS.move = 'Movement (bots ideas, round 3)';
+/** n/a: a slot its builder fills */
+const unfilled = () => ({ value: null });
+// ---- (bots ideas, round 3: G period) the task kinds whose stands are their game's own (H19 leaves them out) ----
+export const PERIOD_IDLE_KINDS = new Set(['GamesRoom']);
+// ---- end of G period's block ----
+// ---- G period: the G builder's metrics (kittens PC3, PC4; Gnomeball PC5; Runelink PC6; the period talk PC8, Castle
+// Wars PC9, the period visits' rescue jumps PC10) ----
+/** PC8's words: the period's content as the bots talk of it (G-content §8) */
+export const PERIOD_TALK = /fremennik|fremmy|hftd|horror from the deep|lighthouse|rock crab|crabs|castle wars|\bcw\b|games room|runelink|gnomeball|chompy|kitten|kitty/i;
+/** PC9's: Castle Wars said to be open (it opened on 13 Dec 2004, after the world's date) */
+export const CASTLE_WARS_OPEN = /playing (cw|castle wars)|(cw|castle wars) game|won (at|a) (cw|castle wars)/i;
+/**
+ * PC8 (2-8 % on a members world; report on a free one): the share of the talk (every line but trade and the Edgeville
+ * fight banter, set pieces' lines included: the period's own lines are set pieces) that speaks of the period's content
+ */
+export function periodTalkShare(r) {
+    const talk = r.lines.filter(l => !isTrade(l) && !isEdgeBanter(l));
+    if (!talk.length) return { value: null };
+    const period = talk.filter(l => PERIOD_TALK.test(l.text));
+    const chatter = talk.filter(l => !isAside(l));
+    const chatterPeriod = chatter.filter(l => PERIOD_TALK.test(l.text)).length;
+    const heard = period.filter(l => l.humanDist !== undefined && l.humanDist <= VIEW).length;
+    const hours = (r.meta.ticks - (r.meta.warmup ?? 0)) / TICKS_PER_HOUR;
+    const words = {};
+    for (const l of period) {
+        const w = (l.text.match(PERIOD_TALK)?.[0] ?? '').toLowerCase();
+        words[w] = (words[w] ?? 0) + 1;
+    }
+    return {
+        value: pct(period.length, talk.length),
+        detail: `${period.length} of ${talk.length} lines (trade and the Edgeville banter apart): the chatter ${chatterPeriod} of ${chatter.length}, set pieces ${period.length - chatterPeriod}; the human heard ${heard}${hours > 0 ? ` (${round(heard / hours, 1)} an hour)` : ''}; ${Object.entries(words).sort((a, b) => b[1] - a[1]).map(([w, n]) => `${w} ${n}`).join(', ') || 'none'}${period.length ? `; e.g. "${period[0].shown}"` : ''}`
+    };
+}
+/** PC9 (0, decided): lines that speak of Castle Wars as open (it is talk only, in the future tense: its lobby is sealed in 274) */
+export function castleWarsOpen(r) {
+    if (!r.lines.length) return { value: null };
+    const open = r.lines.filter(l => CASTLE_WARS_OPEN.test(l.text));
+    const cw = r.lines.filter(l => /castle wars|\bcw\b/i.test(l.text)).length;
+    return { value: open.length, detail: `${cw} lines name Castle Wars${open.length ? `; open: "${open[0].shown}"` : ''}` };
+}
+/**
+ * PC10 (at most 5): the rescue jumps (BotAction's unseen moves: a watchdog's, a stuck walk's, a gateway's, a dungeon's,
+ * a task's; a random event's apart) of bots out on a period visit per 100 visits begun (port/BotPeriod periodStats, by
+ * kind); n/a under JUDGE_MIN visits
+ */
+export function periodRescues(r) {
+    const s = r.period?.lib;
+    if (!s) return { value: null };
+    const visits = Object.values(s.visits ?? {}).reduce((a, n) => a + n, 0);
+    if (visits < JUDGE_MIN) return { value: null, detail: `${visits} period visits` };
+    let jumps = 0;
+    const by = [];
+    for (const [kind, reasons] of Object.entries(s.moves ?? {})) {
+        const n = Object.entries(reasons).filter(([reason]) => reason !== 'event').reduce((a, [, k]) => a + k, 0);
+        jumps += n;
+        if (n) by.push(`${kind} ${n} (${Object.entries(reasons).map(([reason, k]) => `${reason} ${k}`).join(', ')})`);
+    }
+    return { value: round((100 * jumps) / visits, 1), detail: `${jumps} jumps in ${visits} visits (${Object.entries(s.visits).map(([k, n]) => `${k} ${n}`).join(', ')})${by.length ? `; ${by.join('; ')}` : ''}; refused ${Object.values(s.refused ?? {}).reduce((a, n) => a + n, 0)}` };
+}
+/** PC3 (members 1-4): pets out per 100 online, from the runner's sample (record.period.pc: a pet NPC whose follower varp is its bot's) */
+export function petsOut(r) {
+    const pc = r.period?.pc;
+    if (!pc?.samples || !pc.online) return { value: null };
+    if (!r.meta.members) return { value: null, detail: 'a free world: no pet habit' };
+    const s = pc.lib?.pets;
+    const kinds = Object.entries(pc.byKind ?? {}).map(([k, n]) => `${k} ${round(n / pc.samples, 2)}`).join(', ') || 'none';
+    return { value: round((100 * pc.pets) / pc.online, 2), detail: `${round(pc.pets / pc.samples, 2)} pets out on average (${round(pc.online / pc.samples)} online): ${kinds}; ${pc.owners?.length ?? 0} owners seen${s ? `; bought ${s.bought} (trips ${s.trips}, food trips ${s.foodTrips}), fed ${s.fed}, stroked ${s.stroked}` : ''}` };
+}
+/** PC4 is judged from this many pet-hours (one run-away in 2 pet-hours is 5 per 10: a sample, not a rate) */
+export const PET_HOURS_MIN = 5;
+/**
+ * PC4 (at most 0.5, and no page left open): pets lost to neglect (274's run-away rule) per 10 pet-hours (the runner's
+ * sample), and kitten pages left open 10 s or more (port/BotPets petStats)
+ */
+export function petsLost(r) {
+    const pc = r.period?.pc;
+    const s = pc?.lib?.pets;
+    if (!pc?.samples || !s) return { value: null };
+    const petHours = (pc.pets * (pc.sample ?? 10)) / TICKS_PER_HOUR;
+    if (petHours < PET_HOURS_MIN) return { value: null, detail: `${round(petHours, 1)} pet-hours (judged from ${PET_HOURS_MIN}); ${s.lost?.neglect ?? 0} ran away; pages left open ${s.pagesOpen}` };
+    const value = round((10 * (s.lost?.neglect ?? 0)) / petHours, 2);
+    return { value, ok: value <= 0.5 && s.pagesOpen === 0, detail: `${s.lost?.neglect ?? 0} ran away in ${round(petHours, 1)} pet-hours; lost with a death ${s.lost?.death ?? 0}; pages left open 10 s+ ${s.pagesOpen} (continued ${s.pagesContinued}); warnings ${s.warnings}, cares skipped ${s.skipped}; grown ${s.grown}` };
+}
+/** PC5 (report): bots on the Gnomeball pitch on average (the runner's sample), its games won an hour (port/BotOutings' counts) */
+export function gnomeballPitch(r) {
+    const pc = r.period?.pc;
+    if (!pc?.samples || !pc.lib) return { value: null };
+    if (!r.meta.members) return { value: null, detail: 'a free world: no Gnomeball' };
+    const g = pc.lib.minigames?.Gnomeball ?? {};
+    const hours = (r.meta.ticks - (r.meta.warmup ?? 0)) / TICKS_PER_HOUR;
+    // (each visit's minutes and how it ended: the period log's)
+    const visits = (r.period.log ?? []).filter(v => v.kind === 'gnomeball').map(v => `${v.end === -1 ? `${round((r.meta.ticks - v.start) / 100, 0)}+` : round((v.end - v.start) / 100, 0)} min ${v.outcome || 'on'}`);
+    return { value: round(pc.pitch / pc.samples, 2), detail: `${round(pc.pitch / pc.samples, 2)} bots on the pitch on average (a Gnomeball visit's); ${g.visits ?? 0} visits, ${g.wins ?? 0} games won (${hours > 0 ? round((g.wins ?? 0) / hours, 2) : '-'} an hour), ${g.goals ?? 0} goals, ${g.tackles ?? 0} tackles${visits.length ? `; visits ${visits.slice(0, 8).join(', ')}` : ''}` };
+}
+/**
+ * PC6 (at 400 bots or more: 3 an hour or more, and at most 10 % of the moves forced; report below): Runelink games over
+ * an hour (port/BotRunelink runelinkStats.gamesFinished: a game between two bots counted once) and the share of the bots'
+ * turns that 274's sand timer ended (forced: the bot never let it run out, MOVE_DEADLINE)
+ */
+export function runelinkGames(r) {
+    const s = r.period?.pc?.lib?.runelink;
+    if (!s) return { value: null };
+    if (!r.meta.members) return { value: null, detail: 'a free world: no Games Room' };
+    const hours = (r.meta.ticks - (r.meta.warmup ?? 0)) / TICKS_PER_HOUR;
+    if (hours <= 0) return { value: null };
+    const turns = s.moves + s.forced;
+    const forced = turns ? round((100 * s.forced) / turns, 1) : 0;
+    const value = round(s.gamesFinished / hours, 2);
+    const pc = r.period.pc;
+    return { value, ok: r.meta.bots >= 400 ? value >= 3 && forced <= 10 : undefined, detail: `${round(s.gamesFinished, 1)} games over in ${round(hours, 1)} h (${s.wins} won, ${s.losses} lost, ${s.draws} drawn by bots; ended ${Object.entries(s.ended ?? {}).map(([k, n]) => `${k} ${n}`).join(', ') || '-'}); forced ${s.forced} of ${turns} turns (${forced} %); ${s.visits} visits, ${s.challenges} challenges, the human's ${s.humanChallenges} answered (${s.humanGames} games); ${pc?.samples ? `${round(pc.room / pc.samples, 2)} bots in the room on average` : ''}` };
+}
+METRICS.push(
+    ...[
+        ['PC3', 'period', 'Pets out per 100 online (a kitten, cat or overgrown cat)', '', r => (r.meta.members ? between(1, 4) : null), 'proposed', petsOut],
+        ['PC4', 'period', 'Pets lost to neglect per 10 pet-hours; kitten pages left open 10 s+', '', () => max(0.5), 'proposed', petsLost],
+        ['PC5', 'period', 'Gnomeball: bots on the pitch on average; games won an hour', '', () => null, 'report', gnomeballPitch],
+        ['PC6', 'period', 'Runelink games finished an hour; moves forced by the sand timer', '', r => (r.meta.bots >= 400 ? min(3) : null), 'proposed', runelinkGames],
+        ['PC8', 'period', 'Period talk: lines of the period content (Rellekka, HFTD, crabs, kittens)', '%', r => (r.meta.members ? between(2, 8) : null), 'proposed', periodTalkShare],
+        ['PC9', 'period', 'Castle Wars said to be open', '', () => max(0), 'decided', castleWarsOpen],
+        ['PC10', 'period', 'Rescue jumps of the period visits per 100 visits', '', () => max(5), 'proposed', periodRescues]
+    ].map(([id, group, title, unit, band, basis, fn]) => ({ id, group, title, unit, band, basis, fn }))
+);
+// ---- end of G period's block ----
+// ---- G buzz: the H builder's theme G metrics (Rellekka and the lighthouse PC1, the crab fights in view PC2, chompies
+// PC7) ----
+/** PC1's lighthouse box (any floor), beside VARIETY_PLACES' rellekka_fremennik (level 0): [x0, z0, x1, z1] */
+export const LIGHTHOUSE_BOX = [2495, 3585, 2530, 3645];
+/** PC1's band: 0.5-3 per 100 online at 150 bots or fewer, 1.5-4 at 400 or more, report between; members only */
+export function rellekkaBand(r) {
+    if (!r.meta.members) return null;
+    if (r.meta.bots <= 150) return between(0.5, 3);
+    if (r.meta.bots >= 400) return between(1.5, 4);
+    return null;
+}
+/**
+ * PC2: with the human standing by the crabs (--at=rellekka_crabs), the share of samples with a bot within 15 tiles
+ * fighting a crab (its target a woken one, or one it attacks); n/a elsewhere and under JUDGE_MIN samples
+ */
+export function crabFightsInView(r) {
+    const c = r.buzz?.crabs;
+    if (!c || r.meta.at !== 'rellekka_crabs') return { value: null, detail: 'the human stands elsewhere (--tour=still --at=rellekka_crabs)' };
+    if (c.samples < JUDGE_MIN) return { value: null, detail: `${c.samples} samples` };
+    return { value: round((100 * c.fights) / c.samples, 1), detail: `${c.fights} of ${c.samples} samples, ${round(c.bots / c.samples, 2)} bots within 15 tiles on average` };
+}
+// (C15, round 3's G buzz: the rock crabs are a 2004 crowd spot on a members world)
+CROWD_SPOTS.push({ key: 'rellekka_crabs', x: 2690, z: 3722, r: 22, members: true });
+/** PC1: bots at Rellekka (level 0) and the lighthouse per 100 online (by place and what they do in the detail) */
+export function rellekkaBots(r) {
+    const b = r.buzz;
+    if (!b?.samples || !b.online) return { value: null };
+    if (!r.meta.members) return { value: null, detail: 'a free world: Rellekka and the lighthouse are members-only' };
+    const kinds = Object.entries(b.byKind).sort((x, y) => y[1] - x[1]).slice(0, 8).map(([k, n]) => `${k} ${round(n / b.samples, 2)}`);
+    // (round 3, G buzz: the jumps of bots out on a buzz visit, where they were: PC10's buzz part)
+    const jumps = (b.jumps ?? []).map(j => `${j.key} ${j.task} ${j.from.join(',')}→${j.to.join(',')}`);
+    return { value: round((100 * b.there) / b.online, 2), detail: `${round(b.there / b.samples, 2)} bots on average (${round(b.online / b.samples, 1)} online): Rellekka ${round(b.byPlace.rellekka / b.samples, 2)}, the lighthouse ${round(b.byPlace.lighthouse / b.samples, 2)}; doing ${kinds.join(', ') || '-'}${jumps.length ? `; buzz visits' jumps: ${jumps.join('; ')}` : ''}` };
+}
+METRICS.push(
+    ...[
+        ['PC1', 'period', 'Bots at Rellekka and the lighthouse per 100 online', '', rellekkaBand, 'proposed', rellekkaBots],
+        ['PC2', 'period', 'Crab fights in view with the human at the crabs (samples with one)', '%', r => (r.meta.bots >= 400 && r.meta.at === 'rellekka_crabs' ? min(50) : null), 'proposed', crabFightsInView],
+        ['PC7', 'period', 'Chompy hunts an hour; kills an hour; ogre arrows made', '', () => null, 'report', unfilled]
+    ].map(([id, group, title, unit, band, basis, fn]) => ({ id, group, title, unit, band, basis, fn }))
+);
+// ---- end of G buzz's block ----
+// (the PC rows in id order, whichever block pushed them)
+{
+    const at = METRICS.map((m, i) => (m.group === 'period' ? i : -1)).filter(i => i >= 0);
+    const rows = at.map(i => METRICS[i]).sort((a, b) => Number(a.id.slice(2)) - Number(b.id.slice(2)));
+    at.forEach((i, k) => (METRICS[i] = rows[k]));
+}
+// ---- H move: theme H's metrics (MV1-MV9; record.move: the runner's H block, lib: port/BotMinimap's stats) ----
+// (MV1, MV2, MV4-MV7 and MV9 read the runner's own trips and lines, so an older library gives
+// them a "before"; MV3 and MV8 read port/BotMinimap's minimapStats: n/a without it)
+/** a share in % with its counts, n/a under JUDGE_MIN of the whole */
+function moveShare(part, whole, what) {
+    if (!whole || whole < JUDGE_MIN) return { value: null, detail: `${whole ?? 0} ${what}` };
+    return { value: round((100 * part) / whole, 1), detail: `${part} of ${whole} ${what}` };
+}
+/** MV1: 1-7 tick stops per 100 tiles of the near-human trips (20+ tiles, all within 40 of the human) */
+export function moveShortStops(r) {
+    const n = r.move?.near;
+    if (!n || n.trips < JUDGE_MIN || !n.tiles) return { value: null, detail: `${n?.trips ?? 0} near-human trips` };
+    return { value: round((100 * n.stops) / n.tiles, 2), detail: `${n.stops} stops in ${n.tiles} tiles of ${n.trips} near-human trips` };
+}
+/** MV2: the near-human trips of 40+ tiles with a stop */
+export function moveTripsWithStop(r) {
+    const n = r.move?.near40;
+    return moveShare(n?.withStop ?? 0, n?.trips ?? 0, 'near-human trips of 40+ tiles');
+}
+/** MV3: the p90 of the queued hops' lengths (port/BotMinimap minimapStats.hops: a count by length) */
+export function moveHopP90(r) {
+    const hops = r.move?.lib?.stats?.hops;
+    if (!Array.isArray(hops)) return { value: null };
+    const total = hops.reduce((a, n) => a + (n ?? 0), 0);
+    if (total < JUDGE_MIN) return { value: null, detail: `${total} hops` };
+    let seen = 0;
+    let p90 = 0;
+    for (let len = 0; len < hops.length; len++) {
+        seen += hops[len] ?? 0;
+        if (seen >= 0.9 * total) {
+            p90 = len;
+            break;
+        }
+    }
+    const median = (() => {
+        let k = 0;
+        for (let len = 0; len < hops.length; len++) if ((k += hops[len] ?? 0) >= total / 2) return len;
+        return null;
+    })();
+    const st = r.move.lib.stats;
+    return { value: p90, detail: `${total} hops in ${st.walks} walks, median ${median}; pauses ${st.pauses} (${st.pauseTicks} ticks), typing stands ${st.typingStands ?? 0}, lanes ${st.lanes}, released ${st.released ?? 0}` };
+}
+/** MV4: one bot's repeated trips (20+ tiles between the same 8-tile cells) whose tiles overlap 90 %+ */
+export function moveRepeats(r) {
+    const m = r.move?.repeat;
+    return moveShare(m?.over ?? 0, m?.pairs ?? 0, 'pairs of one bot\'s trips between the same cells');
+}
+/** MV5: different bots' trips of 40+ between the same cells whose tiles overlap 90 %+ */
+export function moveCrossRepeats(r) {
+    const m = r.move?.cross;
+    const out = moveShare(m?.over ?? 0, m?.pairs ?? 0, "pairs of different bots' trips of 40+ between the same cells");
+    const v = r.move?.lib?.stats?.variants;
+    if (v && out.detail) out.detail += `; variants taken 0/1/2: ${v.v0}/${v.v1}/${v.v2}, refused ${v.long + v.wild + v.hunt} (long ${v.long}, wild ${v.wild}, hunters ${v.hunt}), same ${v.same}`;
+    return out;
+}
+/** MV6: thread turns (practice lines to a bot) said by a walking speaker */
+export function moveWalkingTurns(r) {
+    const t = r.move?.turns;
+    const out = moveShare(t?.walking ?? 0, t?.n ?? 0, 'thread turns');
+    const talk = r.move?.lib?.talk;
+    if (talk && out.detail) out.detail += `; holds ${talk.holds} (${Object.entries(talk.ended ?? {}).map(([k, n]) => `${k} ${n}`).join(', ') || '-'}), ${talk.holdTicks} ticks`;
+    return out;
+}
+/** MV7: thread openings (a pair's first line after 600 ticks) with the two 5+ tiles apart */
+export function moveApartOpenings(r) {
+    const o = r.move?.openings;
+    const out = moveShare(o?.apart ?? 0, o?.n ?? 0, 'thread openings');
+    const talk = r.move?.lib?.talk;
+    if (talk && out.detail) out.detail += `; walk-ups ${talk.walkUps} (ready ${talk.walkUpsReady}, given up ${talk.walkUpsFailed}), walking openers refused ${talk.walking}`;
+    return out;
+}
+/** MV8: overshoots per 100 near-human graph walks cut into hops (port/BotMinimap minimapStats) */
+export function moveOvershoots(r) {
+    const st = r.move?.lib?.stats;
+    if (!st || st.walks < JUDGE_MIN) return { value: null, detail: `${st?.walks ?? 0} hopped walks` };
+    return { value: round((100 * st.overshoots) / st.walks, 1), detail: `${st.overshoots} overshoots in ${st.walks} hopped walks` };
+}
+/** MV9: the near-human trips' ticks a tile against a --movement=off run of the same seed (--move-base); report */
+export function moveTravel(r) {
+    const n = r.move?.near;
+    if (!n || n.trips < JUDGE_MIN || !n.tiles) return { value: null, detail: `${n?.trips ?? 0} near-human trips` };
+    const own = n.ticks / n.tiles;
+    const base = r.move?.base?.ticksPerTile;
+    const detail = `ticks a tile ${own.toFixed(3)} in ${n.trips} near-human trips`;
+    if (!base) return { value: null, detail: `${detail} (no --move-base)` };
+    return { value: round(100 * (own / base - 1), 1), detail: `${detail}; the hops-off run's ${base.toFixed(3)}` };
+}
+METRICS.push(
+    ...[
+        ['MV1', 'move', 'Short stops (1-7 ticks) per 100 tiles of near-human trips', '', () => between(1.5, 4), 'proposed', moveShortStops],
+        ['MV2', 'move', 'Near-human trips of 40+ tiles with a stop', '%', () => between(40, 80), 'proposed', moveTripsWithStop],
+        ['MV3', 'move', 'Queued hop length p90 of near-human graph walks (tiles)', '', () => max(18), 'proposed', moveHopP90],
+        ['MV4', 'move', "Same bot's repeated trips overlapping 90 %+", '%', () => max(15), 'proposed', moveRepeats],
+        ['MV5', 'move', "Different bots' trips of 40+ between the same cells overlapping 90 %+", '%', () => max(12), 'proposed', moveCrossRepeats],
+        ['MV6', 'move', 'Thread turns said by a walking speaker', '%', () => max(10), 'proposed', moveWalkingTurns],
+        ['MV7', 'move', 'Thread openings with the two 5+ tiles apart', '%', () => max(35), 'proposed', moveApartOpenings],
+        ['MV8', 'move', 'Overshoots per 100 near-human graph walks', '', () => between(3, 15), 'proposed', moveOvershoots],
+        ['MV9', 'move', 'Near-human travel ticks per tile against a hops-off run of the same seed', '%', () => null, 'report', moveTravel]
+    ].map(([id, group, title, unit, band, basis, fn]) => ({ id, group, title, unit, band, basis, fn }))
+);
+// ---- end of H move's block ----

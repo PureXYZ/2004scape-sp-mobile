@@ -95,6 +95,9 @@ C.setCliqueBehaviourForTest(false);
 lib.setHabitRatesForTest({ breaks: 0, lingers: 0, watch: 0, abrupt: 0 });
 lib.setHangoutRateForTest(0.0001);
 lib.setDirectorForTest({ first: 1e9, gap: 1e9 });
+// (bots ideas, round 4 fixes) and the first gap it drew in the ticks before (its default, 2000-5000) dropped: none comes. A
+// clan walk took the feathers' bot mid-errand (errands.test seed 8)
+lib.resetDirectorForTest();
 // (the human far from everything staged here: bots come online only with a human in the world)
 sim.addHuman(3300, 3000);
 for (let i = 0; i < 400 && sim.bots().length < 40; i++) sim.tick();
@@ -117,6 +120,25 @@ if (bots.length < 14) {
 }
 const clean = text => lib.WordEnc.filter(text) === text && !/[{}]/.test(text) && text.length <= 80;
 const nameOf = p => p.username;
+/**
+ * (the KQ fixes, T-1) a line as said fits a pool's line, as test/duel.test.mjs's fits(): port/BotStyle's typos ("rio his
+ * stuff"), stretched letters ("nooo"), a word on the end
+ */
+function fits(said, line) {
+    const norm = t => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/(.)\1+/g, '$1').replace(/\s+/g, ' ').trim();
+    const a = norm(said);
+    const b = norm(line);
+    if (!a || !b) return false;
+    if (a === b || a.startsWith(`${b} `) || b.startsWith(`${a} `)) return true;
+    // (the edit distance of their starts: two letters at most, one in a short line, none in a word or two)
+    const most = b.length >= 8 ? 2 : b.length >= 5 ? 1 : 0;
+    if (most === 0) return false;
+    const x = a.slice(0, b.length + 1);
+    const d = Array.from({ length: x.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+    for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= x.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (x[i - 1] === b[j - 1] ? 0 : 1));
+    return Math.min(...d.map(row => row[b.length])) <= most;
+}
 
 // P4: threads drawn: strangers 2-3 turns, friends up to 6; a counter-question answered by the other
 {
@@ -290,9 +312,17 @@ const nameOf = p => p.username;
     };
     const plainDeath = run(2600, 3100);
     const pkDeath = run(3090, 3512);
-    const deathPool = new Set(L.NEW_LINES.filter(l => l.tag.event === 'witness-death').map(l => L.meaningKey(l.text)));
-    const pkPool = new Set(L.NEW_LINES.filter(l => l.tag.event === 'witness-pk').map(l => L.meaningKey(l.text)));
-    check('P7: a death near gets a word from a bot near ("rip"), at the ditch a PK word ("lol he got pked"), logged about the victim', plainDeath.length === 1 && deathPool.has(L.meaningKey(plainDeath[0].text)) && pkDeath.length === 1 && pkPool.has(L.meaningKey(pkDeath[0].text)) && W.witnessLog.filter(w => w.about === victim.username).length === 2, `${plainDeath.map(s => s.text).join(' | ')} || ${pkDeath.map(s => s.text).join(' | ')}`);
+    // (the KQ fixes, T-1: the line as said, in the witness's style: seed 1's "rip his stuff" typed "rio his stuff". Its
+    // pool: the one with its meaning (port/BotLines meaningKey, as before), else the only one with a line it fits, a typo
+    // and all: "rip his stuff" fits the PK words' "rip his loot" too, so a typo's pool must be the only one)
+    const deathPool = L.NEW_LINES.filter(l => l.tag.event === 'witness-death').map(l => l.text);
+    const pkPool = L.NEW_LINES.filter(l => l.tag.event === 'witness-pk').map(l => l.text);
+    const poolOf = text => {
+        const meant = [deathPool, pkPool].filter(pool => pool.some(l => L.meaningKey(l) === L.meaningKey(text)));
+        const near = meant.length ? meant : [deathPool, pkPool].filter(pool => pool.some(l => fits(text, l)));
+        return near.length === 1 ? near[0] : null;
+    };
+    check('P7: a death near gets a word from a bot near ("rip"), at the ditch a PK word ("lol he got pked"), logged about the victim', plainDeath.length === 1 && poolOf(plainDeath[0].text) === deathPool && pkDeath.length === 1 && poolOf(pkDeath[0].text) === pkPool && W.witnessLog.filter(w => w.about === victim.username).length === 2, `${plainDeath.map(s => s.text).join(' | ')} || ${pkDeath.map(s => s.text).join(' | ')}`);
     // the killer says nothing as a witness (its target is the victim)
     W.resetWitnessForTest();
     const killerSaid = (() => {
@@ -354,6 +384,15 @@ const nameOf = p => p.username;
     place(a, 2522, 3330);
     place(b, 2518, 3331);
     tick(3);
+    // (the KQ fixes, T-2: the chat dice held through the reactions, so no exchange of port/BotStage's (its START_CHANCE)
+    // nor a stander's "hi" (port/BotReactions) pairs the two first: mid-talk, neither is calm and none reacts, as the game
+    // means it (seed 2: a stage thread 2 ticks before the Wilderness one). The reactions' own rolls are Math.random's, at
+    // testRates.human 1, the response's (respondTo) Math.random's at testRates.respond 1. Held through the response's part
+    // too: there, a stage exchange of the two ("what u up to", seed 10) was b's second line. Each roll still draws, so a
+    // seed whose dice let nothing through leaves the scenes after with the world they had: B3's pair by the Karamja
+    // shipyard, seed 5)
+    const roll = lib.chatDice.roll;
+    lib.chatDice.roll = () => (roll(), 1);
     W.readyForTest(a);
     W.readyForTest(b);
     const from = said.length;
@@ -377,6 +416,7 @@ const nameOf = p => p.username;
     const noted = lib.Chatter.talkStats().responses.length;
     W.respondTo(a, 'complaint');
     tick(40);
+    lib.chatDice.roll = roll;
     const resp = said.slice(from2).filter(s => s.name === b.username);
     const last = lib.Chatter.talkStats().responses.slice(noted);
     const fits = resp.length === 1 && last.length === 1 && last[0].cls === 'complaint' && L.responseFits({ c: 'response', after: last[0].after ?? undefined }, 'complaint');

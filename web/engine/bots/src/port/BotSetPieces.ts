@@ -17,7 +17,20 @@
 import type Player from '#/engine/entity/Player.js';
 import type { BotTask } from '#/engine/bot/tasks/BotTaskBase.js';
 
-export type SetPieceKind = 'drop_party' | 'party_room' | 'clan_walk' | 'pk_raid' | 'duel_stake' | 'scam_spree' | 'fake_dp';
+export type SetPieceKind =
+    | 'drop_party'
+    | 'party_room'
+    | 'clan_walk'
+    | 'pk_raid'
+    | 'duel_stake'
+    | 'scam_spree'
+    | 'fake_dp'
+    // ---- (bots ideas, round 2: arcs foundation) theme C's pieces: a 99's gathering and its party, a bot's own mini drop
+    // party, a wedding (the kinds only: C builds them) ----
+    | 'ninety_nine'
+    | 'mini_party'
+    | 'wedding';
+// ---- end of the arcs foundation's block ----
 export type SetPiecePhase = 'announce' | 'build' | 'peak' | 'end' | 'done';
 
 /** where a piece runs: a key (for "no venue again within 3 events"), the tile, and how a bot names it ("fally park") */
@@ -93,9 +106,13 @@ export function register(def: SetPieceDef): void {
     defs.set(def.kind, def);
 }
 
-/** Every registered set piece, in registration order. */
+/**
+ * Every registered set piece, by kind. (bots ideas, round 1, the fixes: B8) a fixed order: the director's draw walks it,
+ * and the registration order is the modules' load order, which any import elsewhere moved (track B's loot imports loaded
+ * duel_stake before fake_dp, and every world's director course changed with it).
+ */
 export function registeredSetPieces(): readonly SetPieceDef[] {
-    return [...defs.values()];
+    return [...defs.values()].sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0));
 }
 
 // ── what runs, and who is in it ───────────────────────────────────────────────────────────────────────────────────

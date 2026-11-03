@@ -3,19 +3,26 @@
 // situation a reply is written for: the bot's real state, the lines it heard, the human's line and what the rules
 // understood (the same object the training data keeps: the research).
 //
-//   engine -> page   {type:'bots-lm', id, mode, local, online, maxChars, timeoutMs}
+//   engine -> page   {type:'bots-lm', id, mode, ambient?, local, online, maxChars, timeoutMs}
 //                        A reply for a bot to write. `local` is the prompt as the on-device model takes it (its system
 //                        and user turns; native wraps them in the model's chat template), `online` as Claude takes it (a
 //                        static style guide to cache, the bot's own context, its user turn). `mode` is the backend the
 //                        player chose; native falls back from online to local, and from either to nothing (text null,
 //                        with the error): the engine then says the rules' line, or nothing where the rules had none.
+//                        (bots ideas, round 4: I model) `ambient: true`: a line of the bots' own talk near the human
+//                        (port/BotModelAmbient: a thread's turn, a bot's answer to a bot), always `mode: 'local'` (the
+//                        on-device model, never Claude), never with Think first (the page sends think false); native
+//                        refuses it when hot (thermal fair), while the model rests, and behind a reply to the human.
 //   page -> engine   {type:'bots-lm-reply', id, text, source, error?, ms}
 //                        The model's line as it came (the engine guards and styles it: port/BotModelGuard), or null and
 //                        why ('unavailable', 'timeout', 'busy', 'refused', 'failed: ...'); ms: from the page's send.
-//                    {type:'bots-lm-mode', mode, local, online}
+//                    {type:'bots-lm-mode', mode, local, online, ambient?}
 //                        At start and whenever it changes: the player's choice (Settings › Bot chat) and what is there
 //                        (an on-device model in the app; a Claude key saved). The engine asks only when the chosen
-//                        backend, or the fallback, is there; with 'rules' (and in every sim) it never asks.
+//                        backend, or the fallback, is there; with 'rules' (and in every sim) it never asks. (bots ideas,
+//                        round 4: I model) `ambient`: Settings › Bot chat › Bots' own talk is Model and usable (the
+//                        on-device model in the app, a chat model chosen); absent or false: the bots' own talk is the
+//                        rules' and nothing of it draws a die.
 //
 // Nothing here is in engine.js: the bots' bundle only (bots off stays vanilla). Model text never decides a game outcome:
 // the rules decide whether a bot replies and when, and what it does; a model only writes the words of a reply already
@@ -27,8 +34,12 @@ export type ChatModelMode = 'rules' | 'local' | 'online';
 /** Who wrote a reply. */
 export type ModelSource = 'local' | 'online';
 
-/** How a human's line reached the bot (port/BotChat ReplyRequest's `via`). */
-export type ReplyVia = 'named' | 'window' | 'conversation' | 'crowd' | 'second' | 'private' | 'market' | 'reaction';
+/**
+ * How a human's line reached the bot (port/BotChat ReplyRequest's `via`). (bots ideas, round 4: I model) 'thread' and
+ * 'botanswer': no human's line but a bot's (port/BotModelAmbient: a thread's turn after the opener, a bot's answer to
+ * another bot's question), the partner in the human's place.
+ */
+export type ReplyVia = 'named' | 'window' | 'conversation' | 'crowd' | 'second' | 'private' | 'market' | 'reaction' | 'thread' | 'botanswer';
 
 /** The on-device model's turns (native applies the chat template: Qwen's ChatML with an empty think block). */
 export interface LocalPrompt {
@@ -53,6 +64,10 @@ export interface ModelRequestMessage {
     maxChars: number;
     /** after this long native gives up and answers null ('timeout'): the engine's own deadline is a little longer */
     timeoutMs: number;
+    // ---- (bots ideas, round 4: I model) ----
+    /** a line of the bots' own talk (port/BotModelAmbient): the on-device model only, no Think first, refused when hot */
+    ambient?: true;
+    // ---- end of I model's block ----
 }
 
 export interface ModelReplyMessage {
@@ -71,6 +86,10 @@ export interface ModelModeMessage {
     local: boolean;
     /** a Claude key is saved */
     online: boolean;
+    // ---- (bots ideas, round 4: I model) ----
+    /** Settings › Bot chat › Bots' own talk is Model, and usable (the on-device model in the app, a chat model chosen) */
+    ambient?: boolean;
+    // ---- end of I model's block ----
 }
 
 /** One line of what the bot heard or said lately, oldest first. */

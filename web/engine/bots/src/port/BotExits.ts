@@ -14,8 +14,10 @@
 import type Player from '#/engine/entity/Player.js';
 import World from '#/engine/World.js';
 import InvType from '#/cache/config/InvType.js';
+import VarBitType from '#/cache/config/VarBitType.js'; // (bots ideas, round 3: G period: the Games Room's board)
 // (BotAction imports this module for walkTo's legs: its functions are used only inside these, after every module is loaded)
 import { botAnswerDialogue, botScript, countItem, findNpcByName, interactNpcOp, noteMove, walkTo } from '#/engine/bot/BotAction.js';
+import { findLocByName, interactLocOp } from '#/engine/bot/BotAction.js'; // (bots ideas, Track A: the Mage Arena's way up)
 import { Items, MembersPlaces, inShilo } from '#/engine/bot/BotKnowledge.js';
 import { buildingAt, climbLeg } from '#/engine/bot/port/BotUpstairs.js';
 import { moveItems } from '#/engine/bot/port/BotInventoryCompat.js';
@@ -38,7 +40,7 @@ const CART_TRIES = 4;
 export const exitStats = { begun: {} as Record<string, number>, carts: 0, withdrawals: 0, failed: {} as Record<string, number> };
 
 interface ExitState {
-    kind: 'shilo' | 'upstairs';
+    kind: 'shilo' | 'upstairs' | 'arena' | 'games';
     began: number;
     seen: number;
     failedAt: number;
@@ -79,6 +81,10 @@ function fail(st: ExitState, why: string): false {
  */
 export function exitLeg(player: Player, destX: number, destZ: number, level: number): boolean {
     if (level !== 0) return false;
+    // ---- (bots ideas, round 3: G period) the Games Room under Burthorpe (either floor; no walking graph in it) with a
+    // target out of it: up its stairs first ----
+    if (inGamesRoomBox(player.x, player.z) && !inGamesRoomBox(destX, destZ)) return gamesRoomOut(player);
+    // ---- end of G period's block ----
     if (player.level > 0) {
         if (buildingAt(player.x, player.z) === null) return false;
         const st = stateFor(player, 'upstairs');
@@ -88,8 +94,47 @@ export function exitLeg(player: Player, destX: number, destZ: number, level: num
         return climbLeg(player, [destX, destZ, 0]);
     }
     if (inShilo(player.x, player.z) && !inShilo(destX, destZ)) return shiloCartOut(player);
+    // ---- (bots ideas, Track A: the period endgame) the Mage Arena's cellar and chamber (z 4680-4730: no dungeon of
+    // walkTo's, and no route out): the chamber's pool, then the cellar's ladder up ----
+    if (inMageArenaBelow(player.x, player.z) && !inMageArenaBelow(destX, destZ)) return mageArenaOut(player);
+    // ---- end of Track A's block ----
     return false;
 }
+
+// ---- (bots ideas, Track A: the period endgame) the way up out of the Mage Arena (its cellar: Kolodion, a banker; its
+// chamber: the statues and the guardian, reached by the cellar's pool): from the chamber its pool out
+// (magearena_waterportal2, 274's jump_in_sparkling_pool: back to the cellar), from the cellar its ladder up
+// (magearena_ladder_from_cellar, to the ruined building at 3091,3957); each click's move marked as the game's ----
+/** the Mage Arena's cellar and chamber (2490-2560, 4675-4730, level 0) */
+export function inMageArenaBelow(x: number, z: number): boolean {
+    return x >= 2490 && x <= 2560 && z >= 4675 && z <= 4730;
+}
+const ARENA_CHAMBER_MAX_X = 2525;
+
+function mageArenaOut(player: Player): boolean {
+    if (player.level !== 0) return false;
+    const st = stateFor(player, 'arena');
+    if (st.over) return false;
+    if (World.currentTick - st.began > EXIT_TICKS) return fail(st, 'arena');
+    if (player.delayed || botScript(player)) {
+        botAnswerDialogue(player, 1);
+        return true;
+    }
+    const chamber = player.x <= ARENA_CHAMBER_MAX_X;
+    const [name, x, z] = chamber ? ['magearena_waterportal2', 2508, 4686] : ['magearena_ladder_from_cellar', 2542, 4713];
+    const loc = findLocByName(x, z, 0, name, 3);
+    if (!loc) return fail(st, 'arena-loc');
+    if (player.target === loc) return true;
+    if (now() - st.cartAt < CART_GAP) return true;
+    st.cartAt = now();
+    interactLocOp(player, loc, 1);
+    noteMove(player, 'event');
+    return true;
+}
+function now(): number {
+    return World.currentTick;
+}
+// ---- end of Track A's block ----
 
 /** a way out under way for this bot (the stuck checks wait for it, as for a boat's crossing: BotAction.isCrossing) */
 export function exiting(player: Player): boolean {
@@ -161,3 +206,54 @@ function shiloWithdraw(player: Player, st: ExitState): boolean {
     exitStats.withdrawals++;
     return true;
 }
+
+// ---- (bots ideas, round 3: G period) the way up out of the Games Room under Burthorpe (274's game_gamesroom, stairs.rs2):
+// from the Runelink room's floor (level 0) the stairs base by the hall (board_game_stairs_base at 2207,4935: to the
+// arrival hall), from the hall (level 1) the stairs up (board_game_stairs_grey_base2 at 2205,4935: to Burthorpe at
+// 2899,3564); each click's move marked as the game's. A board under way is never closed here (tasks/GamesRoomTask's:
+// the walk waits for its end); the end screen or a challenge's screen is closed first, as a player clicks it away ----
+/** the Games Room's box, both floors (BotKnowledge PeriodPlaces.GAMES_ROOM_BOX) */
+export function inGamesRoomBox(x: number, z: number): boolean {
+    return x >= 2176 && x <= 2239 && z >= 4928 && z <= 4991;
+}
+let ingameBit: number | undefined;
+function inBoardGame(player: Player): boolean {
+    ingameBit ??= VarBitType.getId('boardgames_ingame');
+    return ingameBit !== -1 && player.getVarBit(ingameBit) === 1;
+}
+
+/** Out of the Games Room by its stairs: true while under way (a walk to the stairs, a click), false out of it or failed. */
+export function gamesRoomOut(player: Player): boolean {
+    if (!inGamesRoomBox(player.x, player.z)) return false;
+    const st = stateFor(player, 'games');
+    if (st.over) return false;
+    if (World.currentTick - st.began > EXIT_TICKS) return fail(st, 'games');
+    if (player.delayed) return true;
+    if (player.modalMain !== -1) {
+        if (inBoardGame(player)) return true;
+        player.closeModal();
+        return true;
+    }
+    const [name, x, z, level] = (player.level === 0 ? ['board_game_stairs_base', 2207, 4935, 0] : ['board_game_stairs_grey_base2', 2205, 4935, 1]) as [string, number, number, number];
+    const loc = findLocByName(x, z, level, name, 3);
+    if (!loc) return fail(st, 'games-loc');
+    // (its target or its route under way: the moment it ends is noted, and the next click a moment after it)
+    if (player.target !== null || player.hasWaypoints()) {
+        st.bankAt = now();
+        return true;
+    }
+    // (on the Runelink room's floor: to the stairs' foot first (a click from the room's far side said "I can't reach
+    // that!"), then the click)
+    if (player.level === 0 && Math.max(Math.abs(player.x - 2208), Math.abs(player.z - 4937)) > 2) {
+        if (now() - st.bankAt >= 2) walkTo(player, 2208, 4937, 0);
+        return true;
+    }
+    // (a person's moment between clicks: 6-13 ticks, never the same twice; 2-5 after a walk or a click ended)
+    if (now() - st.cartAt < 6 + ((st.tries * 7 + player.uid) & 7) || now() - st.bankAt < 2 + ((st.tries * 3 + player.uid) & 3)) return true;
+    st.cartAt = now();
+    st.tries++;
+    interactLocOp(player, loc, 1);
+    noteMove(player, 'event');
+    return true;
+}
+// ---- end of G period's block ----

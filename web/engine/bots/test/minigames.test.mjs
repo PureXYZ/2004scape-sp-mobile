@@ -15,8 +15,9 @@
 //              the registry while out and off it after; Shilo's river by the cart (Hajedy's dialogue, the fare, 274's ride
 //              marked as the game's move) and back by Vigroy's
 //   exits      (round 2, the fixes) a Shilo fisher out of feathers takes Vigroy's cart; a walk out of Shilo with no coins
-//              takes the fare from Shilo's bank first; a watchman thief upstairs with its Hitpoints low climbs down; a walk
-//              from the tower's top floor climbs down first; a walk from the arena's platform and from its pit climbs out (the
+//              takes the fare from Shilo's bank first; a watchman thief upstairs with its Hitpoints low climbs down, and
+//              (bots ideas, round 4 fixes) one whose watchdog ends its task near the spot; a walk from the tower's top
+//              floor climbs down first; a walk from the arena's platform and from its pit climbs out (the
 //              rope, the ladder), never across the map; a fight outing's junk drop keeps its own items and the tools; the
 //              planner's keep step hands back an outing under way
 //   arena      Cap'n Izzy paid, down the ladder, obstacles crossed, pillars tagged, out by the ladder; the floor the task
@@ -73,6 +74,9 @@ lib.setHabitRatesForTest({ breaks: 0, lingers: 0, watch: 0, abrupt: 0 });
 lib.setHangoutRateForTest(0.0001);
 lib.setArenaRatesForTest(0);
 lib.setDirectorForTest({ first: 1e9, gap: 1e9 });
+// (bots ideas, round 4 fixes) and the first gap it drew in the ticks before (its default, 2000-5000) dropped: none comes. A
+// clan walk took the feathers' bot mid-errand (errands.test seed 8)
+lib.resetDirectorForTest();
 lib.setCliqueBehaviourForTest(false);
 lib.setEventRatesForTest({ odds: 0 });
 lib.setTrainRatesForTest({ ask: 0, form: 0, yes: 0, join: 0 });
@@ -380,6 +384,35 @@ if (want('exits')) {
         assign(p, walker(2580, 3092));
         const t2 = run(400, () => (moves2.tick(), p.level === 0 && cheb(p.x, p.z, 2580, 3092) <= 10));
         check("exits: a walk from the watchtower's top floor to Yanille's square: down its ladder first (BotAction.walkTo, port/BotExits), there, no unseen jump", t2 > 0 && (lib.Upstairs.climbStats['yanille-watchtower:down'] ?? 0) > down0 && moves2.unseen().length === 0, { t: t2, at: [p.x, p.z, p.level], unseen: moves2.unseen().slice(0, 3) });
+        hold(p);
+        free.push(p);
+    }
+    {
+        // (bots ideas, round 4 fixes) a watchman thief upstairs whose task's watchdog ends it near the spot (no XP for its
+        // limit: ProgressWatchdog's endsNearSpot): the outing leaves the way it came, down the ladder, and ends there. It
+        // ended upstairs at once (the outing interrupted, no way out), seed 10's watchmen
+        scene(SEED, 'exits-watchdog');
+        const p = take(levelling);
+        levels(p, { THIEVING: 70, ATTACK: 40, STRENGTH: 40, DEFENCE: 40, HITPOINTS: 50 });
+        kit(p, [[Items.LOBSTER, 5], [Items.COINS, 100]]);
+        place(p, 2545, 3115, 1);
+        const moves = watchMoves(p);
+        const task = new lib.OutingTask('yanille-watchmen', 'yanille', new lib.ThievingTask(OUTING_STEPS['yanille-watchmen']), 30);
+        assign(p, task);
+        run(5, () => (moves.tick(), false));
+        const down0 = lib.Upstairs.climbStats['yanille-watchtower:down'] ?? 0;
+        // (its stall at the watchdog's limit, each tick till a check fires near the spot: a check the watchdog sits out (a
+        // pause: the first ticks after its placing at seed 8) and a theft's XP after it started the count again)
+        const wd = task.inner.watchdog;
+        let fired = false;
+        wd.stallTicks = 1e6;
+        const t = run(200, () => {
+            moves.tick();
+            fired ||= wd.endedNear;
+            if (!fired) wd.stallTicks = 1e6;
+            return task.isComplete(p) || task.interrupted;
+        });
+        check("exits: a watchman thief upstairs whose watchdog ends its task near the spot: its outing leaves the way it came (down the watchtower's ladder), then ends, no unseen jump", fired && t > 0 && p.level === 0 && (lib.Upstairs.climbStats['yanille-watchtower:down'] ?? 0) > down0 && moves.unseen().length === 0, { fired, t, at: [p.x, p.z, p.level], state: task.state, ended: lib.outingTaskStats.ended, unseen: moves.unseen().slice(0, 3) });
         hold(p);
         free.push(p);
     }

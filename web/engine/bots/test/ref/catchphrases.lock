@@ -1,0 +1,5 @@
+{
+    "about": "port/BotLines CATCHPHRASE_LIST (every catchphrase of data/lines2004-variety.json \"catchphrases\", each once, in the pools' order) is append only: a phrase's index is what the saved arcs keep (port/BotArcsStore PhraseRecord.phrase). Its first `count` phrases, joined by newlines, hash to `sha256` (test/arcs-store.test.mjs). After appending phrases at the end of a pool that comes last, or in a new pool: node --expose-gc web/engine/bots/test/arcs-store.test.mjs --update-lock",
+    "count": 46,
+    "sha256": "9bc90954574990d66155369f6c79bb405437c2d9ee0a3f2984d321e02496e2cc"
+}

@@ -19,6 +19,7 @@ import { isNewbie } from '#/engine/bot/port/BotNewbie.js';
 import { magicRunFor } from '#/engine/bot/port/BotMagicRuns.js';
 import { herbRunFor } from '#/engine/bot/port/BotHerbRuns.js';
 import { wildTripFor } from '#/engine/bot/port/BotWildTrips.js';
+import { endgameFor, dropSaleFor } from '#/engine/bot/port/BotEndgame.js'; // (bots ideas, Track A)
 // (the errands' lines: the module sets its hook on the errand engine at load)
 import '#/engine/bot/port/BotErrandLines.js';
 
@@ -125,6 +126,13 @@ export function d2Pick(player: Player, personality: string, relog = false): BotT
     if (herbs) return note(herbs);
     const wild = wildTripFor(player);
     if (wild) return note(wild);
+    // ---- (bots ideas, Track A: the period endgame) an eligible bosser's endgame trip (port/BotEndgame: a solo spot, the
+    // dusty key first, a KBD team), and a sale stint of its endgame drops (port/BotDropSale) ----
+    const endgame = endgameFor(player);
+    if (endgame) return note(endgame);
+    const sale = dropSaleFor(player);
+    if (sale) return note(sale);
+    // ---- end of Track A's block ----
     const run = magicRunFor(player);
     if (run) return note(run);
     return null;

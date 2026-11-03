@@ -44,6 +44,9 @@ import { PlayerStat } from '#/engine/entity/PlayerStat.js';
 import { wildernessLevelAt } from '#/engine/bot/port/BotContent.js';
 import { reactToHuman } from '#/engine/bot/port/BotWitness.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+// ---- (bots ideas, round 2: D word) a rumour line's tag (port/BotArcsEvents: a type only) ----
+import type { ArcTag } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- end of D's block ----
 
 /** gz to a human's level-up ({name}: theirs, said in about one in five by the persona's echo) */
 const GZ = ['gz', 'gz m8', 'gratz', 'grats', 'gz!', 'gj', 'nice', 'congrats', 'gz {name}', 'gratz {name}'];
@@ -355,17 +358,22 @@ const RUMOUR_AWAY = 40;
  * tiles from the piece at (x, z) on its floor; typed, in the bot's style, LineKind 'rumour' (out of H7). The speaker, or
  * null (none near, the human at the piece).
  */
-export function rumourNearHuman(text: string, excluded: (bot: Player) => boolean, x: number, z: number, level: number): Player | null {
+export function rumourNearHuman(text: string, excluded: (bot: Player) => boolean, x: number, z: number, level: number, prefer?: (bot: Player) => boolean, told?: (bot: Player) => ArcTag | undefined): Player | null {
     const now = World.currentTick;
     for (const human of humans) {
         if (human.slot === -1) continue;
         if (human.level === level && Math.max(Math.abs(human.x - x), Math.abs(human.z - z)) <= RUMOUR_AWAY) continue;
-        const bot = botsFreeNear(human, 15).find(b => !excluded(b) && ready(b, now));
+        // ---- (bots ideas, round 2: D word) a knower of the rumour among them first (`prefer`), and the line's tag (`told`:
+        // port/BotRumours makes the speaker a knower and tags its line, so the bots near learn it) ----
+        const free = botsFreeNear(human, 15).filter(b => !excluded(b) && ready(b, now));
+        const bot = (prefer ? free.find(prefer) : undefined) ?? free[0];
+        // ---- end of D's block ----
         if (!bot) continue;
         botSaid.set(bot, now);
         noteSaid(bot, text, now);
         const persona = botPersona(bot);
-        sayTyped(bot, styleLine(text, persona).line, { to: null, kind: 'rumour' }, reactionTicks(persona, 'notice'));
+        const arc = told?.(bot);
+        sayTyped(bot, styleLine(text, persona).line, { to: null, kind: 'rumour', tags: arc ? { arc } : undefined }, reactionTicks(persona, 'notice'));
         return bot;
     }
     return null;

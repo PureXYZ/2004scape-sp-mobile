@@ -6,7 +6,8 @@
 //              window and the watchdog's limit (BotAction.waitedForBudgetSince: the ticks are left out), then walks on once
 //              it has its searches; the fill's boost: twice the budget, half of it the far bots' (port/BotPathing)
 //   watchdog   a levelling bot's watchdog within 15 tiles of its spot ends its task (no jump); far from it, the jump
-//   bank loops two arrivals at a bank in a row with the same pack and no XP between end the task (BotTaskBase.noteBankVisit); food above a
+//   bank loops two arrivals at a bank in a row with the same pack and no XP between end the task (BotTaskBase.noteBankVisit),
+//              (bots ideas, round 4 fixes) not when the last stop put something in the bank (a no-XP errand's round); food above a
 //              keep goes in, the worst first (bankFoodAbove)
 //   thief      a baker's stall thief at Ardougne's south bank with a pack of 8 shrimp, 19 cakes and a bread: it banks the
 //              cakes, keeps 8 food and goes back to the stall (it stood at the booth 15-18 minutes)
@@ -26,7 +27,13 @@
 //   sewers     (the fixes) a jittered tile underground in its place's room; the sewers' rooms by their doors and web; a
 //              fighter from the manhole to the moss giants through the doors, cutting the web; a mage with a knife out the
 //              same way; one in the void round the sewers jumped up, no click on the ladder through the wall
+//   door walk  (bots ideas, the door-walk fix) a walk's door (Lumbridge church's west door) opened another way, then a
+//              click on the altar past it: the click is the bot's own, it prays; the KQ track's altar step from by the
+//              castle: done, prayed; and with a walk on to the door under way, the altar in route another way (the
+//              north doors opened by another bot): the clicks the walk took are no clicks, done, prayed
 //   stairs     a walk from Lumbridge castle's hall up to the spinning wheel with the searches spent 9 ticks in 10: no jump
+//   bank walk  (bots ideas, round 4 fixes) to Yanille's bank from the east, round it to its west door: its progress along
+//              the queued route (BotAction.walkLeft), never called stuck, no detour, no jump
 //   cow field  a fighter north of the Champions' Guild walks round to the gate of Lumbridge's west cow field and fights;
 //              out again by the gate (BotAction's gateway; the graph's next goal node when the nearest's leg is closed)
 //   reach      an NPC out of every route is 'no' (no click); firemaking's tile check (274's ~area_allow_loc_add): a bank
@@ -147,6 +154,9 @@ lib.Habits.setHabitRatesForTest({ breaks: 0, lingers: 0, watch: 0, abrupt: 0 });
 lib.setHangoutRateForTest(0.0001);
 lib.setEventRatesForTest({ odds: 0 });
 lib.setDirectorForTest({ first: 1e9 });
+// (and its first piece drawn afresh with that: the one drawn at the fill came at about 2,400 ticks, a clan walk taking the
+// stun scene's thief at seed 7 with the bots ideas' track B draws)
+lib.resetDirectorForTest();
 lib.setCliqueBehaviourForTest(false);
 lib.Scams.setScamRatesForTest({ ambient: false });
 lib.Linger.setLingerForTest(false);
@@ -306,6 +316,17 @@ function spendSearches() {
     packOf(p).add(Items.SHRIMP, 1);
     const changed = lib.noteBankVisit(p);
     check('bank loops: a visit that moved an item starts the count again', !changed && !task2.interrupted);
+    // (bots ideas, round 4 fixes) the same pack at the next arrival, but its last stop put the load in the bank: a round of
+    // a no-XP errand (cabbages picked, banked, as many picked again: errands.test 'picking' at seeds 4 and 10) came to
+    // something. A bank as it was is still the loop
+    const task3 = force(p, driver('Thieve', () => {}, A_STEP));
+    clearInv(packOf(p));
+    packOf(p).add(ObjType.getId('cabbage'), 24);
+    const first3 = lib.noteBankVisit(p);
+    bankOf(p).add(ObjType.getId('cabbage'), 24);
+    const again3 = lib.noteBankVisit(p);
+    check('bank loops: the same pack again after a stop that put its load in the bank (a no-XP errand\'s next round) starts the count again', !first3 && !again3 && !task3.interrupted, { first3, again3, interrupted: task3.interrupted });
+    clearInv(packOf(p));
     const stand = force(p, driver('Bankstand', () => {}));
     const sv = [lib.noteBankVisit(p), lib.noteBankVisit(p), lib.noteBankVisit(p)];
     check('bank loops: a bankstander\'s trips (a task with no skill step) are left alone', sv.join() === 'false,false,false' && !stand.interrupted, sv);
@@ -408,17 +429,21 @@ function spendSearches() {
         for (const r of rocks) if (!lib.isLocClaimed(r)) lib.claimLoc(r);
     };
     takeRocks();
-    const wander0 = lib.gatherStats.wander.Mine ?? 0;
-    const waits0 = lib.gatherStats.waits;
     const gaveUp0 = lib.gatherStats.gaveUp;
     const task = force(p, new lib.MiningTask(step));
     let besideAt = -1;
+    // (bots ideas, round 4 fixes: its own wait and walk about (AM6: MiningTask's wanderUntil), not the world's counts: a world
+    // miner beside it at the mine walked about in these ticks, seed 9)
+    let ownWait = false;
+    let ownWander = 0;
     run(160, () => {
         takeRocks();
+        if (task.wait.waiting) ownWait = true;
+        if (World.currentTick <= task.wanderUntil) ownWander++;
         if (besideAt < 0 && rocks.some(r => Math.max(Math.abs(r.x - p.x), Math.abs(r.z - p.z)) <= 2) && !p.hasWaypoints()) besideAt = World.currentTick;
         return false;
     });
-    check(`miner: every rock of its ore taken (${rocks.length} claimed): it waits beside one, never walking about`, rocks.length > 0 && lib.gatherStats.waits > waits0 && besideAt >= 0 && (lib.gatherStats.wander.Mine ?? 0) === wander0, { waits: lib.gatherStats.waits - waits0, besideAt, wander: (lib.gatherStats.wander.Mine ?? 0) - wander0, at: [p.x, p.z] });
+    check(`miner: every rock of its ore taken (${rocks.length} claimed): it waits beside one, never walking about`, rocks.length > 0 && ownWait && besideAt >= 0 && ownWander === 0, { waited: ownWait, besideAt, wander: ownWander, at: [p.x, p.z] });
     run(lib.RESOURCE_PATIENCE[1] + 20, () => {
         takeRocks();
         return task.isComplete(p);
@@ -631,12 +656,28 @@ function spendSearches() {
     const melee = lib.SkillProgression.ATTACK.find(s => s.location === Locations.SEWER_MOSS_GIANTS);
     place(p, 3237, 9861);
     clearInv(packOf(p));
+    // (the step's weapon in hand: one taken at its wine stint's grabs, its own two-hander in the pack for the air
+    // staff it held, had none fit for the moss giants once the pack was cleared, seed 3 with the bots ideas' track B)
+    {
+        const worn = p.getInventory(InvType.WORN);
+        const held = worn.get(3)?.id ?? -1;
+        worn.set(3, { id: melee.toolItemIds[0], count: 1 });
+        lib.refreshWorn(p, held);
+    }
     packOf(p).add(Items.IRON_SCIMITAR, 1);
     bankOf(p).add(Items.LOBSTER, 20);
+    // (bots ideas, round 4 fixes) the web as the fighter comes to it: cut by another (274's web.rs2: it stays open 100
+    // ticks), it walks through with no cut of its own. A world fighter's cut at seed 1 with the round's dice
+    const webWhole = () => World.gameMap.getZone(3210, 9898, 0).getAllLocsSafe().some(l => l.isActive && l.x === 3210 && l.z === 9898 && lib.LocType.get(l.type).debugname === 'bigweb_slashable');
+    const slashed = () => said.some(m => /slash the web apart/.test(m));
+    let foundOpen = false;
     const before = jumpsOf(p);
     force(p, new lib.CombatTask(melee));
-    const inMoss = run(900, () => p.z > 6400 && lib.dungeonRoomForTest(p.x, p.z) === 4);
-    check('sewers: a fighter from the manhole down to the moss giants through the three doors, its scimitar cutting the web, no jump', inMoss > 0 && jumpsOf(p) === before && said.some(m => /slash the web apart/.test(m)), { inMoss, at: [p.x, p.z], jumps: jumpsOf(p) - before, said: said.slice(-4) });
+    const inMoss = run(900, () => {
+        if (!foundOpen && !slashed() && Math.max(Math.abs(p.x - 3210), Math.abs(p.z - 9898)) <= 2 && !webWhole()) foundOpen = true;
+        return p.z > 6400 && lib.dungeonRoomForTest(p.x, p.z) === 4;
+    });
+    check('sewers: a fighter from the manhole down to the moss giants through the three doors, its scimitar cutting the web (or it found it cut), no jump', inMoss > 0 && jumpsOf(p) === before && (slashed() || foundOpen), { inMoss, at: [p.x, p.z], jumps: jumpsOf(p) - before, said: said.slice(-4), foundOpen });
     // a mage with a full pack and a knife: out by the web, the doors and the manhole's ladder, no jump
     // (the fighter's task over first: a bone it was burying gone from its pack was a script error)
     force(p, driver('Idle', () => {}));
@@ -680,6 +721,88 @@ function spendSearches() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// (bots ideas, the door-walk fix) a walk's door opened another way: the next click on the loc past it is the bot's own
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+{
+    scene(SEED, 'a walk\'s door opened another way'); // (its own dice: test/lib/dice.mjs)
+    // Lumbridge church: its west door (loc_1533) and north doors (the large doors) shut, the altar inside (the KQ track's
+    // LUMBRIDGE_ALTAR). An opened door is another loc: the shut one is inactive until 274's loc_del(500) is up
+    const ALTAR = [3243, 3206, 0];
+    const staticLoc = (name, x, z) => {
+        for (const loc of World.gameMap.getZone(x, z, 0).getAllLocsUnsafe()) if (loc.x === x && loc.z === z && lib.LocType.get(loc.type).debugname === name) return loc;
+        return null;
+    };
+    const west = staticLoc('loc_1533', 3238, 3210);
+    const doors = [west, staticLoc('loc_1516', 3244, 3216), staticLoc('loc_1519', 3243, 3216)];
+    const shut = () => doors.every(d => d?.isActive) || run(700, () => doors.every(d => d?.isActive)) > 0;
+    const altar = lib.findLocByName(3243, 3205, 0, 'altar', 2);
+    // (searches to spare: with the human off at Falador every bot is a far one, 4 searches a tick between them at 30
+    // online; a reach that waited for one past the walk's 60 ticks never met the walk's entry left over. Behind the stairs'
+    // scene, whose bot spends the searches 9 ticks in 10 from then on, it waited 30)
+    const budget0 = lib.Pathing.pathSearchBudget();
+    lib.Pathing.setPathSearchBudget(120);
+    const freeBefore = [...free];
+    const p = take(levellingFree);
+    levels(p, { 5: 30 });
+    clearInv(packOf(p));
+    // the walk on to the west door (walkTo: no route in, BotAction._openDoorToward), the door opened by the bot there another
+    // way (ErrandTask.reachLoc's openGateLoc), then a click on the altar: it is set and the bot prays (the walk's entry ran
+    // the gone door's script again and took the click: _continueDoorWalk)
+    const shut1 = shut();
+    place(p, 3233, 3212);
+    force(p, driver('Drive', () => {}));
+    lib.Pathing.beginPathTick(); // (a tick's searches to spend)
+    lib.walkTo(p, 3243, 3207);
+    const walking = p.hasWaypoints() && west.isActive;
+    const atDoor = run(40, () => !p.hasWaypoints());
+    const opened = lib.openGateLoc(p, west);
+    tick(2);
+    p.levels[5] = 1;
+    lib.interactLocOp(p, altar, 1);
+    const clicked = p.target === altar;
+    const prayed = run(40, () => p.levels[5] === p.baseLevels[5]);
+    check('door walk: a walk\'s door opened another way, then a click on Lumbridge church\'s altar past it: the click is set, the bot prays', shut1 && walking && atDoor > 0 && opened === 'opened' && !west.isActive && clicked && prayed > 0, { shut1, walking, atDoor, opened, westOpen: !west.isActive, clicked, prayed, prayer: p.levels[5], at: [p.x, p.z] });
+    // the KQ track's altar step (BotKqTeams' altarStep: clickLoc, radius 4, 2 clicks at most) from by the castle: its walk
+    // to the west door, the step's reach opening it, its click on the altar: it prays (the step was done, its prayer down)
+    const shut2 = shut();
+    place(p, 3226, 3213);
+    p.levels[5] = 1;
+    const step = lib.clickLoc(['altar'], 'Pray-at', ALTAR, { radius: 4, max: 2, wait: 6 });
+    let r = 'run';
+    force(p, driver('Drive', player => {
+        if (r === 'run') r = step.tick(player, null);
+    }));
+    const ended = run(400, () => r !== 'run');
+    check('door walk: the KQ track\'s altar step from by the castle (its walk to the church\'s west door, the door opened by its reach): done, and it prayed', shut2 && ended > 0 && r === 'done' && p.levels[5] === p.baseLevels[5], { shut2, ended, r, prayer: p.levels[5], westOpen: !west.isActive, at: [p.x, p.z] });
+    // the step with a walk on to the west door under way and the altar in route another way (the north doors opened by
+    // another bot): the clicks the walk took (BotAction.interactLocOp false) are none, the walk opens its door and the
+    // click comes after it: it prays (they were counted, the step done, its prayer down)
+    const shut3 = shut();
+    const q = take(levellingFree);
+    place(q, 3243, 3217);
+    force(q, driver('Idle', () => {}));
+    place(p, 3233, 3212);
+    p.levels[5] = 1;
+    const step3 = lib.clickLoc(['altar'], 'Pray-at', ALTAR, { radius: 4, max: 2, wait: 6 });
+    let r3 = null;
+    force(p, driver('Drive', player => {
+        if (r3 === 'run') r3 = step3.tick(player, null);
+    }));
+    lib.Pathing.beginPathTick();
+    lib.walkTo(p, 3243, 3207);
+    const walking3 = p.hasWaypoints() && west.isActive;
+    const north = lib.openGateLoc(q, doors[2]);
+    r3 = 'run';
+    const ended3 = run(400, () => r3 !== 'run');
+    check('door walk: the altar step with a walk on to the west door under way and the north doors opened by another bot: the clicks the walk took are none, done, and it prayed', shut3 && walking3 && north === 'opened' && !doors[1].isActive && !doors[2].isActive && ended3 > 0 && r3 === 'done' && p.levels[5] === p.baseLevels[5], { shut3, walking3, north, ended3, r3, prayer: p.levels[5], westOpen: !west.isActive, at: [p.x, p.z] });
+    lib.Pathing.setPathSearchBudget(budget0);
+    place(p, 3222, 3218, 0);
+    place(q, 3222, 3218, 0);
+    // (the free bots back as they were: the scenes after take the bots they took before this one)
+    free.splice(0, free.length, ...freeBefore);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // Lumbridge castle's stairs with the searches spent 9 ticks in 10 (ISS-10)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
@@ -704,6 +827,55 @@ function spendSearches() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// (bots ideas, round 4 fixes) a bank walk round a building to its door: Yanille's bank from the east
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+{
+    scene(SEED, 'a bank walk round a building'); // (its own dice: test/lib/dice.mjs)
+    // (its only doorway is in its west wall: from the east the route goes north round it, away from the bank tile for a
+    // while. Measured in a straight line the window ending at its west door made no progress (3 tiles of the 4 wanted), the
+    // detour (a tile within 4 of the bank, east of its wall) sent the bot back round, and the freeze rule jumped it:
+    // minigames.test seed 9's hurt fighter, a tile a tick. Its walk staged from its route's tiles there: from 2584,3059 and
+    // 2611,3066 the stuck check's window ends at the west door as it did (its route measured: never called stuck); from
+    // 2622,3094, by the east wall, the first window has no route to measure yet: called stuck once, the route kept (no
+    // detour). No alch stint at the bank (port/BotAlch's bank stop hook) to take the bot between the walks)
+    lib.Alch.setAlchRateForTest(0);
+    const p = take(levellingFree);
+    const runs = [];
+    for (const [x, z, measured] of [[2584, 3059, true], [2611, 3066, true], [2622, 3094, false]]) {
+        levels(p, {});
+        p.runenergy = 0;
+        place(p, x, z);
+        const stuck = new lib.StuckDetector(30, 4, 2); // CombatTask's
+        let verdicts = 0;
+        const check0 = stuck.check.bind(stuck);
+        stuck.check = (...a) => {
+            const said = check0(...a);
+            if (said) verdicts++;
+            return said;
+        };
+        const before = jumpsOf(p);
+        let arrived = false;
+        let detours = 0;
+        force(p, driver('Drive', player => {
+            if (arrived) return;
+            const v0 = verdicts;
+            if (lib.advanceBankWalk(player, stuck) !== 'walk') arrived = true;
+            // (a detour: called stuck, and its route after it no longer ends at the bank's tile)
+            const wp = player.hasWaypoints() ? player.waypoints[0] : -1;
+            if (verdicts > v0 && (wp === -1 || Math.max(Math.abs(((wp >> 14) & 0x3fff) - 2613), Math.abs((wp & 0x3fff) - 3093)) > 1)) detours++;
+        }));
+        const t = run(250, () => arrived);
+        runs.push({ from: [x, z], t, stuck: verdicts, detours, jumps: jumpsOf(p) - before, at: [p.x, p.z], ok: t > 0 && detours === 0 && jumpsOf(p) === before && (!measured || verdicts === 0) && cheb(p, { x: 2613, z: 3093 }) <= 6 });
+    }
+    check("bank walk: to Yanille's bank from the east (its door in the west wall, the route round it): there, no detour, no jump; its route's progress counted (never called stuck from the route's tiles before the turn)", runs.every(r => r.ok), runs);
+    lib.Alch.setAlchRateForTest(1);
+    force(p, driver('Idle', () => {}));
+    p.runenergy = 10000;
+    place(p, 3222, 3218, 0);
+    free.push(p);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // Lumbridge's west cow field: in by its gate from the far side of the river, out again (the watchdog's jumps)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 {
@@ -712,6 +884,7 @@ function spendSearches() {
     levels(p, { 0: 15, 1: 15, 2: 15, 3: 15 });
     fightReady(p);
     const step = lib.SkillProgression.ATTACK.find(s => s.location === Locations.COWS_LUMBRIDGE2);
+    clearInv(packOf(p)); // (before the place's tick too: a bone its old task buried in it read an emptied slot the tick after, seed 10)
     place(p, 3200, 3370); // north of the Champions' Guild: the field's fence and the river between
     clearInv(packOf(p));
     const xp0 = p.stats[0] + p.stats[1] + p.stats[2] + p.stats[3];
@@ -794,18 +967,22 @@ function spendSearches() {
         for (let i = 0; packOf(q).freeSlotCount > 0 && i < 28; i++) packOf(q).add(Items.LOGS, 1);
         const logs0 = count(packOf(q), Items.LOGS);
         const guest = { junkDropped: 0 };
+        // ((bots ideas, round 4 fixes) not in a script's delay first: a guest drops nothing then, seed 3 with the round's dice)
+        for (let i = 0; i < 20 && q.delayed; i++) tick(1);
+        const delayed = q.delayed;
         const dropped = lib.PartyGuestTask.prototype.dropJunk.call(guest, q);
         tick(2);
         const kept = keep.every(id => count(packOf(q), id) === 1);
         const logs1 = count(packOf(q), Items.LOGS);
         clearInv(packOf(q));
         for (const id of keep) packOf(q).add(id, 1);
+        for (let i = 0; i < 20 && q.delayed; i++) tick(1);
         const none = lib.PartyGuestTask.prototype.dropJunk.call({ junkDropped: 0 }, q);
         tick(2);
         const kept2 = keep.every(id => count(packOf(q), id) === 1);
         const loads = ['logs', 'iron_ore', 'coal', 'bones', 'ashes', 'raw_shrimp', 'blankrune'].every(n => lib.isGatheredLoad(ObjType.getId(n)));
         const notLoads = keep.every(id => !lib.isGatheredLoad(id));
-        check('parties: a full pack\'s junk for a pile is a log (a gathered load), never its scimitar, sword, leather, wizard hat, talisman or clue scroll; with no load it drops nothing', dropped && kept && logs1 === logs0 - 1 && !none && kept2 && loads && notLoads, { dropped, kept, logs: [logs0, logs1], none, kept2, loads, notLoads, keep: keep.map(id => ObjType.get(id)?.debugname) });
+        check('parties: a full pack\'s junk for a pile is a log (a gathered load), never its scimitar, sword, leather, wizard hat, talisman or clue scroll; with no load it drops nothing', dropped && kept && logs1 === logs0 - 1 && !none && kept2 && loads && notLoads, { dropped, delayed, kept, logs: [logs0, logs1], none, kept2, loads, notLoads, keep: keep.map(id => ObjType.get(id)?.debugname) });
     }
     clearInv(packOf(q));
     free.push(q);

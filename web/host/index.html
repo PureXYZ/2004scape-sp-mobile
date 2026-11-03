@@ -304,6 +304,13 @@
                             <span class="data-text"><span class="data-name">Think first</span><span class="data-detail" id="botchat-think-hint"></span></span>
                             <div class="seg" data-setting="botThink"><button data-value="false">Off</button><button data-value="true">On</button></div>
                         </div>
+                        <!-- (bots ideas, round 4: I model) the on-device model words the bots' own talk near you (the engine's
+                             port/BotModelAmbient: never Claude, never with Think first); greyed out, its choice kept, with its
+                             hint (host.js botChat.render), unless the on-device model is in the app and a chat model is chosen -->
+                        <div class="data-row" id="botchat-ambient">
+                            <span class="data-text"><span class="data-name">Bots' own talk</span><span class="data-detail" id="botchat-ambient-hint"></span></span>
+                            <div class="seg" data-setting="botAmbient"><button data-value="rules">Rules</button><button data-value="model">Model</button></div>
+                        </div>
                         <div class="data-row">
                             <span class="data-text"><span class="data-name">Claude key</span><span class="data-detail" id="botchat-key"></span></span>
                             <span class="data-btns"><button class="data-btn plain" id="botchat-key-set">Set key</button><button class="data-btn" id="botchat-key-remove" hidden>Remove</button></span>

@@ -9,7 +9,8 @@
 //     breaks   they happen; none in the Wilderness, a fight, a trade, a conversation or on the human's errand; a bot on a
 //              break (not AFK-skilling) neither walks nor jumps (the watchdog waits); 20-85 s each, its time up or cut
 //              short by what may cut it (port/BotHabits.lastBreakOf); a linger 2-2.5 min; isAway says so (a linger is no
-//              break)
+//              break); (bots ideas, round 4 fixes) a minute or more between one and the next (never a linger and at
+//              once a break)
 //     brb      every "brb" comes with a break of 45 s or more (or the bot left, or something cut it short); "back" only
 //              after a "brb"
 //     ends     a fight (the combat logout lock) or the human's errand ends a break at once
@@ -346,6 +347,24 @@ for (const b of brk) ends[b.reason ?? (b.gone ? 'gone' : 'open')] = (ends[b.reas
 check('a break lasts 20-85 s (at most 143 ticks), its time up or cut short by what may cut it', done.length > 0 && tooLong.length === 0 && !brk.some(b => b.reason === '?'), `lengths p10/p50/p90 ${[0.1, 0.5, 0.9].map(q => [...done.map(b => b.len)].sort((a, b) => a - b)[Math.floor(q * done.length)]).join('/')} ticks; ends ${JSON.stringify(ends)}; too long: ${tooLong.slice(0, 3).map(b => `${b.p.username} ${b.len}`).join(', ')}`);
 const lingerOk = lingers.filter(b => !b.cut && !b.gone && !b.open);
 check('a linger (at a bank or its spot) lasts 2-2.5 min (200-251 ticks), and the bot is not away meanwhile', lingers.length > 0 && lingerOk.every(b => b.len >= 200 && b.len <= 251) && !lingers.some(b => b.awayWrong), `${lingers.length} lingers: ${lingerOk.map(b => b.len).join(', ')}`);
+// (bots ideas, round 4 fixes) a break or a linger never at once after the last (port/BotHabits SPELL_GAP_TICKS: 100): a
+// linger and a break straight after it stood a woodcutter 323 ticks on its tile, a stall of sim.mjs's aged free world
+const spellGaps = [];
+{
+    const byBot = new Map();
+    for (const b of brk.concat(lingers)) {
+        if (!byBot.has(b.p)) byBot.set(b.p, []);
+        byBot.get(b.p).push(b);
+    }
+    for (const [p, list] of byBot) {
+        list.sort((a, b) => a.start - b.start);
+        for (let i = 1; i < list.length; i++) {
+            const gapTicks = list[i].start - (list[i - 1].start + list[i - 1].len);
+            if (gapTicks < 99) spellGaps.push(`${p.username} ${list[i - 1].kind} to t${list[i - 1].start + list[i - 1].len}, ${list[i].kind} t${list[i].start} (${gapTicks})`);
+        }
+    }
+}
+check('a break or a linger comes a minute or more after the last one ended (never a linger and at once a break)', spellGaps.length === 0 && brk.length + lingers.length >= 10, spellGaps.slice(0, 4).join(' | ') || `${brk.length + lingers.length} breaks and lingers`);
 check('isAway: true on a break, false on a linger', !brk.some(b => b.awayWrong), brk.filter(b => b.awayWrong).slice(0, 3).map(b => `${b.p.username} ${b.kind}`).join(', '));
 // a "brb": the break that came with it lasted 45 s or more, unless cut short or the bot left (a line is told in the
 // tick's own number, the break seen after the tick: one later)

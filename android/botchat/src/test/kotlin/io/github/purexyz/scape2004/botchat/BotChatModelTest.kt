@@ -1,6 +1,6 @@
 // BotChatModel's router step by step (BCM-14 1-10), with a fake native layer and, for Claude, a tiny local server:
-// the missing id, the clamp, rules, busy at once, the page reset, the half second, the merge, the
-// status, the hot phone and the fallback chain.
+// the missing id, the clamp, rules, busy at once ((bots ideas, round 4 fixes) the bots' own talk apart), the page reset,
+// the half second, the merge, the status, the hot phone and the fallback chain.
 package io.github.purexyz.scape2004.botchat
 
 import com.sun.net.httpserver.HttpServer
@@ -132,6 +132,50 @@ class BotChatModelTest {
         val rest = (1..3).map { replies.next()["id"] }.toSet()
         assertEquals(setOf(1, 2, 3), rest)
         assertEquals(1, main.run { chat.counters["busy"] })
+    }
+
+    // (bots ideas, round 4 fixes) a line of the bots' own talk is not counted toward the replies' 3: with one in flight,
+    // three replies are taken, a fourth is 'busy'; the one of their talk running is stopped by the first ('busy')
+    @Test
+    fun theBotsOwnTalkIsNotCountedTowardTheRepliesThree() {
+        val chat = model()
+        val release = CountDownLatch(1)
+        native.script = { call, out ->
+            if (call.user.startsWith("ambient")) {
+                while (!native.stop.get()) Thread.sleep(5)
+                LlmNative.ABORTED
+            } else {
+                release.await(10, TimeUnit.SECONDS)
+                out.text = "ok".toByteArray()
+                LlmNative.OK
+            }
+        }
+        val ambient = request(1).toMutableMap().apply {
+            this["ambient"] = true
+            this["local"] = mapOf("system" to "s", "user" to "ambient")
+        }
+        main.run { chat.handle(ambient) }
+        val until = System.currentTimeMillis() + 10_000
+        while (!chat.local.ambientRunning && System.currentTimeMillis() < until) Thread.sleep(5)
+        assertTrue(chat.local.ambientRunning)
+        val busy = main.run {
+            repeat(3) { chat.handle(request(it + 2)) }
+            chat.handle(request(5))
+            replies.queue.poll()  // (synchronously, before handle returned)
+        }
+        assertEquals(5, busy?.get("id"))
+        assertEquals("busy", busy?.get("error"))
+        val first = replies.next()
+        assertEquals(1, first["id"])
+        assertEquals("busy", first["error"])  // (stopped for the replies)
+        release.countDown()
+        val rest = (1..3).map { replies.next() }
+        assertEquals(setOf(2, 3, 4), rest.map { it["id"] }.toSet())
+        assertTrue(rest.all { it["source"] == "local" })
+        assertEquals(1, main.run { chat.counters["busy"] })
+        assertEquals(1, main.run { chat.counters["ambientStopped"] })
+        assertEquals(0, main.run { chat.counters["inFlight"] })
+        assertTrue(log.has("#1 local (ambient): stopped for a reply to the player: busy"))
     }
 
     @Test

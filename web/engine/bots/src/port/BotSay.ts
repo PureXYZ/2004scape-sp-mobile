@@ -12,6 +12,9 @@ import WordPack from '#/wordenc/WordPack.js';
 import { scheduleInTicks } from '#/engine/bot/port/BotSchedule.js';
 // (the variety work, round 2, Track S2: P5's cap on one voice: every non-trade line goes into the place's ledger)
 import { noteVoice } from '#/engine/bot/port/BotVoice.js';
+// ---- (bots ideas, round 2: arcs foundation) every line on the bus ('said': port/BotArcsEvents) ----
+import { emitArcs, type SaidTags } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- end of the arcs foundation's block ----
 
 /**
  * port: the most a line holds: 274's client sends at most 80 characters (WordPack) and its chatbox shows about that
@@ -85,10 +88,14 @@ export function lastChatAt(player: Player): number {
     return lastChat.get(player) ?? -Infinity;
 }
 
-export function botSay(player: Player, text: string, style?: ChatStyle, kind?: LineKind, to?: Player | null): void {
+/**
+ * (bots ideas, round 2: arcs foundation) `tags`: what the line's 'said' event carries (a catchphrase's index, a rumour's
+ * id: port/BotArcsEvents), on its first part
+ */
+export function botSay(player: Player, text: string, style?: ChatStyle, kind?: LineKind, to?: Player | null, tags?: SaidTags): void {
     const [first, ...more] = splitLine(text);
     if (first === undefined) return;
-    sayLine(player, first, style, kind, to);
+    sayLine(player, first, style, kind, to, tags);
     more.forEach((part, i) =>
         scheduleInTicks(2 * (i + 1), () => {
             // (still in the world: a bot that logged out, or out and back in, is another Player)
@@ -97,12 +104,12 @@ export function botSay(player: Player, text: string, style?: ChatStyle, kind?: L
     );
 }
 
-function sayLine(player: Player, text: string, style?: ChatStyle, kind?: LineKind, to?: Player | null): void {
+function sayLine(player: Player, text: string, style?: ChatStyle, kind?: LineKind, to?: Player | null, tags?: SaidTags): void {
     // port (the realism work): one line a tick shows (a player update carries one chat message: the second would hide
     // the first, which the listeners still counted); a typed reply, the chatter and a "brb" can meet: the later waits
     if ((player.masks & PlayerInfoProt.CHAT) !== 0) {
         scheduleInTicks(1, () => {
-            if (player.slot !== -1 && player.is_bot) sayLine(player, text, style, kind, to);
+            if (player.slot !== -1 && player.is_bot) sayLine(player, text, style, kind, to, tags);
         });
         return;
     }
@@ -125,4 +132,7 @@ function sayLine(player: Player, text: string, style?: ChatStyle, kind?: LineKin
     // (variety round 2, S2: a place's talk, for its voices' shares: port/BotVoice; trade and the set pieces' own calls apart)
     if (kind === undefined || !ASIDE_KINDS.has(kind)) noteVoice(player.username, player.x, player.z, player.level);
     for (const listener of sayListeners) listener(player, line, kind, to);
+    // ---- (bots ideas, round 2: arcs foundation) the line on the bus, as shown (theme D hears rumours and phrases) ----
+    emitArcs({ k: 'said', bot: player, text: line, kind, to, catchphrase: tags?.catchphrase, arc: tags?.arc });
+    // ---- end of the arcs foundation's block ----
 }

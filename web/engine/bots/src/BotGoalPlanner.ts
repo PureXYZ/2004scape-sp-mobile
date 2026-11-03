@@ -63,6 +63,9 @@ import { cliqueSkillsFor, cliqueStepFor } from '#/engine/bot/port/BotCliques.js'
 import type { PlannerKey } from '#/engine/bot/port/BotRoster.js';
 import { alchTaskFor } from '#/engine/bot/port/BotAlch.js';
 import { keptHookTask, setPieceTaskFor } from '#/engine/bot/port/BotSetPieces.js';
+// ---- (bots ideas, round 2: C arcs) theme C's hooks (port/BotLives: goals, moods, whims; filled by the C modules) ----
+import { LIVES } from '#/engine/bot/port/BotLives.js';
+// ---- end of C's block ----
 // (the realism work's phase 5a, Track F: the danger check, step 1e, and the White Wolf Mountain reach rule)
 import World from '#/engine/World.js';
 import { RestTask } from '#/engine/bot/tasks/RestTask.js';
@@ -377,13 +380,21 @@ export class BotGoalPlanner {
     pickTask(player: Player): BotTask | null {
         // (the variety work, round 1, Track D: the bot is not one of the occupants of the spots it weighs: port/BotSpots)
         setPicker(player);
-        let task: BotTask | null;
+        let task: BotTask | null = null;
         this.themeRolled = false;
+        // ---- (bots ideas, round 2: C arcs) around the pick: its goal (the first pick of a session with none), a tilted
+        // careless bot's risky pick (port/BotFumble), boredom's clock (the task kind picked) ----
+        LIVES.beginPick?.(player);
+        // ---- end of C's block ----
         try {
             task = this._pickTaskInternal(player);
         } finally {
             setPicker(null);
         }
+        // ---- (bots ideas, round 2: C arcs) the task picked: boredom's clock, a whim's task timed to its end (its
+        // replacement, or null: as picked) ----
+        task = LIVES.endPick?.(player, task) ?? task;
+        // ---- end of C's block ----
         // (Track D: DO-6) a theme pick that came to a tool trip: the theme again next time (THEME_TRIP_KINDS)
         if (this.themeRolled) this.themeAgain = task !== null && THEME_TRIP_KINDS.has(task.name.split(':')[0]);
         if (BotDebugService.enabled) {
@@ -448,6 +459,9 @@ export class BotGoalPlanner {
         // (rolled once a login; tried for its first CARRY_ON_PICKS picks until one is a doing: a bank trip for the full pack
         // it logged out with, or a shop trip for a tool, comes first; after the hang-outs and visits above, which keep their
         // own cadence: a carry-on before them took the Duel Arena's asks, A1)
+        // ---- (bots ideas, round 2: C arcs) a whim due at the session's first pick takes the carry-on's place (port/BotWhims) ----
+        if (this.firstPick && LEVELLING_PERSONALITIES.has(this.personality.name) && LIVES.whimFirst?.(player)) this.firstPick = false;
+        // ---- end of C's block ----
         if (this.firstPick && this.saved && LEVELLING_PERSONALITIES.has(this.personality.name)) {
             if (this.carryOnLeft < 0) this.carryOnLeft = Math.random() < CARRY_ON_CHANCE ? CARRY_ON_PICKS : 0;
             if (this.carryOnLeft > 0) {
@@ -624,6 +638,9 @@ export class BotGoalPlanner {
             return new BankstandTask();
         }
         this.bankstandCooldown--;
+        // ---- (bots ideas, round 2: C arcs) a skiller saving for a piece or a sum: its bankstand session 25 % sooner ----
+        if (LIVES.bankstandSooner?.(player)) this.bankstandCooldown--;
+        // ---- end of C's block ----
 
         // ── COOKING priority: cook whenever any fish are available ───────────
         // Without this, FISHING (weight 25) almost always beats COOKING (weight 15)
@@ -702,11 +719,20 @@ export class BotGoalPlanner {
         // way kept (port/BotD2Picks); not over a theme's roll or a carry-on, nor at a relog's first pick; (round 2, the fixes)
         // a levelling personality's planner only, as the hang-outs, the alch stints and the set pieces: a planner of the
         // tests' own weights (the coverage's cases) trains what they ask (a hides chain took a cape buyer's whole run) ----
-        if (!themeRoll && !this.prefer && LEVELLING_PERSONALITIES.has(this.personality.name)) {
+        // (bots ideas, round 2: C arcs: a whim due takes this pick before D2's: port/BotWhims, its session's one off-role plan)
+        if (!themeRoll && !this.prefer && LEVELLING_PERSONALITIES.has(this.personality.name) && !LIVES.whimFirst?.(player)) {
             const d2 = d2Pick(player, this.personality.name, this.saved);
             if (d2) return d2;
         }
         // ---- end of Track D2's block ----
+        // ---- (bots ideas, round 2: C arcs) a goal's piece come into reach (the upgrade path's shop trip), a whim's own
+        // trip (a skiller's Wilderness whim, an outing): a levelling personality's planner, not over a theme's roll or a
+        // carry-on (port/BotLivesIndex) ----
+        if (!themeRoll && !this.prefer && LEVELLING_PERSONALITIES.has(this.personality.name)) {
+            const own = LIVES.plannerTask?.(player, this.personality.weights) ?? null;
+            if (own) return own;
+        }
+        // ---- end of C's block ----
 
         // Build candidate list ordered by weight (highest first after shuffle)
         const candidates = this._buildCandidates(player);
@@ -721,6 +747,11 @@ export class BotGoalPlanner {
             if (i > 0) candidates.unshift(...candidates.splice(i, 1));
             friendFirst = i >= 0;
         }
+        // ---- (bots ideas, round 2: C arcs) a whim's skill first (once), else the goal's lean (before the friend's skill:
+        // precedence carry-on, goal, friend, theme), then boredom's avoidance of the last skill: a levelling personality's
+        // planner, not over a theme's roll or a carry-on (port/BotLivesIndex) ----
+        if (!themeRoll && !this.prefer && LEVELLING_PERSONALITIES.has(this.personality.name)) LIVES.candidates?.(player, candidates, this.personality.weights);
+        // ---- end of C's block ----
         // (the variety work, round 1, Track D: DO-6) a bot named for an activity does it first on its roll above
         // (yew_cutter cuts, fish_fanatic fishes: before, 20-23 of 26-30 such bots never did their name's); a carry-on's
         // skill (DO-7) first always
@@ -1978,6 +2009,13 @@ export class ExtrasGoalPlanner extends BotGoalPlanner {
             this.extrasInit = true;
             // Extras bots skip the normal InitTask — their tasks self-initialise.
         }
+        // ---- (bots ideas, round 2: C arcs) an extra's whim (15 % of its sessions, at its first pick: a vendor's or a
+        // social's short skill, a PKer's fishing by Edgeville or Draynor), and its bank on the way back (port/BotWhims) ----
+        {
+            const whim = LIVES.extrasTask?.(_player, this.extrasType) ?? null;
+            if (whim) return whim;
+        }
+        // ---- end of C's block ----
         switch (this.extrasType) {
             case 'social':         return new SocialTask();
             case 'vendor':         return new VendorTask();

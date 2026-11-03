@@ -1,0 +1,368 @@
+{
+    "about": "The bots ideas work, round 2: theme C's lines (lives with arcs: goals asked and done, moods, rage-quits and hops, 99 parties, whims (weddings cut this round)), in a late-2004 voice, the same shape and rules as lines2004.json: each group's tag says where and when it is true. Each group's tag carries an event no chatter event uses (so the idle picker never says them out of turn) and its kinds; its lines are said only through port/BotArcsSay (sayArcLine, arcLines(event, kind)), which fills their {slots} ({goal}, {left}, {item}, {skill} ...). Every line, every slot filled, through the 274 filter and charset (test/chat-filter.test.mjs covers every group of GROUPS_2004; its theme C block checks the slots).",
+    "groups": [
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-goal",
+                "kinds": [
+                    "answer"
+                ]
+            },
+            "lines": [
+                "going for {goal}",
+                "{goal} lol",
+                "{left} to go for {goal}",
+                "tryin to get {goal}",
+                "just {goal} atm",
+                "{goal} then idk",
+                "working on {goal}",
+                "{goal} atm"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-goal",
+                "kinds": [
+                    "saving"
+                ]
+            },
+            "lines": [
+                "saving for {gear}",
+                "need {left} more for {gear}",
+                "{gear} soon i hope",
+                "saving up for {gear} lol",
+                "only {left} to go for {gear}"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-goal",
+                "kinds": [
+                    "done"
+                ]
+            },
+            "lines": [
+                "finally {done}!!",
+                "{done} done!!",
+                "woot {done}",
+                "yes!! {done}",
+                "took forever lol",
+                "{done} at last",
+                "finally got {done} lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-goal",
+                "kinds": [
+                    "done-item"
+                ]
+            },
+            "lines": [
+                "finally got my {gear}!!",
+                "got my {gear} at last",
+                "{gear} finally lol",
+                "woot {gear}!!",
+                "saved up for {gear} lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-goal",
+                "kinds": [
+                    "dropped"
+                ]
+            },
+            "lines": [
+                "gave up on that lol",
+                "nah too slow, going for {goal} now",
+                "changed my mind lol",
+                "forget that, {goal} now",
+                "got bored of that"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-mood",
+                "kinds": [
+                    "tilt"
+                ]
+            },
+            "lines": [
+                "this game",
+                "so annoying",
+                "unreal",
+                "why me",
+                "this is so rigged",
+                "i hate this",
+                "cmon",
+                "worst day",
+                "omg this game"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-mood",
+                "kinds": [
+                    "elated"
+                ]
+            },
+            "lines": [
+                "best day ever",
+                "im so happy lol",
+                "today is my day",
+                "w00t!!",
+                "so lucky today lol",
+                "best day in ages"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-mood",
+                "kinds": [
+                    "bored"
+                ]
+            },
+            "lines": [
+                "so bored of {target}",
+                "ugh {target} again",
+                "need a break from {skill}",
+                "bored bored bored",
+                "zzz",
+                "this is boring lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-leave",
+                "kinds": [
+                    "rage"
+                ]
+            },
+            "lines": [
+                "im done",
+                "this game is so dumb",
+                "rage quit lol",
+                "forget this im out",
+                "done with this",
+                "i quit lol",
+                "so done",
+                "logging, this is stupid"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-leave",
+                "kinds": [
+                    "hop"
+                ]
+            },
+            "lines": [
+                "w8 hopping",
+                "too crowded, hopping",
+                "this world is so full",
+                "brb hop",
+                "way too many ppl here",
+                "hopping, cya"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-leave",
+                "kinds": [
+                    "bank-drop"
+                ]
+            },
+            "lines": [
+                "gtg bank this lol",
+                "omg banking this now",
+                "not risking this, bank",
+                "cya im banking this",
+                "banking this asap"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-whim",
+                "kinds": [
+                    "skiller"
+                ]
+            },
+            "lines": [
+                "felt like a change lol",
+                "time to fight something lol",
+                "bit of combat for once"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-whim",
+                "kinds": [
+                    "skiller-wild"
+                ]
+            },
+            "lines": [
+                "trying the wildy for once",
+                "wildy time lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-whim",
+                "kinds": [
+                    "fighter",
+                    "vendor"
+                ]
+            },
+            "lines": [
+                "lol me skilling",
+                "skilling for once lol",
+                "bit of skilling lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-whim",
+                "kinds": [
+                    "fighter-fish"
+                ]
+            },
+            "lines": [
+                "fishing for once lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-whim",
+                "kinds": [
+                    "balanced"
+                ]
+            },
+            "lines": [
+                "doing something different today",
+                "something different for once"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-whim",
+                "kinds": [
+                    "pker"
+                ]
+            },
+            "lines": [
+                "taking a break from pking",
+                "pk later",
+                "need a break from the wildy"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-99",
+                "kinds": [
+                    "near"
+                ]
+            },
+            "lines": [
+                "almost 99 {skill}!!",
+                "99 {skill} soon",
+                "1 lvl to 99 {skill} omg",
+                "so close to 99 {skill}"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-99",
+                "kinds": [
+                    "hold"
+                ]
+            },
+            "lines": [
+                "wait for every1",
+                "dont go yet",
+                "99 in 1!!",
+                "every1 here?",
+                "ok ready",
+                "1 more lol"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-99",
+                "kinds": [
+                    "pm"
+                ]
+            },
+            "lines": [
+                "getting 99 {skill} soon, come!!"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-99",
+                "kinds": [
+                    "gz"
+                ]
+            },
+            "lines": [
+                "gz on 99!!",
+                "99 gz!!",
+                "omg gz on 99",
+                "gz on the 99!!",
+                "huge gz",
+                "gz 99 {skill}!!"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-99",
+                "kinds": [
+                    "call"
+                ]
+            },
+            "lines": [
+                "99 party at {place}!!",
+                "99 drop party at {place} 5 min!!",
+                "come to {place} 99 party",
+                "99 party {place}, come!!"
+            ]
+        },
+        {
+            "tag": {
+                "c": "event",
+                "event": "arcs-party",
+                "kinds": [
+                    "mini-call"
+                ]
+            },
+            "lines": [
+                "dropping some stuff lol",
+                "mini drop party!!",
+                "free stuff over here lol",
+                "im in a good mood, dropping stuff"
+            ]
+        }
+    ]
+}

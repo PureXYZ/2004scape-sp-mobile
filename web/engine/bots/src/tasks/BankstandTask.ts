@@ -32,13 +32,25 @@ import World from '#/engine/World.js';
 import { botConsole as console } from '#/engine/bot/port/BotLog.js';
 import { botSay } from '#/engine/bot/port/BotSay.js';
 import { clearTradeTarget, packCounts, setOffer, tradeOffer, TradeSession, type TradeDeal, type TradeOutcome, type TradingTask } from '#/engine/bot/port/BotTradeScreen.js';
-import { depositItems } from '#/engine/bot/port/BotInventoryCompat.js';
+import { bankedId, depositItems } from '#/engine/bot/port/BotInventoryCompat.js';
 import { claimNearestStall, releaseStall, takeAdvertTurn, TRADE_BANKS, type Stall } from '#/engine/bot/port/BotTradeSpots.js';
 import { categoryOf, itemValue, sellPrice, streetPrice } from '#/engine/bot/port/BotPrices.js';
 import { advertGapOf, buyerNear, vendorStock } from '#/engine/bot/tasks/VendorTask.js';
 import { nameSeed, seededRandom } from '#/engine/bot/port/BotSeed.js';
 
 const VIABLE_ITEMS = new Set(viableItemIds);
+
+/** (bots ideas, Track A: the period endgame, A9) a drop sale's stint (port/BotDropSale): what it sells, how long, its adverts */
+export interface OwnStock {
+    /** the task's name (its kind: the report's) */
+    readonly name: string;
+    /** item (unnoted) -> how many of it are its own loot */
+    readonly stock: ReadonlyMap<number, number>;
+    readonly ticks: number;
+    advert(stock: ReadonlyMap<number, number>, priceOf: (id: number) => number): string | null;
+    /** a sale made: what went (as held), how many */
+    sold?(p: Player, id: number, n: number): void;
+}
 
 function pick(lines: readonly string[]): string {
     return lines[Math.floor(Math.random() * lines.length)];
@@ -75,10 +87,35 @@ export class BankstandTask extends BotTask implements TradingTask {
     /** (the variety work, round 1, Track S: ISS-5) the tick its next advert may come (its own log-normal pace, VendorTask advertGapOf) */
     private advertDue = -1;
 
-    constructor() {
-        super('Bankstand');
-        this.duration = 3000; //3,000 * 0.6 = 1,800 seconds = 30 minutes
+    // ---- (bots ideas, Track A: the period endgame, A9) a drop sale's stint: its own endgame loot only (port/BotDropSale:
+    // what it picked up on its trips and still owns), for its own time, its adverts in the period's forms, walked to (no
+    // jump to the bank), its sales noted ----
+    private readonly own: OwnStock | null;
+    /**
+     * (round 1 fixes, A3) what is left of its own loot to sell: item (unnoted) -> count, spent by each sale (a cap read
+     * afresh from the stint's stock never fell: a sale of its one drop let it sell its own banked copy next)
+     */
+    private readonly ownLeft = new Map<number, number>();
+    /** (round 1 fixes, A3) the pack's count of each item it sells (as held) at the last count: a sale is what left it */
+    private readonly packHeld = new Map<number, number>();
+    /** sells this item (as held: a note counts as its item): its own stock's while any is left, else the sellable materials */
+    private _sells(id: number): boolean {
+        if (!this.own) return VIABLE_ITEMS.has(id);
+        return (this.ownLeft.get(bankedId(id)) ?? 0) > 0;
+    }
+    /** (round 1 fixes, A3) any of its own loot left to sell? */
+    private _ownLeftAny(): boolean {
+        for (const n of this.ownLeft.values()) if (n > 0) return true;
+        return false;
+    }
+    // ---- end of Track A's block ----
+
+    constructor(own?: OwnStock) {
+        super(own?.name ?? 'Bankstand');
+        this.duration = own?.ticks ?? 3000; //3,000 * 0.6 = 1,800 seconds = 30 minutes
         this.finished = false;
+        this.own = own ?? null;
+        if (own) for (const [id, n] of own.stock) this.ownLeft.set(id, n);
     }
 
     private static listPrice(itemId: number): number {
@@ -393,12 +430,24 @@ export class BankstandTask extends BotTask implements TradingTask {
         this.stock.clear();
         const inv = player.getInventory(InvType.INV);
         if (!inv) return;
+        // (bots ideas, Track A: a drop sale's stock at most what is left of its own loot, by the item: its note and the
+        // item itself together; round 1 fixes, A3)
+        const left = this.own ? new Map(this.ownLeft) : null;
+        if (left) this.packHeld.clear();
         for (let slot = 0; slot < inv.capacity; slot++) {
             const item = inv.get(slot);
-            if (!item || !VIABLE_ITEMS.has(item.id) || !ObjType.get(item.id).tradeable) continue;
+            if (!item || !this._sells(item.id) || !ObjType.get(item.id).tradeable) continue;
+            let count = item.count;
+            if (left) {
+                const base = bankedId(item.id);
+                this.packHeld.set(item.id, (this.packHeld.get(item.id) ?? 0) + item.count);
+                count = Math.min(count, left.get(base) ?? 0);
+                left.set(base, (left.get(base) ?? 0) - count);
+                if (count <= 0) continue;
+            }
             const entry = this.stock.get(item.id);
-            if (entry) entry.count += item.count;
-            else this.stock.set(item.id, { count: item.count, price: this.priceOf(player, item.id) });
+            if (entry) entry.count += count;
+            else this.stock.set(item.id, { count, price: this.priceOf(player, item.id) });
         }
     }
 
@@ -607,6 +656,23 @@ export class BankstandTask extends BotTask implements TradingTask {
         }
         // (the trade fields: TradeSession.end)
         this.request = null;
+        // (bots ideas, Track A: a drop sale's items sold, noted; round 1 fixes, A3: what left the pack, its stock spent by
+        // it; all of it sold, the stint is over)
+        if (this.own && outcome === 'done') {
+            const before = new Map(this.packHeld);
+            this.refreshStock(player);
+            for (const [id, n] of before) {
+                const gone = n - (this.packHeld.get(id) ?? 0);
+                if (gone <= 0) continue;
+                const base = bankedId(id);
+                this.ownLeft.set(base, Math.max(0, (this.ownLeft.get(base) ?? 0) - gone));
+                this.own.sold?.(player, id, gone);
+            }
+            if (!this._ownLeftAny()) {
+                this._endStint(player);
+                return;
+            }
+        }
         this.refreshStock(player);
         this.watchdog.notifyActivity();
         // sold out: bank the coins and restock (upstream banked after every trade, and sold for 0gp until it had)
@@ -706,6 +772,18 @@ export class BankstandTask extends BotTask implements TradingTask {
                     }
                     saidSomething = true;
                 }
+            } else if (this.own) {
+                // ---- (bots ideas, Track A) a drop sale's advert, in the bank's turn: "selling rune chain 44k" ----
+                if (!this.stall || takeAdvertTurn(this.stall.bank, World.currentTick)) {
+                    const counts = new Map<number, number>();
+                    for (const [id, { count }] of this.stock) counts.set(id, count);
+                    const text = this.own.advert(counts, id => this.priceOf(player, id));
+                    if (text) {
+                        botSay(player, text, undefined, 'trade');
+                        saidSomething = true;
+                    }
+                }
+                // ---- end of Track A's block ----
             } else {
                 const allItems = Array.from(this.stock.entries());
                 const shuffled = allItems.sort(() => Math.random() - 0.5);
@@ -831,8 +909,28 @@ export class BankstandTask extends BotTask implements TradingTask {
             player.setVar(VarPlayerType.getId('bankcert'), 1);
         }
         this.withdrawViableItems(player);
+        // (bots ideas, Track A, round 1 fixes: A3: a drop sale's withdraw-all took every copy it owns, its kit's and its own
+        // pieces the Wilderness strip banked: what is over its own loot left goes back)
+        if (this.own) this._depositSurplus(player);
         this.hasBanked = true;
         this.refreshStock(player);
+    }
+
+    /** (bots ideas, Track A, round 1 fixes: A3) the pack's copies of its loot over what is left of it, back into the bank */
+    private _depositSurplus(player: Player): void {
+        const inv = player.getInventory(InvType.INV);
+        const bid = bankInvId();
+        const bank = bid === -1 ? null : player.getInventory(bid);
+        if (!inv || !bank || !this.own) return;
+        const left = new Map(this.ownLeft);
+        for (let slot = 0; slot < inv.capacity; slot++) {
+            const item = inv.get(slot);
+            if (!item || item.id === Items.COINS || !this.own.stock.has(bankedId(item.id))) continue;
+            const base = bankedId(item.id);
+            const keep = Math.min(item.count, Math.max(0, left.get(base) ?? 0));
+            left.set(base, (left.get(base) ?? 0) - keep);
+            if (item.count > keep) depositItems(inv, bank, item.id, item.count - keep);
+        }
     }
 
     /**
@@ -876,7 +974,7 @@ export class BankstandTask extends BotTask implements TradingTask {
             for (let slot = 0; slot < inv.capacity; slot++) {
                 const item = inv.get(slot);
                 if (!item) continue;
-                if (VIABLE_ITEMS.has(item.id)) {
+                if (this._sells(item.id)) {
                     //we withdraw
                     console.log('Attempting to withdraw item: ' + item.id + ' from slot: ' + slot);
                     // port: the stock is counted from the pack afterwards (refreshStock): the bank script withdraws
@@ -894,7 +992,8 @@ export class BankstandTask extends BotTask implements TradingTask {
         // teleport directly to the bank area instead of walking the whole map.
         const [bx, bz] = this._bankSpot(player);
         // port: only where nobody sees it (botTeleport); else it walks
-        if ((Math.abs(player.x - bx) > 50 || Math.abs(player.z - bz) > 50) && teleportNear(player, bx, bz)) {
+        // (bots ideas, Track A: a drop sale walks to its bank)
+        if (!this.own && (Math.abs(player.x - bx) > 50 || Math.abs(player.z - bz) > 50) && teleportNear(player, bx, bz)) {
             this.cooldown = randInt(2, 4);
             return;
         }
@@ -928,6 +1027,12 @@ export class BankstandTask extends BotTask implements TradingTask {
         super.reset();
         // port: the bot switches tasks with a trade open: close it (the human is told), do not leave them hanging
         if (this.trade.active && this.self) this.trade.end(this.self, 'lost');
+        // (bots ideas, Track A, round 1 fixes: A6: a drop sale cut short at its bank (its stall, Varrock West's farthest 17
+        // tiles off) puts its stock back, as its end does: the notes stayed in the pack)
+        if (this.own && this.self && this.hasBanked && !this.finished && this.stall && isNear(this.self, this.stall.bank.center[0], this.stall.bank.center[1], 20, this.stall.bank.center[2])) {
+            this._depositPack(this.self);
+            this.hasBanked = false;
+        }
         this.resetLoop();
         if (this.self) releaseStall(this.self);
         this.stall = null;
@@ -974,6 +1079,12 @@ export class BankstandTask extends BotTask implements TradingTask {
 
     /** port: the stint is over: everything but coins into the bank (bankedId: notes as their items), notes off */
     private _endStint(player: Player): void {
+        this._depositPack(player);
+        this.finished = true;
+    }
+
+    /** everything but coins into the bank (bankedId: notes as their items), notes off */
+    private _depositPack(player: Player): void {
         const inv = player.getInventory(InvType.INV);
         if (inv) {
             for (let i = 0; i < inv.capacity; i++) {
@@ -982,6 +1093,5 @@ export class BankstandTask extends BotTask implements TradingTask {
             }
         }
         player.setVar(VarPlayerType.getId('bankcert'), 0);
-        this.finished = true;
     }
 }

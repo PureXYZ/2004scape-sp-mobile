@@ -7,7 +7,9 @@
 // - Loaded lazily, at the first request (or a warm-up), when there is room for it ([Options.minFreeToLoad]); unloaded
 //   after 5 idle minutes, on a memory warning ([release]: the reply being written stops first) and in the background.
 // - One generation at a time, on its own thread (`generate` from any thread; the completion comes on the main thread). All
-//   llama.cpp state is confined to that thread.
+//   llama.cpp state is confined to that thread. (bots ideas, round 4: I model) The thread serves the replies to the player
+//   first: a request of the bots' own talk (`ambient`) waits behind every reply asked before it runs, and (round 4 fixes)
+//   one running stops (native's stop flag) when a reply is asked ([Failure.Preempted], 'busy').
 // - The prompt is the engine's `renderLocal` (a system and a user turn) in Qwen's chat template with the empty think block
 //   (thinking off), exactly as the model was trained: temperature 0.8, top-p 0.9, top-k 40, a repetition penalty of 1.1
 //   over the last 64 tokens, at most 40 tokens, one line of the chat's characters (a GBNF grammar), stopping at a newline,
@@ -120,6 +122,11 @@ class LocalModel(
         }
         class Failed(val why: String) : Failure("failed: $why")
 
+        /** (bots ideas, round 4 fixes) a line of the bots' own talk stopped for a reply to the player asked while it ran ([generate]): 'busy', as when it is refused behind one */
+        object Preempted : Failure("busy") {
+            private fun readResolve(): Any = Preempted
+        }
+
         override fun toString() = description
     }
 
@@ -170,6 +177,12 @@ class LocalModel(
     /** Requests waiting or running. */
     val queued: Int get() = lock.withLock { pending }
 
+    /** (bots ideas, round 4: I model) Replies to the player (requests not `ambient`) waiting or running. */
+    val queuedReplies: Int get() = lock.withLock { pendingReplies }
+
+    /** (bots ideas, round 4 fixes) A line of the bots' own talk is running on the model now (the harness). */
+    val ambientRunning: Boolean get() = lock.withLock { runningAmbient }
+
     // The serial queue (iOS: DispatchQueue "lostcity.local-model", userInitiated): immediate and delayed work on one thread.
     // (8 MB of stack: llama.cpp's grammar and graph code run on it)
     private val queue = ScheduledThreadPoolExecutor(1) { runnable ->
@@ -187,6 +200,16 @@ class LocalModel(
     private var pending = 0
     /** bumped by [release]: a request asked before it stops (the one running in native, those waiting at once) */
     private var epoch = 0
+    // (bots ideas, round 4: I model)
+    /** the requests waiting for the thread, in order; the next to run is the first reply among them ([runNextJob]) */
+    private val jobs = ArrayList<Pair<Boolean, () -> Unit>>()
+    /** the replies to the player (not the bots' own talk) waiting or running */
+    private var pendingReplies = 0
+    // (bots ideas, round 4 fixes)
+    /** the job running on the thread is a line of the bots' own talk */
+    private var runningAmbient = false
+    /** a reply to the player was asked while it ran: native's stop flag is set, and it fails [Failure.Preempted] */
+    private var ambientPreempted = false
     private var variant: String? = null
     private var mappedValue = false
 
@@ -207,9 +230,11 @@ class LocalModel(
      * Writes one reply. [think]: the request asks for the note first (it is written when the model offers the choice,
      * [ThinkSupport.OPTION]; a model that always or never writes one does as it was trained). [deadlineNanos] (on
      * `System.nanoTime()`): past it the generation stops and fails with [Failure.Timeout]. The completion runs on the main
-     * thread, with a [Failure] when it fails.
+     * thread, with a [Failure] when it fails. (bots ideas, round 4: I model) [ambient]: a line of the bots' own talk, which
+     * waits behind the replies to the player ([runNextJob]); (round 4 fixes) a reply asked while one runs stops it
+     * ([Failure.Preempted]).
      */
-    fun generate(system: String, user: String, think: Boolean, deadlineNanos: Long, completion: (Result<Output>) -> Unit) {
+    fun generate(system: String, user: String, think: Boolean, deadlineNanos: Long, ambient: Boolean = false, completion: (Result<Output>) -> Unit) {
         val info = info
         if (!available || info == null) {
             val reason = unavailableReason ?: "no-model"
@@ -219,9 +244,10 @@ class LocalModel(
         val note = info.think.writesNote(think)
         val epoch = lock.withLock {
             pending += 1
+            if (!ambient) pendingReplies += 1
             this.epoch
         }
-        queue.execute {
+        val work = {
             val result: Result<Output> = try {
                 Result.success(run(system, user, note, deadlineNanos, epoch))
             } catch (failure: Failure) {
@@ -229,10 +255,40 @@ class LocalModel(
             } catch (error: Throwable) {
                 Result.failure(Failure.Failed(error.toString()))
             }
-            lock.withLock { pending -= 1 }
+            lock.withLock {
+                pending -= 1
+                if (!ambient) pendingReplies -= 1
+            }
             scheduleIdleUnload()
             main.post { completion(result) }
         }
+        lock.withLock {
+            jobs.add(ambient to work)
+            // (bots ideas, round 4 fixes: a reply to the player never waits behind the bots' own talk running: native stops
+            // it; in the same look as the job's queuing, so a line of their talk picked meanwhile is seen)
+            if (!ambient && runningAmbient) {
+                ambientPreempted = true
+                native?.setStop(true)
+            }
+        }
+        queue.execute { runNextJob() }
+    }
+
+    /**
+     * (bots ideas, round 4: I model) On the model's thread, once per [generate]: the first reply to the player waiting, else
+     * the first line of the bots' own talk. (Round 4 fixes) What runs is noted for a reply asked meanwhile ([generate]).
+     */
+    private fun runNextJob() {
+        val work = lock.withLock {
+            if (jobs.isEmpty()) return@withLock null
+            val i = jobs.indexOfFirst { !it.first }
+            val job = jobs.removeAt(if (i >= 0) i else 0)
+            runningAmbient = job.first
+            ambientPreempted = false
+            job.second
+        }
+        work?.invoke()
+        lock.withLock { runningAmbient = false }
     }
 
     /**
@@ -308,6 +364,7 @@ class LocalModel(
 
     private fun shouldStop(deadlineNanos: Long, epoch: Int) {
         if (lock.withLock { abortRequested || suspended || epoch != this.epoch }) throw Failure.Aborted
+        if (lock.withLock { ambientPreempted }) throw Failure.Preempted  // (bots ideas, round 4 fixes: only ever set while the bots' own talk runs)
         if (System.nanoTime() - deadlineNanos >= 0) throw Failure.Timeout
     }
 
@@ -405,7 +462,7 @@ class LocalModel(
         // stored in the same look)
         val suspendedNow = lock.withLock {
             if (!suspended) abortRequested = false
-            native.setStop(abortRequested || suspended)
+            native.setStop(abortRequested || suspended || ambientPreempted)  // (round 4 fixes: a reply asked already stops it too)
             suspended
         }
         if (suspendedNow) throw Failure.Unavailable("background")
@@ -431,7 +488,8 @@ class LocalModel(
         timings.resampled = out.resampled
         when (status) {
             LlmNative.OK -> Unit
-            LlmNative.ABORTED -> throw Failure.Aborted
+            // (bots ideas, round 4 fixes: stopped for a reply to the player, or by a pause or a release)
+            LlmNative.ABORTED -> throw if (lock.withLock { ambientPreempted && !abortRequested && !suspended && epoch == this.epoch }) Failure.Preempted else Failure.Aborted
             LlmNative.TIMEOUT -> throw Failure.Timeout
             else -> throw Failure.Failed(out.error ?: "?")
         }

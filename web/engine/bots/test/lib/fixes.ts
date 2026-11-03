@@ -51,3 +51,7 @@ export { RangedMagicTask } from '#/engine/bot/tasks/RangedMagicTask.js';
 export { botJitter, webBladeFor } from '#/engine/bot/tasks/BotTaskBase.js';
 export { tilesInSquare } from '#/engine/bot/BotAction.js';
 export { nearestGeneral } from '#/engine/bot/port/BotChains.js';
+// (bots ideas, the door-walk fix) a walk's door opened another way, then a click: the KQ track's altar step (ErrandTask's
+// clickLoc), the click itself, the reach's door opening
+export { clickLoc } from '#/engine/bot/tasks/ErrandTask.js';
+export { interactLocOp, openGateLoc } from '#/engine/bot/BotAction.js';

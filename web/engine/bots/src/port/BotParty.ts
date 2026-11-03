@@ -35,7 +35,7 @@ import ObjType from '#/cache/config/ObjType.js';
 import InvType from '#/cache/config/InvType.js';
 import World from '#/engine/World.js';
 import { BotManager } from '#/engine/bot/BotManager.js';
-import { eventRoleOf, register, setPieceLog, nextSetPieceId, type SetPieceContext, type SetPieceDef, type SetPiecePhase, type SetPiecePlan, type SetPieceRun, type SetPieceVenue } from '#/engine/bot/port/BotSetPieces.js';
+import { eventRoleOf, register, runStarted, setPieceLog, nextSetPieceId, type SetPieceContext, type SetPieceDef, type SetPiecePhase, type SetPiecePlan, type SetPieceRun, type SetPieceVenue } from '#/engine/bot/port/BotSetPieces.js';
 import { isMembersWorld } from '#/engine/bot/port/BotWorldRules.js';
 import { isRare, itemValue } from '#/engine/bot/port/BotPrices.js';
 import { isLevelling, type PlannerKey } from '#/engine/bot/port/BotRoster.js';
@@ -247,7 +247,7 @@ function noteOf(id: number): number {
  * Room, a note when one is worth under 100 (Pete throws out a cheap single); gear single; 1 party in 10 one better item;
  * then a coin pile (now and then a joke one) topped up toward the budget.
  */
-export function planKit(bot: Player, kind: PartyKind, random: () => number = Math.random, opts: { better?: boolean; knights?: boolean; joke?: boolean } = {}): Kit | null {
+export function planKit(bot: Player, kind: PartyKind, random: () => number = Math.random, opts: { better?: boolean; knights?: boolean; joke?: boolean; budget?: readonly [number, number]; drops?: readonly [number, number] } = {}): Kit | null {
     const D = PARTY;
     const members = isMembersWorld();
     const have = owned(bot);
@@ -256,12 +256,14 @@ export function planKit(bot: Player, kind: PartyKind, random: () => number = Mat
     const knights = kind === 'party_room' && (opts.knights ?? random() < D.knightsChance);
     const leverCoins = kind === 'party_room' ? D.lever + (knights ? D.knights : 0) : 0;
     if (coinsHave < D.hostCoins + leverCoins) return null;
-    const budget = logUniform(D.budget[kind], random);
+    // ---- (bots ideas, round 2: C arcs) a bot's own party's budget and piles (a 99's: 3-10k, 8-20; a mini party's: 1-3k, 4-10) ----
+    const budget = logUniform(opts.budget ?? D.budget[kind], random);
+    // ---- end of C's block ----
     // (the pack holds the piles: 28 slots, its tools kept. The Party Room's kit goes through the pack to the chest too: a
     // host with 7 tools kept and a kit of 24 slots took 21 of it out and no lever coins, and the party was off at the
     // booth, 'no kit': test/party.test at seed 3)
     const maxDrops = Math.min(kind === 'drop_party' ? 28 : 26, 28 - toolsCarried(bot));
-    const target = Math.min(maxDrops - 1, randIn(D.drops[kind], random));
+    const target = Math.min(maxDrops - 1, randIn(opts.drops ?? D.drops[kind], random));
     // (the coin pile's share kept back: now and then a joke pile instead, "lol 1 coin drop")
     const joke = opts.joke ?? random() < D.jokeCoinChance;
     const coinPart = joke ? 0 : Math.round(budget * (D.coinShare[0] + random() * (D.coinShare[1] - D.coinShare[0])));
@@ -347,7 +349,8 @@ export function planKit(bot: Player, kind: PartyKind, random: () => number = Mat
         drops++;
         value += pile;
     } else pile = 0;
-    const least = kind === 'drop_party' ? D.drops.drop_party[0] : D.drops.party_room[0];
+    // (bots ideas, round 2: C arcs: a bot's own party's least, its `drops`)
+    const least = opts.drops ? opts.drops[0] : kind === 'drop_party' ? D.drops.drop_party[0] : D.drops.party_room[0];
     if (drops < least) return null;
     return { picks, coins: pile, value: value + betterValue, drops, budget, better, leverCoins, knights };
 }
@@ -480,6 +483,13 @@ export interface PartyRecord {
     hostGot: { item: string; count: number }[];
     /** the bots of the party still at the venue 10 minutes after it ended (stuck), -1 until then */
     stuckAfter: number;
+    // ---- (bots ideas, round 2: C arcs) a bot's own party (port/BotNinetyNine: 'ninety_nine', 'mini_party'), not the director's ----
+    own?: string;
+    // ---- end of C's block ----
+    // ---- (bots ideas, round 2: D word) guests who came by word of mouth (addWordGuest: knowers of its rumour from
+    // further off, port/BotRumours): asked; they are in `asked` and `came` too ----
+    wordGuests?: number;
+    // ---- end of D's block ----
 }
 
 const LOG_MAX = 500;
@@ -595,6 +605,23 @@ export class PartyRun implements SetPieceRun {
         this.record.asked++;
     }
 
+    // ---- (bots ideas, round 2: D word) word guests: knowers of the party's rumour from further off (port/BotRumours), at
+    // most WORD_GUESTS_MOST a party past its guest cap, each a guest as any (its part a sub-task, the director's recruit) ----
+    /** the guests who came by word of mouth */
+    readonly wordGuests = new Set<Player>();
+    /** a knower of its rumour comes (sets off at `at`, as the asked guests do, while it can still be there for the drop); false: not taken */
+    addWordGuest(bot: Player, at: number = World.currentTick): boolean {
+        if (this.phase !== 'announce' && this.phase !== 'build') return false;
+        if (bot === this.host || this.roles.has(bot) || this.wordGuests.has(bot) || this.wordGuests.size >= WORD_GUESTS_MOST || this.pending.some(g => g.bot === bot)) return false;
+        const latest = this.latestFor(bot);
+        if (latest < at) return false;
+        this.wordGuests.add(bot);
+        this.record.wordGuests = (this.record.wordGuests ?? 0) + 1;
+        this.addGuest(bot, at, latest);
+        return true;
+    }
+    // ---- end of D's block ----
+
     /** (variety round 1, F) the last moment a guest at (x, z) may set off to be there for the drop */
     latestFor(bot: Player): number {
         const [dx, dz] = this.venue.drop;
@@ -620,7 +647,8 @@ export class PartyRun implements SetPieceRun {
                 this.record.retries = (this.record.retries ?? 0) + 1;
             } else {
                 this.record.lost = (this.record.lost ?? 0) + 1;
-                this.replaceGuest(now);
+                // (bots ideas, round 2: D word: a word guest came past the cap: no one of the pool in its place)
+                if (!this.wordGuests.has(g.bot)) this.replaceGuest(now);
             }
         }
         this.walkIns(now);
@@ -752,7 +780,8 @@ export class PartyRun implements SetPieceRun {
         if (this.phase === 'end' || this.phase === 'done') return false;
         const ai = BotManager.botFor(bot);
         // (variety round 1, F: ISS-3) a hang-out it stands in is given up for the party, as a player there would
-        if (!ai || bot.slot === -1 || (ai.hasSubTask() && !inHangout(bot)) || eventRoleOf(bot) !== null || !(walkIn ? walkInFree(bot) : guestFree(bot))) return false;
+        // (bots ideas, round 2: D word: a word guest, a levelling bot or a social regular: wordGuestFree)
+        if (!ai || bot.slot === -1 || (ai.hasSubTask() && !inHangout(bot)) || eventRoleOf(bot) !== null || !(walkIn ? walkInFree(bot) : this.wordGuests.has(bot) ? wordGuestFree(bot) : guestFree(bot))) return false;
         const task = new PartyGuestTask(this, walkIn);
         ai.setSubTask(task);
         this.guests.set(bot, task);
@@ -887,6 +916,15 @@ export function setWalkInChanceForTest(chance: number | null): void {
     walkInChance = chance ?? WALK_IN_CHANCE;
 }
 export const WALK_IN_MOST = 8;
+
+// ---- (bots ideas, round 2: D word) word guests (PartyRun.addWordGuest; port/BotRumours) ----
+/** at most this many word guests a party, past its guest cap */
+export const WORD_GUESTS_MOST = 10;
+/** a word guest free to set off: a passer-by's rules (a levelling bot or a social regular), never a newbie */
+export function wordGuestFree(bot: Player): boolean {
+    return walkInFree(bot) && !isNewbie(bot);
+}
+// ---- end of D's block ----
 
 /**
  * (variety round 1, F) a passer-by free to walk in: a levelling bot (a newbie too: Lumbridge's drop parties drew them) or
@@ -1031,6 +1069,34 @@ export const PARTY_ROOM: SetPieceDef = {
 
 register(DROP_PARTY);
 register(PARTY_ROOM);
+
+// ---- (bots ideas, round 2: C arcs) a bot's own drop party, not the director's: a 99's
+// (port/BotNinetyNine: "99 party at varrock west bank 5 min!!") and an elated bot's mini party. The same run as a drop
+// party's (its host banks for a kit of its own things, walks to the venue, drops the piles one by one; the guests grab after
+// 274's reveal), with its own budget and piles, its venue the caller's (the nearest bank, its spot), its guests the caller's
+// (each sets off at a moment of the lead) and the walk-ins. Started as a set piece (runStarted: its roles hold their logouts
+// and are no director's recruits); the caller ticks it every 5 ticks and ends it (runEnded) when its phase is 'done'. Null
+// when the host is not free or has no kit. ----
+export function startOwnParty(host: Player, venue: { key: string; x: number; z: number; level: number; say: string }, opts: { budget: readonly [number, number]; drops: readonly [number, number]; guests: readonly Player[]; own: string }): PartyRun | null {
+    const ai = BotManager.botFor(host);
+    if (!ai || ai.hasSubTask() || host.slot === -1) return null;
+    const kit = planKit(host, 'drop_party', Math.random, { budget: opts.budget, drops: opts.drops, better: false });
+    if (!kit) return null;
+    const pv: PartyVenue = { key: venue.key, kind: 'drop_party', x: venue.x, z: venue.z, level: venue.level, say: venue.say, drop: [venue.x, venue.z] };
+    const run = new PartyRun({ kind: 'drop_party', venue: pv, score: 1 }, host, kit, pv);
+    run.record.own = opts.own;
+    ai.setSubTask(run.hostTask);
+    const lead = run.dropAt - run.startedAt;
+    for (const g of opts.guests) {
+        if (g === host || g.slot === -1) continue;
+        const latest = run.latestFor(g);
+        if (latest < run.startedAt + 2) continue;
+        run.addGuest(g, Math.min(latest, run.startedAt + Math.round(lead * (0.05 + 0.3 * Math.random()))), latest);
+    }
+    runStarted(run);
+    return run;
+}
+// ---- end of C's block ----
 
 // ── tests ────────────────────────────────────────────────────────────────────────────────────────────────────────
 

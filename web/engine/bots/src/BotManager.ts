@@ -58,8 +58,8 @@ import { agedStartBank, ageTierFor, applyAge } from '#/engine/bot/port/BotAge.js
 import { isNewbie, lumbridgeLowLevel } from '#/engine/bot/port/BotNewbie.js';
 import { awayAfter, NEWCOMER_WAIT_LOOKS, newcomerGap, newcomerGapMost, newcomerPace, sessionLeft, sessionLength, timing as makeTiming, uniform, type SessionTiming } from '#/engine/bot/port/BotSessions.js';
 import { cliqueReturnBonus } from '#/engine/bot/port/BotCliques.js';
-import { BotChat } from '#/engine/bot/port/BotChat.js';
-import { readyToLeave } from '#/engine/bot/port/BotHabits.js';
+import { BotChat, OWED_REPLY_MOST } from '#/engine/bot/port/BotChat.js';
+import { isAway, readyToLeave } from '#/engine/bot/port/BotHabits.js';
 import { tickCliques } from '#/engine/bot/port/BotCliques.js';
 import { holdsLogout, isArmed, tickRandomEvents } from '#/engine/bot/port/BotRandomEvents.js';
 // (the realism work, phase 5b: set pieces: the director, the newbie trains, a bot's part in a piece; the pieces' modules
@@ -68,9 +68,16 @@ import { exportDirector, restoreDirector, tickDirector } from '#/engine/bot/port
 import { exportArena, restoreArena } from '#/engine/bot/port/BotArena.js';
 import { tickTrains } from '#/engine/bot/port/BotTrains.js';
 import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
+import { runelinkHold } from '#/engine/bot/port/BotRunelink.js'; // (bots ideas, round 3: G period)
 import '#/engine/bot/port/BotSetPieceIndex.js';
 // (the realism work, phase 5b, Track A: the player-mod bot: its silver crown at spawn, and it never quits)
 import { isPlayerModName } from '#/engine/bot/port/BotModBot.js';
+// (bots ideas, Track B: loot) the PKers' ledgers: the logout hold and the saved world
+import { dropLedger, exportLoot, holdsLoot, noteLootLogin, restoreLoot, type SavedLootStack } from '#/engine/bot/port/BotLoot.js';
+// ---- (bots ideas, round 2: arcs foundation) the bots' saved arcs (goals, ties, phrases) and the bus (themes C and D) ----
+import { exportArcs, forgetArcs, restoreArcs } from '#/engine/bot/port/BotArcsStore.js';
+import { arcsPlay, emitArcs, setArcsPlaySource, tickArcs } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- end of the arcs foundation's block ----
 
 export type BotLoadResult = { status: 'ok'; data: Uint8Array } | { status: 'missing' } | { status: 'error'; error: string };
 
@@ -139,6 +146,17 @@ export interface BotWorldState {
     director?: unknown;
     /** port (phase 5b): the Duel Arena's purse and the bots the human beat (port/BotArena exportArena) */
     arena?: unknown;
+    // ---- (bots ideas, Track B: loot) ----
+    /** the PKers' ledgers of the human's items not yet banked, {name: [[id, count, playtime], ...]} (port/BotLoot exportLoot; usually none) */
+    loot?: Record<string, SavedLootStack[]>;
+    // ---- end of Track B's (ideas) block ----
+    // ---- (bots ideas, round 2: arcs foundation) ----
+    /**
+     * the bots' arcs: each levelling bot's goal, its ties to other bots, its borrowed catchphrases ({ v: 1, t, b }:
+     * port/BotArcsStore exportArcs; missing when there are none, and in an older store)
+     */
+    arcs?: unknown;
+    // ---- end of the arcs foundation's block ----
 }
 
 export interface BotStats {
@@ -348,6 +366,13 @@ interface Member {
     goodbyeAt: number;
     failedLogins: number;
     sessions: number;
+    // ---- (bots ideas, round 2: arcs foundation) ----
+    /** its next absence, [min, max] play ticks, instead of the drawn one (leaveSoon's `away`: a hop's short one), or none */
+    awayOverride?: [number, number] | null;
+    // ---- end of the arcs foundation's block ----
+    // ---- (bots ideas, round 2: C arcs) the play tick its leave was first stretched for a reply it owes the human (-1: none) ----
+    owedSince?: number;
+    // ---- end of C's block ----
 }
 
 // ── BotManager singleton ──────────────────────────────────────────────────────
@@ -442,6 +467,9 @@ class BotManagerClass {
         this.poolKeep = Math.max(this.poolCap, typeof kept === 'number' && Number.isFinite(kept) && kept >= 0 ? Math.min(before, kept) : before);
         this.names = new NameSource(name => this.known.has(name) || isQuit(name) || options.isReservedName(name));
         this.nextNewcomer = uniform(this.timing.newcomer, this.random);
+        // ---- (bots ideas, round 2: arcs foundation) the arcs' play clock is this one (port/BotArcsEvents arcsPlay) ----
+        setArcsPlaySource(() => this.play);
+        // ---- end of the arcs foundation's block ----
         this._restoreWorld(options.world);
         this.namesLeft = this.names.remaining();
         const savedSet = new Set(saved);
@@ -528,6 +556,14 @@ class BotManagerClass {
                     this.tickErrors++;
                     console.error('[BotManager] cliques failed', err);
                 }
+                // ---- (bots ideas, round 2: arcs foundation) the arcs' passes (themes C and D: port/BotArcsEvents tickArcs) ----
+                try {
+                    tickArcs(tick, this.play);
+                } catch (err) {
+                    this.tickErrors++;
+                    console.error('[BotManager] arcs failed', err);
+                }
+                // ---- end of the arcs foundation's block ----
                 // port (the realism work, phase 5a): random events on bots near a human (port/BotRandomEvents: arming
                 // at 274's own roll, the cap, what came of an armed flag)
                 try {
@@ -772,6 +808,12 @@ class BotManagerClass {
         this.members.delete(member.name);
         this.pending = this.pending.filter(m => m !== member);
         this.known.add(member.name);
+        // ---- (bots ideas, round 1, the fixes: B5) its loot ledger leaves with it (port/BotLoot) ----
+        dropLedger(member.name);
+        // ---- end of Track B's (ideas) block ----
+        // ---- (bots ideas, round 2: arcs foundation) its arcs and every tie to it (a quit, a human's name now: bots only) ----
+        forgetArcs(member.name);
+        // ---- end of the arcs foundation's block ----
     }
 
     /** In the world and not on its way out: online, or in since processLogins took it (its session starts next tick). */
@@ -783,6 +825,9 @@ class BotManagerClass {
     private _cameOnline(member: Member): void {
         member.entered = true;
         member.owned = true;
+        // ---- (bots ideas, round 1, the fixes: B6) a restored loot ledger against the bot's own save (port/BotLoot) ----
+        if (member.bot) noteLootLogin(member.bot.player);
+        // ---- end of Track B's (ideas) block ----
         if (member.retiring) return;
         member.state = 'online';
         member.sessions++;
@@ -815,6 +860,10 @@ class BotManagerClass {
             const linger = loginLingerFor(bot.player);
             if (linger) bot.setSubTask(linger);
         }
+        // ---- (bots ideas, round 2: arcs foundation) a new session: no absence set yet; its login on the bus ----
+        member.awayOverride = null;
+        emitArcs({ k: 'login', name: member.name, bot: bot?.player ?? null });
+        // ---- end of the arcs foundation's block ----
     }
 
     /**
@@ -822,10 +871,27 @@ class BotManagerClass {
      * name ends within `ticks` play ticks (its wrap-up and goodbye as any session's end), as a clique friend leaving
      * with another does (tickCliques). Nothing for a name not online.
      */
-    leaveSoon(name: string, ticks: number): void {
+    leaveSoon(name: string, ticks: number, how?: { abrupt?: boolean; away?: [number, number] }): void {
         const member = this.members.get(normalizeBotName(name));
         if (member && member.state === 'online' && !member.retiring) member.sessionEnd = Math.min(member.sessionEnd, this.play + Math.max(1, Math.floor(ticks)));
+        // ---- (bots ideas, round 2: arcs foundation: a rage-quit, a hop) `abrupt`: it goes at `ticks` with no wrap-up, no
+        // goodbye and no hold (its goodbye's time: _sessions, _endSession), only the engine's combat lock (logout.rs2);
+        // the caller checks the other holds first (mayLeaveAbruptly). `away`: its next absence, [min, max] play ticks ----
+        if (!member || member.state !== 'online' || member.retiring || !how) return;
+        if (how.abrupt) {
+            const at = this.play + Math.max(1, Math.floor(ticks));
+            member.goodbyeAt = member.goodbyeAt >= 0 ? Math.min(member.goodbyeAt, at) : at;
+        }
+        if (how.away) member.awayOverride = [Math.max(0, Math.floor(how.away[0])), Math.max(0, Math.floor(how.away[1]))];
+        // ---- end of the arcs foundation's block ----
     }
+
+    // ---- (bots ideas, round 2: arcs foundation) ----
+    /** the play clock (world ticks with a human in the world): what stats().playTicks says, without building it */
+    playTicks(): number {
+        return this.play;
+    }
+    // ---- end of the arcs foundation's block ----
 
     /** The bot is out of the world (its logout went through): away until it comes back. */
     private _wentAway(member: Member): void {
@@ -844,8 +910,16 @@ class BotManagerClass {
         member.leftAt = -1;
         member.busySince = -1;
         member.goodbyeAt = -1;
+        member.owedSince = -1; // (bots ideas, round 2: C arcs)
         // port (phase 3): a check-in (a short session) is followed by a shorter absence (port/BotSessions.awayAfter)
-        member.awayUntil = member.resume > 0 ? this.play : this.play + awayAfter(wasLeaving ? member.drawn : -1, this.timing, this.random);
+        // (bots ideas, round 2: arcs foundation: or the one leaveSoon set, a hop's: awayOverride)
+        const override = member.awayOverride;
+        member.awayOverride = null;
+        if (override && member.resume === 0) member.awayUntil = this.play + uniform([Math.min(override[0], override[1]), Math.max(override[0], override[1])], this.random);
+        else member.awayUntil = member.resume > 0 ? this.play : this.play + awayAfter(wasLeaving ? member.drawn : -1, this.timing, this.random);
+        // ---- (bots ideas, round 2: arcs foundation) its logout on the bus ----
+        emitArcs({ k: 'logout', name: member.name, bot: player ?? null });
+        // ---- end of the arcs foundation's block ----
         if (member.retiring) return;
         if (wasLeaving) this.logoffs++;
         else console.info(`[BotManager] ${member.name} left the world`);
@@ -977,11 +1051,30 @@ class BotManagerClass {
             if (busy !== null && busy !== 'conversation') {
                 if (member.busySince < 0) member.busySince = play;
                 if (play - member.busySince < this.timing.busyGiveUp) return;
+                // ---- (bots ideas, round 3: G period; the review's G-2) a Runelink game, or its end screen: never left
+                // by the give-up (its leave closes the board, 274's resign), its own cap instead, the game's moves at its
+                // sand timer (port/BotRunelink runelinkHold: 0 while theme G is off) ----
+                if (play - member.busySince < runelinkHold(player)) return;
+                // ---- end of G period's block ----
             }
             if (member.goodbyeAt > play) return;
             // (a bot that said its goodbye in a conversation goes then: no wrap-up and no second goodbye)
             if (busy === null && member.goodbyeAt < 0 && !readyToLeave(bot)) return;
         }
+        // ---- (bots ideas, round 2: C arcs; the review's C-1) a reply it owes the human (BotChat.owesHumanReply: a line
+        // heard and not read yet, its reply typed, a model's words, a line kept for its return from a break) is said first:
+        // its leave, an abrupt goodbye's (a rage-quit, a hop) and a big drop's too, is stretched, never dropped:
+        // OWED_REPLY_MOST from the first look at most, a kept line till the bot is back (its reply counted from then) ----
+        if (BotChat.owesHumanReply(player)) {
+            if (isAway(player)) {
+                member.owedSince = -1;
+                return;
+            }
+            if ((member.owedSince ?? -1) < 0) member.owedSince = play;
+            if (play - (member.owedSince ?? play) < OWED_REPLY_MOST) return;
+        }
+        member.owedSince = -1;
+        // ---- end of C's block ----
         this._leave(member, false);
     }
 
@@ -998,6 +1091,9 @@ class BotManagerClass {
         if (holdsLogout(player)) return 'busy';
         // port (the realism work, phase 5b): a part in a set piece (a host, a duellist, a clan walk's leader: port/BotSetPieces)
         if (eventRoleOf(player)) return 'busy';
+        // ---- (bots ideas, Track B: loot) a PKer holding the human's items until it has banked them (port/BotLoot) ----
+        if (holdsLoot(player)) return 'busy';
+        // ---- end of Track B's (ideas) block ----
         if (BotChat.inConversation(player)) return 'conversation';
         return null;
     }
@@ -1040,6 +1136,14 @@ class BotManagerClass {
         // port (phase 5b): the Duel Arena's purse and the bots the human beat (no farming across a restart)
         const arena = exportArena(this.play);
         if (arena !== null && arena !== undefined) state.arena = arena;
+        // ---- (bots ideas, Track B: loot) the PKers' ledgers of the human's items not yet banked (port/BotLoot) ----
+        const loot = exportLoot();
+        if (loot !== null) state.loot = loot;
+        // ---- end of Track B's (ideas) block ----
+        // ---- (bots ideas, round 2: arcs foundation) the bots' arcs (none: no field, the state as before) ----
+        const arcs = exportArcs(arcsPlay());
+        if (arcs !== null) state.arcs = arcs;
+        // ---- end of the arcs foundation's block ----
         return state;
     }
 
@@ -1106,6 +1210,20 @@ class BotManagerClass {
         } catch (err) {
             console.error('[BotManager] the Duel Arena\'s purse could not be restored', err);
         }
+        // ---- (bots ideas, Track B: loot) the ledgers (an older store has none) ----
+        try {
+            restoreLoot(state.loot);
+        } catch (err) {
+            console.error('[BotManager] the loot ledgers could not be restored', err);
+        }
+        // ---- end of Track B's (ideas) block ----
+        // ---- (bots ideas, round 2: arcs foundation) the bots' arcs (an older store has none), the pool's names only ----
+        try {
+            restoreArcs(state.arcs, arcsPlay(), name => this.members.has(name));
+        } catch (err) {
+            console.error('[BotManager] the bots\' arcs could not be restored', err);
+        }
+        // ---- end of the arcs foundation's block ----
         console.info(`[BotManager] continuing the last run's world: ${online} bots were online`);
     }
 
@@ -1582,3 +1700,21 @@ class BotManagerClass {
 }
 
 export const BotManager = new BotManagerClass();
+
+// ---- (bots ideas, round 2: arcs foundation) ----
+/**
+ * May this bot leave at once (BotManager.leaveSoon's `abrupt`: a rage-quit, a hop)? Playing,
+ * and nothing that an abrupt leave would skip holds it: no trade, no "come here", no set-piece role, no random event, no
+ * human's items to bank (port/BotLoot), no script it must finish. The combat lock is the engine's to hold (logout.rs2), and
+ * the never-ignored reply, a newbie and a friend of the human are the caller's to check.
+ */
+export function mayLeaveAbruptly(p: Player): boolean {
+    if (p.slot === -1 || p.is_bot !== true || BotManager.botFor(p) === null) return false;
+    if (p.botTradeTargetPid !== -1 || tradeScreen(p) !== null) return false;
+    if (p.botComeHereReturnX !== -1) return false;
+    if (eventRoleOf(p)) return false;
+    if (holdsLogout(p)) return false;
+    if (holdsLoot(p)) return false;
+    return !p.delayed && !p.protect;
+}
+// ---- end of the arcs foundation's block ----

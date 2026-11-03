@@ -23,6 +23,12 @@ import { personaOf } from '#/engine/bot/port/BotPersona.js';
 import { isLevelling, type PlannerKey } from '#/engine/bot/port/BotRoster.js';
 import { noteEvent } from '#/engine/bot/port/BotChatter.js';
 import { dangerAt, huntsMe } from '#/engine/bot/port/BotDanger.js';
+// ---- (bots ideas, round 2: arcs foundation) a death on the bus (port/BotArcsEvents) ----
+import { emitArcs } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- end of the arcs foundation's block ----
+// ---- (bots ideas, round 2: C arcs) theme C's hooks (port/BotLives: a tilted careless bot's risky pick, port/BotMoods) ----
+import { LIVES } from '#/engine/bot/port/BotLives.js';
+// ---- end of C's block ----
 
 /** carelessness at which the scales below are 1 (the persona's median) */
 export const CARELESS_MEDIAN = 0.25;
@@ -114,7 +120,10 @@ export function carelessRoll(bot: Player, scale: number): boolean {
  * anyway" over White Wolf Mountain (the variety work, round 2, the fixes: its draw is held, its chance read when asked).
  */
 export function carelessChance(bot: Player, scale: number): number {
-    return carelessnessOf(bot) * scale * carelessForTest;
+    // ---- (bots ideas, round 2: C arcs) a tilted careless bot's risky pick: its careless roll doubled (port/BotMoods) ----
+    const risky = LIVES.riskyNow?.(bot) ? 2 : 1;
+    // ---- end of C's block ----
+    return carelessnessOf(bot) * scale * carelessForTest * risky;
 }
 
 /** Tests only (test/texture.test.mjs): careless moments at this many times their chance (0: none). Never set by the game. */
@@ -240,9 +249,13 @@ export const deathLog: { name: string; tick: number; repeat: boolean }[] = [];
 /**
  * The bot died (port/BotChatter notices the respawn): its carelessness counts half from now on this session, and for
  * REPEAT_DEATH_TICKS no spot where monsters hunt it (isShaken: its task ends if its spot is one); a second death within
- * them ends its plan. Only a levelling bot's (a PKer dies by the PK rules).
+ * them ends its plan. Only a levelling bot's (a PKer dies by the PK rules). (Bots ideas, round 2: every bot's death goes
+ * on the arcs bus first, `wild` from port/BotChatter's respawn check.)
  */
-export function noteDeath(bot: Player): void {
+export function noteDeath(bot: Player, wild = false): void {
+    // ---- (bots ideas, round 2: arcs foundation) every bot's death on the bus, a PKer's too (`wild`: in the Wilderness) ----
+    emitArcs({ k: 'death', bot, wild });
+    // ---- end of the arcs foundation's block ----
     if (!isLevelling(bot.botPlanner as PlannerKey)) return;
     const st = stateOf(bot);
     const now = World.currentTick;
@@ -278,6 +291,9 @@ export function keepOffHunted(bot: Player, ticks: number): void {
 
 /** For 30 minutes after a death: the planner keeps the bot off spots where monsters hunt it (a second death: its plan ends too). */
 export function isShaken(bot: Player): boolean {
+    // ---- (bots ideas, round 2: C arcs) a tilted careless bot's risky pick: a second death's caution ignored, once (port/BotMoods) ----
+    if (LIVES.riskyNow?.(bot)) return false;
+    // ---- end of C's block ----
     return World.currentTick < (states.get(bot)?.shakenUntil ?? -1);
 }
 

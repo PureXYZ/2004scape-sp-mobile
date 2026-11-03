@@ -451,12 +451,17 @@ const locName = t => (t && t.type !== undefined && t.nid === undefined && t.user
 }
 
 // ---- the danger check ----
+const DANGER_CHECK_TICKS = 8; // (port/BotDefence's: the danger check looks this often, by slot)
 {
     Fumble.setCarelessRollsForTest(0); // (the careful bots' careless moments, 2-5 %, are step 1e's check below)
     // a low-level bot mining at Varrock East (giant rats hunt combat 12 or less there) at 40 % of its Hitpoints
     const careful = [...free].filter(politeLeveller).sort((a, b) => lib.personaOf(a.username, a.botPlanner).carelessness - lib.personaOf(b.username, b.botPlanner).carelessness);
     const eater = take(p => p === careful[0]);
     const rester = take(p => p === careful[1]);
+    // (timed so that the eater's first check comes on the first or second tick of its mining, while it is still on the
+    // hunted tiles: it walks to the bank at once, and at seed 11 the round 1 left-overs' dice had the check come 9 ticks
+    // on, outside them)
+    run(DANGER_CHECK_TICKS, () => (World.currentTick + eater.slot) % DANGER_CHECK_TICKS === DANGER_CHECK_TICKS - 2);
     for (const p of [eater, rester]) {
         p.setLevel(lib.PlayerStat.MINING, 5);
         kit(p, [[PICKAXE, 1]]);

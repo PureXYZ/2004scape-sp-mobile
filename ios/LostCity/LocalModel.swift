@@ -44,7 +44,9 @@ nonisolated struct ModelInfo: Sendable {
 /// - Loaded lazily, at the first request, when the app has room for it (`Options.minFreeToLoad`); unloaded after 5 idle
 ///   minutes, on a memory warning (`release`: the reply being written stops first) and in the background.
 /// - One generation at a time, on its own serial queue (`generate` from any thread; the completion comes on the main
-///   queue). All llama.cpp state is confined to that queue.
+///   queue). All llama.cpp state is confined to that queue. (bots ideas, round 4: I model) The queue serves the replies to
+///   the player first: a request of the bots' own talk (`ambient`) waits behind every reply asked before it runs, and
+///   (round 4 fixes) one running stops at its next token when a reply is asked (`Failure.preempted`, 'busy').
 /// - The prompt is the engine's `renderLocal` (a system and a user turn) in Qwen's chat template with the empty think
 ///   block (thinking off), exactly as the model was trained (the engine's sampling settings, docs/ARCHITECTURE.md §7.1): temperature 0.8, top-p 0.9, top-k 40, a
 ///   repetition penalty of 1.1 over the last 64 tokens, at most 40 tokens, one line of the chat's characters (a GBNF
@@ -122,6 +124,9 @@ nonisolated final class LocalModel: @unchecked Sendable {
         case timeout
         case aborted
         case failed(String)
+        /// (bots ideas, round 4 fixes) a line of the bots' own talk stopped at its next token for a reply to the player
+        /// asked while it ran (`generate`): 'busy', as when it is refused behind one
+        case preempted
 
         /// The reason as the page protocol words it (ARCHITECTURE.md §7.1).
         var description: String {
@@ -130,6 +135,7 @@ nonisolated final class LocalModel: @unchecked Sendable {
             case .timeout: "timeout"
             case .aborted: "failed: interrupted"
             case .failed(let why): "failed: \(why)"
+            case .preempted: "busy"
             }
         }
     }
@@ -227,6 +233,16 @@ nonisolated final class LocalModel: @unchecked Sendable {
     private var pending = 0
     /// bumped by `release`: a request asked before it stops (the one running at its next token, those waiting at once)
     private var epoch = 0
+    // (bots ideas, round 4: I model)
+    /// the requests waiting for the queue, in order; the next to run is the first reply among them (`runNextJob`)
+    private var jobs: [(ambient: Bool, work: @Sendable () -> Void)] = []
+    /// the replies to the player (not the bots' own talk) waiting or running
+    private var pendingReplies = 0
+    // (bots ideas, round 4 fixes)
+    /// the job running on the queue is a line of the bots' own talk
+    private var runningAmbient = false
+    /// a reply to the player was asked while it ran: it stops at its next token (`shouldStop`: `Failure.preempted`)
+    private var ambientPreempted = false
 
     // (queue) llama.cpp state
     #if canImport(llama)
@@ -260,13 +276,19 @@ nonisolated final class LocalModel: @unchecked Sendable {
 
     /// Requests waiting or running.
     var queued: Int { lock.withLock { pending } }
+    /// (bots ideas, round 4: I model) Replies to the player (requests not `ambient`) waiting or running.
+    var queuedReplies: Int { lock.withLock { pendingReplies } }
+    /// (bots ideas, round 4 fixes) A line of the bots' own talk is running on the model now (the harness).
+    var ambientRunning: Bool { lock.withLock { runningAmbient } }
 
     // MARK: - Requests
 
     /// Writes one reply. `think`: the request asks for the note first (it is written when the model offers the choice,
     /// `ThinkSupport.option`; a model that always or never writes one does as it was trained). `deadline`: past it the
-    /// generation stops and fails with `.timeout`. The completion runs on the main queue.
-    func generate(system: String, user: String, think: Bool, deadline: DispatchTime,
+    /// generation stops and fails with `.timeout`. The completion runs on the main queue. (bots ideas, round 4: I model)
+    /// `ambient`: a line of the bots' own talk, which waits behind the replies to the player (`runNextJob`); (round 4
+    /// fixes) a reply asked while one runs stops it at its next token (`.preempted`).
+    func generate(system: String, user: String, think: Bool, deadline: DispatchTime, ambient: Bool = false,
                   completion: @escaping @MainActor @Sendable (Result<Output, Failure>) -> Void) {
         guard available, let info else {
             DispatchQueue.main.async { completion(.failure(.unavailable(self.unavailableReason ?? "no-model"))) }
@@ -275,9 +297,10 @@ nonisolated final class LocalModel: @unchecked Sendable {
         let note = info.think.writesNote(asked: think)
         let epoch = lock.withLock {
             pending += 1
+            if !ambient { pendingReplies += 1 }
             return self.epoch
         }
-        queue.async { [self] in
+        let work: @Sendable () -> Void = { [self] in
             let result: Result<Output, Failure>
             do {
                 result = .success(try run(system: system, user: user, note: note, deadline: deadline, epoch: epoch))
@@ -286,10 +309,34 @@ nonisolated final class LocalModel: @unchecked Sendable {
             } catch {
                 result = .failure(.failed(String(describing: error)))
             }
-            lock.withLock { pending -= 1 }
+            lock.withLock {
+                pending -= 1
+                if !ambient { pendingReplies -= 1 }
+            }
             scheduleIdleUnload()
             DispatchQueue.main.async { completion(result) }
         }
+        lock.withLock {
+            jobs.append((ambient, work))
+            // (bots ideas, round 4 fixes: a reply to the player never waits behind the bots' own talk running: it stops at
+            // its next token; in the same look as the job's queuing, so a line of their talk picked meanwhile is seen)
+            if !ambient, runningAmbient { ambientPreempted = true }
+        }
+        queue.async { [self] in runNextJob() }
+    }
+
+    /// (bots ideas, round 4: I model) On the queue, once per `generate`: the first reply to the player waiting, else the
+    /// first line of the bots' own talk. (Round 4 fixes) What runs is noted for a reply asked meanwhile (`generate`).
+    private func runNextJob() {
+        let work: (@Sendable () -> Void)? = lock.withLock {
+            guard !jobs.isEmpty else { return nil }
+            let job = jobs.remove(at: jobs.firstIndex(where: { !$0.ambient }) ?? 0)
+            runningAmbient = job.ambient
+            ambientPreempted = false
+            return job.work
+        }
+        work?()
+        lock.withLock { runningAmbient = false }
     }
 
     /// Loads the model now if it is not in memory (in the background, on the model's queue), so that the next request does
@@ -350,7 +397,9 @@ nonisolated final class LocalModel: @unchecked Sendable {
     // MARK: - On the queue
 
     private func shouldStop(_ deadline: DispatchTime, epoch: Int) throws {
-        if lock.withLock({ abortRequested || suspended || epoch != self.epoch }) { throw Failure.aborted }
+        let (stop, preempted) = lock.withLock { (abortRequested || suspended || epoch != self.epoch, ambientPreempted) }
+        if stop { throw Failure.aborted }
+        if preempted { throw Failure.preempted }  // (bots ideas, round 4 fixes: only ever set while the bots' own talk runs)
         if DispatchTime.now() >= deadline { throw Failure.timeout }
     }
 

@@ -37,7 +37,9 @@
 // every change (bots-lm-mode); a request posted from inside the engine worker (CDP, the worker's own global) goes to
 // native with its prompts and native's line comes back to the worker (bots-lm-reply, with ms); Settings › Bot chat (the
 // model, Think first: shown only for a model that offers it, every On-device request carrying think as the setting
-// says at once, greyed out with Claude online (think false), kept across a reload; Set key, Test, Remove); Rules, no native, a failed reply and a reply that never comes are
+// says at once, greyed out with Claude online (think false), kept across a reload; (bots ideas, round 4) Bots' own talk:
+// Rules by default, Model saved and heard by the engine at once, its ambient requests to the model in the app with think
+// false, also with Claude online, greyed out with Rules and with no native app, kept across a reload; Set key, Test, Remove); Rules, no native, a failed reply and a reply that never comes are
 // answered for the engine; the model's warm-up (in the world: a chat line typed on the chat keyboard or a hardware
 // keyboard loads it when it is not in memory, a Jmod's '::' command never does; entering the world only while no quick load is
 // on record); with the bots off the engine hears nothing of it. Only these checks (two short sessions in the world for the warm-up): a short run.
@@ -806,14 +808,15 @@ const LM_PAGE = bots => `(() => {
 })();`;
 
 // A request as the bots' engine posts it, from inside the engine worker (its own global, through CDP), with a listener
-// there that keeps what the page answers it (self.__lmReplies).
-const LM_REQUEST = (id, timeoutMs = 9000) => `(() => {
+// there that keeps what the page answers it (self.__lmReplies). (bots ideas, round 4: I model) `ambient`: a line of the
+// bots' own talk (port/BotModelAmbient: mode 'local', ambient: true).
+const LM_REQUEST = (id, timeoutMs = 9000, ambient = false) => `(() => {
     if (!self.__lmListening) {
         self.__lmListening = true;
         self.__lmReplies = [];
         self.addEventListener('message', event => { if (event.data?.type === 'bots-lm-reply') self.__lmReplies.push(event.data); });
     }
-    self.postMessage({ type: 'bots-lm', id: ${id}, mode: 'local', local: { system: 'You are Kevin1991.', user: 'Dark Lord 91: hi kevin' }, online: { system: 'guide', context: 'You are Kevin1991.', user: 'Dark Lord 91: hi kevin' }, maxChars: 80, timeoutMs: ${timeoutMs} });
+    self.postMessage({ type: 'bots-lm', id: ${id}, mode: 'local', ${ambient ? 'ambient: true, ' : ''}local: { system: 'You are Kevin1991.', user: 'Dark Lord 91: hi kevin' }, online: { system: 'guide', context: 'You are Kevin1991.', user: 'Dark Lord 91: hi kevin' }, maxChars: 80, timeoutMs: ${timeoutMs} });
     return true;
 })()`;
 
@@ -890,6 +893,34 @@ async function lmStubChecks(stubScriptId, botsScriptId) {
     await evaluate(`window.LostCityHost.bots.lmStatus(window.__lmStub.status)`);
     const forOption = await thinkShown();
     check('lm: Think first hidden while the status says the model always or never writes its note, shown again for \'option\'', !forAlways && !forNever && forOption, JSON.stringify({ forAlways, forNever, forOption }));
+
+    // (bots ideas, round 4: I model) Settings › Bot chat › Bots' own talk: Rules until chosen; an ambient request then
+    // answered 'unavailable' at once by the page; Model saved and heard by the engine at once; its requests to the model in
+    // the app with think false (Think first is On here); greyed out with Rules, its choice kept, the engine hearing it off
+    const ambientRow = () => evaluate(`(() => { const row = document.getElementById('botchat-ambient'); const s = document.getElementById('settings-pane'); return { shown: !row.hidden, unused: row.classList.contains('unused'), disabled: [...row.querySelectorAll('.seg button')].map(b => b.disabled), on: [...row.querySelectorAll('.seg button.on')].map(b => b.textContent), hint: document.getElementById('botchat-ambient-hint').textContent, setting: window.LostCityHost.settings.botAmbient, fits: s.scrollHeight <= s.clientHeight + 1 }; })()`);
+    let row = await ambientRow();
+    check("lm: Bots' own talk shows at Rules (its default), in use with On-device (\"Talk between bots near you\"), the page still all on screen", row.shown && !row.unused && JSON.stringify(row.on) === '["Rules"]' && row.setting === 'rules' && row.hint === 'Talk between bots near you' && JSON.stringify(row.disabled) === '[false,false]' && row.fits, JSON.stringify(row));
+    let ambientMode = await lastMode();
+    let sentBeforeAmbient = (await lmStub()).sent.filter(m => m.type === 'lm').length;
+    await inWorker(LM_REQUEST(9101, 9000, true));
+    reply = await workerReply(9101, 2000);
+    check("lm: Bots' own talk on Rules: the engine hears ambient false, and an ambient request is answered null 'unavailable' at once, without native", ambientMode?.ambient === false && reply?.text === null && reply.error === 'unavailable' && reply.ms === 0 && (await lmStub()).sent.filter(m => m.type === 'lm').length === sentBeforeAmbient, JSON.stringify({ ambientMode, reply }));
+    await tapQuery('#botchat-ambient .seg button[data-value="model"]');
+    ambientMode = await lastMode();
+    stub = await lmStub();
+    check("lm: Bots' own talk Model: saved at once (botAmbient), the engine hears ambient: true", ambientMode?.ambient === true && ambientMode.mode === 'local' && stub.sent.filter(m => m.type === 'settings').at(-1)?.values?.botAmbient === 'model', JSON.stringify(ambientMode));
+    await inWorker(LM_REQUEST(9102, 9000, true));
+    reply = await workerReply(9102, 3000);
+    let ambientAsked = (await lmStub()).sent.find(m => m.type === 'lm' && m.id === 9102);
+    check("lm: an ambient request goes to native as {type:'lm', mode: 'local', ambient: true, think: false} (Think first is On), its line comes back", ambientAsked?.mode === 'local' && ambientAsked.ambient === true && ambientAsked.think === false && reply?.text === 'stub line 9102' && reply.source === 'local', JSON.stringify({ ambientAsked: ambientAsked && { mode: ambientAsked.mode, ambient: ambientAsked.ambient, think: ambientAsked.think }, reply }));
+    await tapQuery('#section-botchat .seg[data-setting="botChat"] button[data-value="rules"]');
+    row = await ambientRow();
+    ambientMode = await lastMode();
+    check("lm: with Rules Bots' own talk is greyed out (Rules / Model disabled, Model still shown, \"Only with a chat model (not Rules).\"), the engine hears ambient: false", row.unused && JSON.stringify(row.disabled) === '[true,true]' && JSON.stringify(row.on) === '["Model"]' && row.setting === 'model' && row.hint === 'Only with a chat model (not Rules).' && ambientMode?.mode === 'rules' && ambientMode.ambient === false, JSON.stringify({ row, ambientMode }));
+    await screenshot('lm-1b-botchat-ambient-unused.png');
+    await tapQuery('#section-botchat .seg[data-setting="botChat"] button[data-value="local"]');
+    ambientMode = await lastMode();
+    check("lm: On-device again: Bots' own talk in use again (Model), the engine hears ambient: true", ambientMode?.mode === 'local' && ambientMode.ambient === true && !(await ambientRow()).unused, JSON.stringify(ambientMode));
     await tapQuery('#section-botchat .seg button[data-value="online"]');
     let mode = await lastMode();
     stub = await lmStub();
@@ -914,6 +945,11 @@ async function lmStubChecks(stubScriptId, botsScriptId) {
     reply = await workerReply(9002, 3000);
     thought = (await lmStub()).sent.find(m => m.type === 'lm' && m.id === 9002);
     check('lm: with Claude online and a key the reply is Claude\'s (source online; think false though Think first is On: the on-device fallback skips the note)', reply?.text === 'claude line 9002' && reply.source === 'online' && thought?.think === false, JSON.stringify({ reply, think: thought?.think }));
+    // (bots ideas, round 4: I model) the bots' own talk never goes to Claude: with Claude online and a key, mode 'local'
+    await inWorker(LM_REQUEST(9103, 9000, true));
+    reply = await workerReply(9103, 3000);
+    ambientAsked = (await lmStub()).sent.find(m => m.type === 'lm' && m.id === 9103);
+    check("lm: with Claude online and a key an ambient request still goes to the model in the app (mode 'local', think false): its line, not Claude's", ambientAsked?.mode === 'local' && ambientAsked.ambient === true && ambientAsked.think === false && reply?.text === 'stub line 9103' && reply.source === 'local', JSON.stringify({ ambientAsked: ambientAsked && { mode: ambientAsked.mode, think: ambientAsked.think }, reply }));
 
     // the page answers for the engine: Rules, a failed reply, a reply that never comes
     await tapQuery('#section-botchat .seg button[data-value="rules"]');
@@ -963,11 +999,12 @@ async function lmStubChecks(stubScriptId, botsScriptId) {
     reply = await workerReply(9006, 2000);
     await tapId('btn-settings');
     await tapId('nav-botchat');
-    const desktop = await evaluate(`({ local: document.getElementById('botchat-local').textContent, key: document.getElementById('botchat-key').textContent, set: document.getElementById('botchat-key-set').disabled, on: [...document.querySelectorAll('#section-botchat .seg[data-setting="botChat"] button.on')].map(b => b.textContent), think: !document.getElementById('botchat-think').hidden, botThink: window.LostCityHost.settings.botThink })`);
+    const desktop = await evaluate(`({ local: document.getElementById('botchat-local').textContent, key: document.getElementById('botchat-key').textContent, set: document.getElementById('botchat-key-set').disabled, on: [...document.querySelectorAll('#section-botchat .seg[data-setting="botChat"] button.on')].map(b => b.textContent), think: !document.getElementById('botchat-think').hidden, botThink: window.LostCityHost.settings.botThink, botAmbient: window.LostCityHost.settings.botAmbient, ambientUnused: document.getElementById('botchat-ambient').classList.contains('unused'), ambientHint: document.getElementById('botchat-ambient-hint').textContent })`);
     await tapId('nav-display');
     await tapId('settings-close');
     check('lm: no native app: a request is answered null \'unavailable\' at once; Bot chat says "Only in the iPhone app" (Set key off, no Think first)', reply?.text === null && reply.error === 'unavailable' && reply.ms === 0 && desktop.local === 'Only in the iPhone app' && desktop.key === 'Only in the iPhone app' && desktop.set && !desktop.think, JSON.stringify({ reply, desktop }));
     check(`lm: Think first is kept across the reload (${thinkDefault ? 'Off' : 'On'}, as left: not its default)`, desktop.botThink === !thinkDefault, JSON.stringify({ botThink: desktop.botThink, thinkDefault }));
+    check("lm: (bots ideas, round 4) Bots' own talk is kept across the reload (Model, as left), greyed out with no native app (\"Only in the iPhone app\")", desktop.botAmbient === 'model' && desktop.ambientUnused && desktop.ambientHint === 'Only in the iPhone app', JSON.stringify({ botAmbient: desktop.botAmbient, unused: desktop.ambientUnused, hint: desktop.ambientHint }));
 
     // the bots off (the plain engine): it hears nothing of the model
     await S('Page.removeScriptToEvaluateOnNewDocument', { identifier: botsScriptId });

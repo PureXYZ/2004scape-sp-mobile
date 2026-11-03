@@ -304,8 +304,51 @@ export function agedKit(name: string, tier: AgeTier, levels: ArrayLike<number>, 
     kit.bank.push(...magicKit(name, tier, levels, members));
     // (the variety work, round 1, Track D: DO-4) Rune Mysteries' air talisman, last and from a seed of its own
     kit.bank.push(...talismanKit(name, tier));
+    // ---- (bots ideas, Track A: the period endgame) last, each from a seed of its own, so nothing above changes ----
+    endgameKit(name, levels, members, kit);
+    // ---- end of Track A's block ----
     return kit;
 }
+
+// ---- (bots ideas, Track A: the period endgame; new bots only: saved bots keep what they own) ----
+/** a new aged bot of combat 85+ holds Velrak's dusty key this often (its seed 'a-dustykey'): it went to Taverley's deep part */
+export const DUSTY_KEY_SHARE = 0.5;
+/** a new aged mage of Magic 60+ (a mage's look) wears a god cape and holds its staff this often (its seed 'a-godcape') */
+export const GOD_CAPE_SHARE = 0.7;
+
+/**
+ * The endgame's part of a new aged bot's kit (A1, A5): a dusty key in the bank (combat 85+, DUSTY_KEY_SHARE), and for a
+ * mage of Magic 60+ on a members world a god cape worn (its outfit's cape replaced) with the god's staff in its hand when
+ * it holds a staff, else in the bank (GOD_CAPE_SHARE; the god Zamorak 40 %, Saradomin 40 %, Guthix 20 %). The Mage
+ * Arena's run is not a bot's (its real runs were cut this round): the cape is the kit's, "an aged kit may hold anything".
+ */
+export function endgameKit(name: string, levels: ArrayLike<number>, members: boolean, kit: AgedKit): void {
+    if (!members) return;
+    const dusty = ObjType.getId('dusty_key');
+    if (dusty !== -1 && combatLevelOf(levels) >= 85 && seededRandom(nameSeed(name, 'a-dustykey'))() < DUSTY_KEY_SHARE) kit.bank.push([dusty, 1]);
+    if (levels[PlayerStat.MAGIC] < 60 || combatStyleOf(name) !== 'mage') return;
+    const rand = seededRandom(nameSeed(name, 'a-godcape'));
+    if (rand() >= GOD_CAPE_SHARE) return;
+    const g = rand();
+    const [capeName, staffName] = g < 0.4 ? ['zamorak_cape', 'zamorak_staff'] : g < 0.8 ? ['saradomin_cape', 'saradomin_staff'] : ['guthix_cape', 'guthix_staff'];
+    const cape = ObjType.getId(capeName);
+    const staff = ObjType.getId(staffName);
+    if (cape === -1 || staff === -1) return;
+    const capes = [ObjType.getId('saradomin_cape'), ObjType.getId('zamorak_cape'), ObjType.getId('guthix_cape')];
+    const staffs = [ObjType.getId('saradomin_staff'), ObjType.getId('zamorak_staff'), ObjType.getId('guthix_staff')];
+    // (one cape and one staff of one god: its look's god cape or staff, of another god, goes)
+    kit.worn = kit.worn.filter(id => !capes.includes(id) && !staffs.includes(id));
+    kit.bank = kit.bank.filter(([id]) => !capes.includes(id) && !staffs.includes(id));
+    const wornCape = kit.worn.findIndex(id => ObjType.get(id).wearpos === 1);
+    if (wornCape >= 0) kit.bank.push([kit.worn.splice(wornCape, 1)[0], 1]);
+    kit.worn.push(cape);
+    const held = kit.worn.findIndex(id => ObjType.get(id).wearpos === 3);
+    if (held >= 0 && /staff/i.test(ObjType.get(kit.worn[held]).name ?? '')) {
+        kit.bank.push([kit.worn[held], 1]);
+        kit.worn[held] = staff;
+    } else kit.bank.push([staff, 1]);
+}
+// ---- end of Track A's block ----
 
 /** Tests only (the humanlike runner's --rune-seed=false: a world as saved bots have it, no runes). Never set by the game. */
 let runeSeed = true;

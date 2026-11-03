@@ -23,6 +23,14 @@ import { categoryOf, formatGp, sellPrice } from '#/engine/bot/port/BotPrices.js'
 import { isAllowedCoord, isMembersWorld } from '#/engine/bot/port/BotWorldRules.js';
 import { itemByNickname, vendorStock } from '#/engine/bot/tasks/VendorTask.js';
 import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
+import { periodOn } from '#/engine/bot/port/BotPeriod.js'; // (bots ideas, round 3: G buzz: the update's towns, theme G on)
+// ---- (bots ideas, round 2: C arcs) theme C's hooks (port/BotLives: a goal asked about, port/BotGoals) ----
+import { LIVES } from '#/engine/bot/port/BotLives.js';
+// ---- end of C's block ----
+// ---- (bots ideas, round 2: D word) theme D's hooks (port/BotWordHooks: rumours, ties) ----
+import { wordHooks } from '#/engine/bot/port/BotWordHooks.js';
+import { periodTalk } from '#/engine/bot/port/BotPeriod.js'; // (bots ideas, round 3: G period)
+// ---- end of D's block ----
 
 /** What a rule understood and its answer (slots filled; `{name}` is left for BotChat.composeReply). */
 export interface StateAnswer {
@@ -158,6 +166,10 @@ interface Town {
     r: number;
     /** over the sea from the mainland: the boat */
     boat?: boolean;
+    /** (bots ideas, round 3: G buzz) its own directions from afar ("north of seers, walk up past the wolves") */
+    line?: readonly string[];
+    /** (bots ideas, round 3: G buzz) the update's place: known only while theme G is on (periodOn; off, as before it) */
+    period?: boolean;
 }
 
 /** 274's towns and landmarks (BotPlaces' places, the world map's labels), with the names players typed. */
@@ -197,7 +209,12 @@ export const TOWNS: readonly Town[] = [
     { say: 'witchaven', words: ['witchaven'], x: 2720, z: 3285, r: 15 },
     { say: 'tree gnome village', words: ['tree gnome village', 'gnome village'], x: 2525, z: 3170, r: 25 },
     { say: 'the barbarian outpost', words: ['barbarian outpost', 'barb outpost'], x: 2540, z: 3570, r: 20 },
-    { say: 'white wolf mountain', words: ['white wolf mountain', 'white wolf'], x: 2848, z: 3480, r: 18 }
+    { say: 'white wolf mountain', words: ['white wolf mountain', 'white wolf'], x: 2848, z: 3480, r: 18 },
+    // ---- (bots ideas, round 3: G buzz) the update's places, with players' directions ----
+    { say: 'rellekka', words: ['rellekka', 'relleka', 'rellika', 'the fremmy town', 'fremennik town'], x: 2660, z: 3670, r: 30, period: true, line: ['north of seers, walk up past the wolves', 'way north of seers', 'go north from seers past the wolves'] },
+    { say: 'rock crabs', words: ['rock crabs', 'rock crab', 'the crabs', 'crabs'], x: 2690, z: 3722, r: 20, period: true, line: ['north of rellekka', 'just north of rellekka', 'past rellekka up north'] },
+    { say: 'the lighthouse', words: ['lighthouse', 'the lighthouse'], x: 2510, z: 3630, r: 12, period: true, line: ['west of rellekka, jump the rocks', 'west of rellekka u jump across the rocks'] }
+    // ---- end of G buzz's towns ----
 ];
 
 /** The ground-floor banks bots use (BotTaskBase's), as players named them. */
@@ -244,6 +261,7 @@ export function townIn(msg: string): Town | null {
     let best: Town | null = null;
     let bestLen = 0;
     for (const town of TOWNS) {
+        if (town.period && !periodOn()) continue; // (bots ideas, round 3: G buzz: theme G off, the towns as before it)
         for (const w of town.words) {
             if (w.length > bestLen && text.includes(` ${w} `)) {
                 best = town;
@@ -259,7 +277,7 @@ function townAt(x: number, z: number): Town | null {
     let best: Town | null = null;
     let bestDepth = Infinity;
     for (const t of TOWNS) {
-        if (t.r <= 0) continue;
+        if (t.r <= 0 || (t.period && !periodOn())) continue; // (bots ideas, round 3: G buzz: theme G off, as before it)
         const depth = chebyshev(x, z, t.x, t.z) / t.r;
         if (depth <= 1.5 && depth < bestDepth) {
             best = t;
@@ -467,6 +485,17 @@ const QUESTS: readonly Quest[] = [
     { say: 'legends quest', words: ['legends quest', 'legend quest', 'legends'], combat: 75, members: true }
 ];
 
+/**
+ * (the KQ fixes, T-3) has a bot of this combat level done the quest (`say` as QUESTS says it), as its answer to "did you
+ * do X" says (stateAnswer's quest_done: QUEST_DONE from the quest's combat level)? The period's talk of the update's quests
+ * (port/BotPeriodTalk's idle kinds, port/BotThreads' update and fremmy topics) by the same rule: a bot never says it did
+ * one and then that it has not. No dice
+ */
+export function saysQuestDone(combatLevel: number, say: string): boolean {
+    const q = QUESTS.find(x => x.say === say);
+    return q !== undefined && combatLevel >= q.combat;
+}
+
 function questIn(msg: string): Quest | null {
     const text = ` ${msg} `;
     for (const q of QUESTS) if (q.words.some(w => text.includes(` ${w} `))) return q;
@@ -540,6 +569,20 @@ export function stateAnswer(ctx: AnswerContext): StateAnswer | null {
     const mod = modAnswer(msg, bot, pick);
     if (mod) return mod;
 
+    // ---- (bots ideas, round 2: C arcs) a question about the bot's goal ("whats ur goal", "what u saving for", "goals?"):
+    // its saved goal and progress (port/BotGoals: "3 lvls to go for 60 wc", "saving for rune legs"); a statement ("im going
+    // for 99 wc") and a bot with no goal (a PKer, a vendor, a newbie) get upstream's replies as before ----
+    {
+        const goal = LIVES.goalAnswer?.(bot, msg) ?? null;
+        if (goal) return text('goal', goal);
+    }
+    // ---- end of C's block ----
+    // ---- (bots ideas, round 2: D word) "where?", "when?", "real?" after a rumour it told lately: from the rumour
+    // (port/BotRumours; null: not that) ----
+    const word = wordHooks.rumourAnswer?.(bot, msg, pick) ?? null;
+    if (word) return word;
+    // ---- end of D's block ----
+
     // ---- the bot itself: asl, age, home, body, time played ----
     if (/\basl\b/.test(msg)) {
         if (persona.friendliness < -0.35 && Math.random() < 0.5) return text('asl', pick(ASL_REFUSE));
@@ -578,6 +621,13 @@ export function stateAnswer(ctx: AnswerContext): StateAnswer | null {
     if (/^(what is up|wassup|wazzup|what is up with you)$/.test(msg)) return text('whatsup', pick(WHATSUP));
     if (/\bhow is it going\b|\bhow you doing\b|\bhow are you doing\b|\bhow are things\b|\byou good\b|\bhow is life\b/.test(msg)) return text('how', pick(HOW));
 
+    // ---- (bots ideas, round 3: G period) theme G's content (port/BotPeriodTalk through port/BotPeriod periodTalk: a
+    // kitten, the Games Room, Runelink, Gnomeball, Castle Wars never open); theme G off: null, no pick ----
+    {
+        const period = periodTalk.answer?.(msg, bot, pick) ?? null;
+        if (period) return text(period.id, period.text);
+    }
+    // ---- end of G period's block ----
     // ---- the world: directions, banks, spots, prices, quests, money ----
     if (/\bwhere (is|are) (the |a )?(bank|nearest bank|closest bank)\b|\bnearest bank\b|\bclosest bank\b|\bwhich way (is )?(to )?the bank\b|\bhow do i get to (the|a) bank\b|^bank$/.test(msg)) {
         const bank = nearestBankFor(from.x, from.z);
@@ -698,6 +748,7 @@ function townLine(town: Town, from: Player, pick: Picker): string {
     if (!isAllowedCoord(town.x, town.z)) return pick(TOWN_MEMBERS);
     const d = chebyshev(from.x, from.z, town.x, town.z);
     if (town.r > 0 && d <= town.r) return pick(TOWN_HERE).replace('{town}', town.say);
+    if (town.line && d > 60) return pick(town.line); // (bots ideas, round 3: G buzz: the way players told it)
     const dir = compass(town.x - from.x, town.z - from.z);
     // an island from the mainland: the boat (Karamja's from Port Sarim)
     if (town.boat && from.x > 2950 && town.x < 2950) return pick(TOWN_BOAT);

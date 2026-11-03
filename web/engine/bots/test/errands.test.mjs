@@ -61,6 +61,9 @@ lib.setHabitRatesForTest({ breaks: 0, lingers: 0, watch: 0, abrupt: 0 });
 lib.setHangoutRateForTest(0.0001);
 lib.setArenaRatesForTest(0);
 lib.setDirectorForTest({ first: 1e9, gap: 1e9 });
+// (bots ideas, round 4 fixes) and the first gap it drew in the ticks before (its default, 2000-5000) dropped: none comes. A
+// clan walk took the feathers' bot mid-errand (errands.test seed 8)
+lib.resetDirectorForTest();
 lib.setCliqueBehaviourForTest(false);
 lib.setEventRatesForTest({ odds: 0 });
 lib.setTrainRatesForTest({ ask: 0, form: 0, yes: 0, join: 0 });
@@ -172,7 +175,10 @@ const bot = () => free[next++ % free.length];
 }
 {
     const p = bot();
-    kit(p, { COOKING: 5 }, [], [[995, 200]]);
+    // (bots ideas, round 4 fixes: Cooking 40, where 274's bread never burns: cooking_generic_bread's successchance 118,492,
+    // and stat_random passes every roll of 0-255 from Cooking 38 up. At Cooking 5 every loaf of both rounds burned, no XP,
+    // seed 7)
+    kit(p, { COOKING: 40 }, [], [[995, 200]]);
     place(p, 3212, 3240);
     const xp0 = p.stats[S.COOKING];
     const r = stage('flour', p, new Errand.ErrandHost(Chains.chainTask('flour')), 2500);

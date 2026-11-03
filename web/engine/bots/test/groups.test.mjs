@@ -189,8 +189,22 @@ const attacking = p => (p.target && p.target.username !== undefined && (p.target
         p.teleJump(x, z, 0);
     }
     run(2);
+    // (the round 4 fixes: all four free in Varrock at once, as the new bots' walk below, and the director's step in that
+    // tick: at its own step one may be on a break or a bank trip again, and at its retry 500 ticks on they are scattered,
+    // too far from the hub to gather in time: seed 4)
+    run(600, () => {
+        for (const p of clan) {
+            if (cheb(p, { x: 3205, z: 3424 }) > 12) {
+                const [x, z] = tileNear(3205 + clan.indexOf(p) * 3, 3424);
+                p.clearWaypoints();
+                p.teleJump(x, z, 0);
+            }
+        }
+        return clan.every(p => D.isFreeForEvent(p));
+    });
     D.resetDirectorForTest();
-    D.setDirectorForTest({ first: 5, firstKinds: ['clan_walk'], kinds: ['clan_walk'] });
+    D.setDirectorForTest({ first: 0, firstKinds: ['clan_walk'], kinds: ['clan_walk'] });
+    D.directorStepForTest(BotManager.stats().playTicks, World.currentTick);
     let walk = null;
     const coinsAfter = new Map();
     const spent = p => coins.get(p.username) - (coinsAfter.get(p.username) ?? coinsOf(p));
@@ -304,6 +318,9 @@ const attacking = p => (p.target && p.target.username !== undefined && (p.target
     });
     D.resetDirectorForTest();
     D.setDirectorForTest({ first: 0, firstKinds: ['clan_walk'], kinds: ['clan_walk'] });
+    // (the round 4 fixes: the director's step in the tick all three are free, not at its own next step up to 5 ticks on,
+    // when one may be off on a break or a bank trip again, and its retries 500 ticks apart find them scattered: seed 5)
+    D.directorStepForTest(BotManager.stats().playTicks, World.currentTick);
     let walk = null;
     run(5000, () => {
         if (!walk) {
@@ -544,6 +561,10 @@ const attacking = p => (p.target && p.target.username !== undefined && (p.target
     check('the train ends (the leader still, far, or its time), its newbies in the log', !!ended && ended.members.length >= 2, ended);
     for (const t of busied) t.done = true;
     run(20);
+    // ((bots ideas, round 4 fixes) and more while a follow's end still holds a person's moment, BotTiming 'retarget': up
+    // to 32 ticks when it looked away (a lapse), 23 for the first newbie with the round's dice; a run whose follows are
+    // over runs no tick more)
+    if ([first, second].some(p => subOf(p)?.name === 'ChainFollow')) run(20, () => ![first, second].some(p => subOf(p)?.name === 'ChainFollow'));
     const after = [first, second].map(p => ({ role: SetPieces.eventRoleOf(p), sub: subOf(p)?.name ?? null, newbie: lib.isNewbie(p) }));
     check('after it: newbies still, no part, no follow', after.every(a => a.role === null && a.sub !== 'ChainFollow' && a.newbie), after);
 

@@ -51,6 +51,12 @@ import { styleLine } from '#/engine/bot/port/BotStyle.js';
 import { logNormal, reactionTicks } from '#/engine/bot/port/BotTiming.js';
 import { tradeScreen } from '#/engine/bot/port/BotTradeScreen.js';
 import { isMembersWorld } from '#/engine/bot/port/BotWorldRules.js';
+// ---- (bots ideas, round 2: arcs foundation) a run's moments on the bus (port/BotArcsEvents: theme D's rumour seeds) ----
+import { emitArcs } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- end of the arcs foundation's block ----
+// ---- (bots ideas, round 2: D word) its tellings from the rumour's knowers (port/BotRumours, through the hooks) ----
+import { wordHooks } from '#/engine/bot/port/BotWordHooks.js';
+// ---- end of D's block ----
 
 // ── the schedule (play ticks: 100 a minute) ──────────────────────────────────────────────────────────────────────
 
@@ -451,6 +457,9 @@ function begin(run: SetPieceRun, play: number, now: number): void {
     const nearHumanAt = directorDice.roll() < NEAR_HUMAN_RUMOUR ? now + 60 + Math.floor(directorDice.roll() * span) : -1;
     current = { run, entry, record, recruits: new Map(), gone: new Set(), rumourAt, nearHumanAt };
     noteRoles(current, play, now);
+    // ---- (bots ideas, round 2: arcs foundation) the run's begin on the bus ----
+    emitArcs({ k: 'set-piece', run, phase: run.phase });
+    // ---- end of the arcs foundation's block ----
 }
 
 // ── a run under way ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -468,6 +477,8 @@ function noteRoles(cur: Current, play: number, now: number): void {
 
 function advance(cur: Current, now: number): void {
     const run = cur.run;
+    // (bots ideas, round 2: arcs foundation: its phase before this step, for the bus below)
+    const phaseBefore = run.phase;
     noteRoles(cur, lastPlay, now);
     // (a bot that left the world: its piece is told, once; one its piece let go before the end: noted)
     for (const [p, rec] of cur.recruits) {
@@ -494,6 +505,9 @@ function advance(cur: Current, now: number): void {
         }
     }
     if (run.phase !== 'done' && now > run.endsBy + OVERTIME) abortRun(run, 'overtime');
+    // ---- (bots ideas, round 2: arcs foundation) a phase it moved to on the bus (its 'done' at its finish) ----
+    if (run.phase !== phaseBefore && run.phase !== 'done') emitArcs({ k: 'set-piece', run, phase: run.phase });
+    // ---- end of the arcs foundation's block ----
     if (run.phase === 'announce' || run.phase === 'build' || run.phase === 'peak') rumours(cur, now);
     if (run.phase === 'done') finish(cur, now);
 }
@@ -522,6 +536,9 @@ function finish(cur: Current, now: number): void {
     for (const [p, rec] of cur.recruits) if (p.slot !== -1) then.set(rec.name, { x: p.x, z: p.z, xp: totalXp(p) });
     backChecks.push({ at: now + CHECK_BACK_TICKS, record: cur.record, then });
     current = null;
+    // ---- (bots ideas, round 2: arcs foundation) the run's finish on the bus ----
+    emitArcs({ k: 'set-piece', run, phase: 'done' });
+    // ---- end of the arcs foundation's block ----
 }
 
 function totalXp(p: Player): number {
@@ -566,7 +583,11 @@ function rumours(cur: Current, now: number): void {
         const text = rumourOf(cur.run);
         if (text === null) return;
         const v = cur.run.venue;
-        const speaker = rumourNearHuman(text, p => cur.run.roles.has(p) || !rumourFree(p, now), v.x, v.z, v.level);
+        // ---- (bots ideas, round 2: D word) a knower of its rumour first, and the line's tag (port/BotRumours) ----
+        const run = cur.run;
+        const prefer = wordHooks.knowsRun ? (p: Player) => wordHooks.knowsRun!(p, run) : undefined;
+        const speaker = rumourNearHuman(text, p => cur.run.roles.has(p) || !rumourFree(p, now), v.x, v.z, v.level, prefer, p => wordHooks.toldRun?.(p, run));
+        // ---- end of D's block ----
         if (speaker) {
             cur.record.rumours.push({ t: now, name: speaker.username, text, nearHuman: true });
             countAsBudgetedLine(speaker);
@@ -606,7 +627,12 @@ function sayRumour(cur: Current, now: number): void {
         if (rumourFree(p, now)) near.push(p);
     }
     if (near.length === 0) return;
-    const speaker = near[Math.floor(directorDice.roll() * near.length)];
+    let speaker = near[Math.floor(directorDice.roll() * near.length)];
+    // ---- (bots ideas, round 2: D word) a knower of its rumour among them first, else this one, made a knower ("heard it
+    // from a friend"); its line carries the rumour's tag, so the bots near learn it (port/BotRumours) ----
+    const word = wordHooks.directorSpeaker?.(run, near, speaker);
+    if (word) speaker = word.speaker;
+    // ---- end of D's block ----
     let text = rumourOf(run);
     // (a variant another bot said in this square lately, or the human heard: one more try)
     if (text !== null && !isFresh(speaker.username, text, speaker.x, speaker.z, speaker.level, now)) text = rumourOf(run);
@@ -614,7 +640,8 @@ function sayRumour(cur: Current, now: number): void {
     noteSaid(speaker, text, now);
     const persona = botPersona(speaker);
     const shown = styleLine(text, persona).line;
-    sayTyped(speaker, shown, { to: null, kind: 'rumour' }, reactionTicks(persona, 'notice'));
+    // (bots ideas, round 2: D word: the rumour's tag on its 'said' event)
+    sayTyped(speaker, shown, { to: null, kind: 'rumour', tags: word?.tag ? { arc: word.tag } : undefined }, reactionTicks(persona, 'notice'));
     countAsBudgetedLine(speaker);
     cur.record.rumours.push({ t: now, name: speaker.username, text: shown, nearHuman: false });
 }

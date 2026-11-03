@@ -348,9 +348,31 @@ const variedCtx = (over = {}) => i => {
     // (revised in the variety work, round 1, P3: a slot line is styled as said, its slots filled: a value of each)
     const samples = lib.Slots.slotSamples();
     samples.clan = ['dark knights', 'the elite', 'team pk'];
+    // ---- (bots ideas, round 2) the arcs' own slots (port/BotArcsSay fills them, not port/BotSlots): samples by theme
+    // (test/chat-filter.test.mjs checks every one of their values) ----
+    const ARC_SAMPLES = {
+        // ---- C arcs: a goal, a goal done, what is left, a gear goal ----
+        goal: ['60 wc for yews'],
+        done: ['60 wc'],
+        left: ['3 lvls'],
+        gear: ['rune legs'],
+        // ---- end of C's samples ----
+        // ---- D word: a rumour's ore, mine and minutes, a friend's nick ----
+        ore: ['iron', 'coal', 'mith'],
+        mine: ['barb mine', 'al kharid mine', 'the mining guild'],
+        mins: ['3', '5', '9'],
+        nick: ['kev', 'matty', 'jen'],
+        // ---- end of D's samples ----
+        // ---- (bots ideas, round 3) G period: the G builder's own slots (data/lines2004-period.json) ----
+        // ---- end of G period's samples ----
+        // ---- (bots ideas, round 3) G buzz: the H builder's theme G slots (data/lines2004-buzz.json) ----
+        // ---- end of G buzz's samples ----
+    };
+    const arcFill = (text, i) => text.replace(/\{([a-z][a-z0-9_]*)\}/g, (all, k) => ARC_SAMPLES[k]?.[i % ARC_SAMPLES[k].length] ?? all);
+    // ---- end of the arcs' samples ----
     for (const line of L.NEW_LINES) {
         for (const [i, p] of sample.entries()) {
-            const text = lib.Slots.fillSlots(line.text, Object.fromEntries(Object.entries(samples).map(([k, v]) => [k, v[i % v.length]])));
+            const text = arcFill(lib.Slots.fillSlots(line.text, Object.fromEntries(Object.entries(samples).map(([k, v]) => [k, v[i % v.length]]))), i);
             const s = lib.styleLine(text, p, rand);
             total++;
             if (s.line !== text) changed++;

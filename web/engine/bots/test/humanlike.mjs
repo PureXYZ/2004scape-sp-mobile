@@ -79,6 +79,11 @@
 //               each answer (the tick loop pauses), so the model's lines are in the record and the guard is measured.
 //               Desktop only. --model-log=FILE: every reply's story (the line heard, the model's words, the guard's
 //               verdict, what was said) as JSON lines
+//   --ambient   (bots ideas, round 4: I model) with --model: Settings › Bot chat › Bots' own talk on Model, the model words
+//               the bots' talk between themselves near the human (port/BotModelAmbient: a thread's turns after the opener, a
+//               bot's answer to a bot); LM1-LM8 (lib/humanlike-metrics.mjs MODEL_METRICS, printed apart with MD1-MD6) and
+//               a sample of those lines next to the rules' they replaced. --lm7-base=FILE: the --json report of the same
+//               run without the model, for LM7 (H7 with the model against without)
 
 // Line kinds: an explicit kind from the library wins (port/BotSay's listeners get `(player, line, kind, to)`: botSay's
 // kind and addressee; `{ kind, to }` as the third argument is read too), then BotPlayer._say's (idle, newbie,
@@ -128,6 +133,14 @@ if (MODEL && !/^stub(:[\d.]+){0,2}$/.test(MODEL) && !/^https?:\/\/[^\s]+$/.test(
     console.error(`humanlike: --model takes stub[:latencyTicks[:failRate]] or http://host:port (got ${MODEL})`);
     process.exit(2);
 }
+// ---- (bots ideas, round 4: I model) --ambient: the bots' own talk in the model's words; --lm7-base: LM7's run without the model ----
+const AMBIENT = args.ambient === 'true';
+if (AMBIENT && !MODEL) {
+    console.error('humanlike: --ambient needs --model (stub or http)');
+    process.exit(2);
+}
+const LM7_BASE = args['lm7-base'] && args['lm7-base'] !== 'true' ? JSON.parse(fs.readFileSync(path.resolve(process.cwd(), args['lm7-base']), 'utf8')) : null;
+// ---- end of I model's options ----
 // ---- (variety round 1: each track's options in a block of its own) ----
 // ---- Track F (fixes and movement) options ----
 // --fill-window=N  (variety round 1, track F) TP4f's window: the rescue jumps in the first N ticks from the fill's first
@@ -157,6 +170,60 @@ const FASHION_EVERY = Math.max(100, Number(args['fashion-every'] ?? 500));
 // --fashion-census=FILE: the census as JSON (record.tracks.fashion), for a closer look
 const FASHION_CENSUS = args['fashion-census'] && args['fashion-census'] !== 'true' ? args['fashion-census'] : null;
 // ---- end of Track W2's options ----
+// ---- (bots ideas, round 1: each track's options in a block of its own) ----
+// ---- Track A (the period endgame) options ----
+// ---- end of Track A's options ----
+// ---- Track B (PKers loot and vultures; the wine crowd, safespots and lever camps; the model guard) options ----
+// --die=pk:N | npc:N  (the human's death pile, LV1-LV11) every N ticks the human dies: pk, at Edgeville's Wilderness level
+//             3 beside an Edgeville PKer online there, at its combat level, low on Hitpoints, in a standard kit (full rune,
+//             a rune scimitar, coins, runes, food), standing until it is killed (10 minutes at most); npc, a damage_player
+//             queued where it stands (an NPC's death: no hero), in the same kit. Meanwhile the tour waits and the human is
+//             not healed; after its respawn it goes back to its stop. Only on a tour or standing (not --probe or --work)
+const LOOT_DIE = (() => {
+    if (!args.die || args.die === 'true') return null;
+    const [kind, n] = String(args.die).split(':');
+    const every = Number(n ?? 3000);
+    if ((kind !== 'pk' && kind !== 'npc') || !Number.isInteger(every) || every < 200) {
+        console.error(`humanlike: --die takes pk:N or npc:N (N whole ticks, 200 or more; got ${args.die})`);
+        process.exit(2);
+    }
+    return { kind, every };
+})();
+// ---- end of Track B's options ----
+// ---- (bots ideas, round 3: each theme's options in a block of its own) ----
+// --period=off    (round 3, theme G) theme G off in the run's world (Sim.create's period: false, as a staged world has
+//             it): the buzz's hook and budget, the pet habit, the Games Room, Gnomeball, chompies; the same seed's A/B
+// --movement=off  (round 3, theme H) theme H off (Sim.create's movement: false): minimap hops, pauses, overshoots, lanes,
+//             route variants, walk-ups and talk holds; MV9 compares a run's travel with a hops-off run of the same seed
+const PERIOD = args.period !== 'off';
+const MOVEMENT = args.movement !== 'off';
+for (const flag of ['period', 'movement']) {
+    if (args[flag] !== undefined && !['on', 'off', 'true'].includes(args[flag])) {
+        console.error(`humanlike: --${flag} takes on or off (got ${args[flag]})`);
+        process.exit(2);
+    }
+}
+// ---- G period options ----
+// ---- end of G period's options ----
+// ---- G buzz options ----
+// (the still spot by the rock crabs, PC2: `--tour=still --at=rellekka_crabs`; not one of HUBS, the
+// vantage points, since the human rarely goes there)
+const BUZZ_STILL = [{ key: 'rellekka_crabs', x: 2690, z: 3722, level: 0, hotspot: false, members: true }];
+// ---- end of G buzz's options ----
+// ---- H move options ----
+// --move-base=FILE: a --movement=off run's --json of the same seed and config, for MV9 (its MV9 detail's ticks a tile)
+const MOVE_BASE = (() => {
+    if (!args['move-base'] || args['move-base'] === 'true') return null;
+    try {
+        const base = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), args['move-base']), 'utf8'));
+        const mv9 = (base.metrics ?? []).find(m => m.id === 'MV9');
+        const hit = /ticks a tile ([0-9.]+)/.exec(mv9?.detail ?? '');
+        return hit ? { ticksPerTile: Number(hit[1]), file: args['move-base'] } : null;
+    } catch {
+        return null;
+    }
+})();
+// ---- end of H move's options ----
 const WARMUP = Number(args.warmup ?? 100);
 const MAX_ERRORS = Number(args['max-errors'] ?? 0);
 const OVERLAY = args.overlay !== 'false';
@@ -250,7 +317,7 @@ if (args['rune-seed'] === 'false') lib.Age.setRuneSeedForTest?.(false);
 // (and the trips' decisions logged, for TP1's detail: which bots made the qualifying trips)
 lib.Teleport?.keepTripLogForTest?.(true);
 const HUBS = M.hubsFor(MEMBERS);
-const hubByKey = new Map(HUBS.map(h => [h.key, h]));
+const hubByKey = new Map([...HUBS, ...BUZZ_STILL].map(h => [h.key, h])); // (round 3, G buzz: its still spot too)
 const STOPS = M.tourStops(MEMBERS);
 const AT = args.at ?? 'varrock_west_road';
 if (STILL && !hubByKey.has(AT)) {
@@ -268,6 +335,11 @@ const sim = await lib.Sim.create({
     ageNewBots: true,
     saves,
     ackLogouts: true,
+    // (bots ideas, round 2: D word: theme D on from the first login, as in the game: a staged world has it off unless asked)
+    word: true,
+    // (bots ideas, round 3: themes G and H on from the first login, as in the game, unless --period=off / --movement=off)
+    period: PERIOD,
+    movement: MOVEMENT,
     extra: { timing: {}, savedNames: () => [...saves.keys()], isQuit: n => quit.has(n), onQuit: n => (saves.delete(n), quit.add(n)) }
 });
 const overlayScripts = content ? lib.installBotsContent(content.bin, content.dat, content.idx) : 0;
@@ -306,13 +378,13 @@ if (MODEL) {
             console.error(`humanlike: --model=stub:L:F takes whole ticks L >= 1 and a share F of 0-1 (got ${MODEL})`);
             process.exit(2);
         }
-        ns.setModelForTest('stub', { latencyTicks, failRate });
-        modelInfo = { kind: 'stub', latencyTicks, failRate };
+        ns.setModelForTest('stub', { latencyTicks, failRate, ambient: AMBIENT });
+        modelInfo = { kind: 'stub', latencyTicks, failRate, ambient: AMBIENT };
     } else {
         modelHttp.url = MODEL.replace(/\/+$/, '');
-        ns.setModelMode({ mode: 'local', local: true, online: false });
+        ns.setModelMode({ mode: 'local', local: true, online: false, ambient: AMBIENT });
         ns.setModelChannel(msg => modelHttp.queue.push(msg));
-        modelInfo = { kind: 'http', url: modelHttp.url };
+        modelInfo = { kind: 'http', url: modelHttp.url, ambient: AMBIENT };
     }
 }
 /** one line of the chat's characters, at most 120 (the guard cuts to 80): §3's grammar for the on-device model */
@@ -349,7 +421,7 @@ async function askHttp(msg) {
         return { type: 'bots-lm-reply', id: msg.id, text: null, source: null, error: `failed: ${String(err?.message ?? err).slice(0, 80)}`, ms: Math.round(performance.now() - t0) };
     }
 }
-const record = M.emptyRecord({ bots: N, ticks: TICKS, members: MEMBERS, xpRate: XPRATE, seed: SEED, humanName: human.displayName || 'sim human', mode: MODE, stopTicks: STOP_TICKS, at: STILL ? AT : null, probe: PROBE, talk: TALK, newchar: args.newchar === 'true', warmup: WARMUP, sampleEvery: SAMPLE, fillTick: -1, overlayScripts });
+const record = M.emptyRecord({ bots: N, ticks: TICKS, members: MEMBERS, xpRate: XPRATE, seed: SEED, humanName: human.displayName || 'sim human', mode: MODE, stopTicks: STOP_TICKS, at: STILL ? AT : null, probe: PROBE, talk: TALK, newchar: args.newchar === 'true', warmup: WARMUP, sampleEvery: SAMPLE, fillTick: -1, overlayScripts, period: PERIOD, movement: MOVEMENT });
 for (const h of HUBS) record.hubs[h.key] = { samples: 0, bots: 0, empty: 0, max: 0, social: 0, crowdBots: 0, crowdSocial: 0 };
 
 const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z));
@@ -1227,12 +1299,14 @@ function humanTick(tick) {
         // (realism phase 5b, track A: --arena, --mod: the human is at the arena or near the mod)
     } else if (PROBE > 0) probeTick(tick);
     else if (WORK > 0) workTick(tick);
-    else if (!STILL && tick > 0 && tick % STOP_TICKS === 0) {
+    // (bots ideas, Track B: a --die episode holds the human where it dies)
+    else if (!STILL && tick > 0 && tick % STOP_TICKS === 0 && !lootDieHolds()) {
         stopIndex = (stopIndex + 1) % STOPS.length;
         const h = hubByKey.get(STOPS[stopIndex]);
         sim.teleportHuman(h.x, h.z, 0);
     }
-    if (human.levels[3] < human.baseLevels[3] / 2) human.levels[3] = human.baseLevels[3];
+    // (bots ideas, Track B: not while a --die episode lets it die)
+    if (human.levels[3] < human.baseLevels[3] / 2 && !lootDieHolds()) human.levels[3] = human.baseLevels[3];
     if (tick >= nextTalk) {
         nextTalk = tick + TALK;
         const line = pick(TALK_LINES);
@@ -2326,6 +2400,629 @@ function varietyW2Collect() {
     if (FASHION_CENSUS) fs.writeFileSync(path.resolve(START_CWD, FASHION_CENSUS), JSON.stringify(fashionRecord));
 }
 // ---- end of Track W2's block ----
+// ---- (bots ideas, round 1) each track's sampling in a block of its own: its record under record.tracks.<key>
+// (endgame, loot) ----
+// ---- Track A (the period endgame) ----
+// record.tracks.endgame (lib/humanlike-metrics.mjs's Track A block: EG1-EG6, EG9, EG11): every EG_SAMPLE ticks after the
+// warm-up, the eligible bossers (a levelling bot with the bosser trait, combat 85+) and how many of them are on an endgame
+// trip (the library's registry: a solo spot, a Wilderness endgame spot, a KBD team), the bots on a trip by spot; at the
+// end the library's logs (the trips with their deaths, the drop moments with their gz, the sale stints, the teams, the
+// dusty keys, the offers, the lines) and a census of the Magic 60+ bots' god capes (owned, worn). n/a for an older library.
+const EG_SAMPLE = 10;
+const egMods = typeof lib.endgameModules === 'function' ? await lib.endgameModules() : { core: null };
+const egRec = { sample: EG_SAMPLE, samples: 0, online: 0, eligible: 0, eligibleOnTrip: 0, onTrip: 0, bySpot: {}, byKind: {}, lib: null, capes: null };
+if (egMods.core) record.tracks.endgame = egRec;
+const EG_TRIP_KINDS = new Set(['solo', 'wild', 'kbd', 'kq', 'arena']);
+function ideasATick(tick) {
+    if (!egMods.core || tick % EG_SAMPLE !== 0 || tick < WARMUP) return;
+    egRec.samples++;
+    egRec.online += active.length;
+    for (const p of active) {
+        const trip = egMods.core.tripOf(p);
+        const on = trip !== null && EG_TRIP_KINDS.has(trip.kind);
+        if (on) {
+            egRec.onTrip++;
+            egRec.bySpot[trip.spot] = (egRec.bySpot[trip.spot] ?? 0) + 1;
+            egRec.byKind[trip.kind] = (egRec.byKind[trip.kind] ?? 0) + 1;
+        }
+        if (M.LEVELLING.has(p.botPlanner) && p.combatLevel >= 85 && egMods.endgame?.mayBoss(p)) {
+            egRec.eligible++;
+            if (on) egRec.eligibleOnTrip++;
+        }
+    }
+}
+function ideasACollect() {
+    if (!egMods.core) return;
+    const copy = x => (x ? JSON.parse(JSON.stringify(x)) : null);
+    // (EG4) the rescue jumps of the endgame's own task kinds
+    const jumps = {};
+    for (const [key, [j]] of lib.teleportStats.byCause) {
+        const kind = key.split('/')[0];
+        if (['Endgame', 'KbdTeam', 'KqTeam', 'Velrak', 'DropSale'].includes(kind)) jumps[key] = j; // (the KQ track: KqTeam)
+    }
+    egRec.lib = {
+        trips: copy(egMods.core.tripLog.map(t => ({ spot: t.spot, kind: t.kind, began: t.began, end: t.end, outcome: t.outcome, died: t.died }))),
+        events: copy(egMods.core.endgameEventStats),
+        drops: copy(egMods.fight?.dropLog),
+        dropStats: copy(egMods.fight?.dropStats),
+        lines: copy(egMods.fight?.endgameLineStats),
+        sales: copy(egMods.sale?.saleLog),
+        saleStats: copy(egMods.sale?.saleStats),
+        teams: copy(egMods.teams?.teamStats),
+        teamLog: copy(egMods.teams?.teamLog),
+        velrak: copy(egMods.velrak?.velrakStats),
+        offers: copy(egMods.endgame?.endgameStats),
+        // (the KQ track: the attempts' stats and log, EG13)
+        kq: copy(egMods.kq?.kqStats),
+        kqLog: copy(egMods.kq?.kqLog),
+        jumps
+    };
+    // (EG9) the Magic 60+ bots online at the end: a god cape owned (worn, carried, banked), worn
+    const ids = ['saradomin_cape', 'zamorak_cape', 'guthix_cape'].map(n => lib.ObjType.getId(n));
+    const capes = { mages: 0, owners: 0, wearing: 0 };
+    for (const p of active) {
+        if (p.baseLevels[lib.PlayerStat.MAGIC] < 60) continue;
+        capes.mages++;
+        const invs = [p.getInventory(lib.InvType.WORN), p.getInventory(lib.InvType.INV), p.getInventory(lib.InvType.getId('bank'))];
+        const owns = invs.some(inv => inv && ids.some(id => id !== -1 && inv.getItemCount(id) > 0));
+        if (!owns) continue;
+        capes.owners++;
+        if (ids.includes(p.getInventory(lib.InvType.WORN)?.get(1)?.id ?? -2)) capes.wearing++;
+    }
+    egRec.capes = capes;
+}
+// ---- end of Track A's block ----
+// ---- Track B (PKers loot and vultures; the wine crowd, safespots and lever camps; the model guard) ----
+// record.tracks.loot: the library's lootLog (the human's piles: deaths, drops, takes, ends, enrolments, lines, banks), the
+// wine crowd's grabs (wineLog), samples every 25 ticks (the temple's grabbers and the crowd's number; the rangers and mages
+// at the Edgeville dungeon's hill giants and those on a safespot tile; the deep PKers by the lever camps and the Chaos
+// Temple), the --die episodes, and the ledgers left at the end. n/a with an older library.
+const lootMods = await lib.lootModules?.().catch(() => null);
+const lootRecord = lootMods?.loot ? { log: [], wine: [], samples: [], episodes: [], ledgers: null, safespotTiles: lootMods.safespots?.safespotTiles?.() ?? [], offSafe: {}, pkWhy: {} } : null;
+const LOOT_SAMPLE = 25;
+const LOOT_TEMPLE = [2934, 3516];
+const LOOT_CHAOS_ALTAR = [2947, 3820];
+const LOOT_CAMPS = [[3017, 3846], [3287, 3880]];
+const LOOT_GIANTS = [3112, 9840];
+/** (round 1's left-overs: LV14) a ranger's or mage's task states at work in the room (tasks/RangedMagicTask) */
+const LOOT_WORK = new Set(['patrol', 'scan', 'interact', 'loot']);
+const lootSafe = new Set((lootRecord?.safespotTiles ?? []).map(t => `${t.at[0]},${t.at[1]}`));
+let lootEp = null;
+let lootHumanLevels = null;
+/** the --die episode holds the human (the tour waits, no healing) */
+function lootDieHolds() {
+    return lootEp !== null;
+}
+function lootKit() {
+    const id = n => lib.ObjType.getId(n);
+    for (const t of [lib.InvType.INV, lib.InvType.WORN]) {
+        const inv = human.getInventory(t);
+        for (let s = 0; s < inv.capacity; s++) inv.set(s, null);
+    }
+    const worn = human.getInventory(lib.InvType.WORN);
+    for (const [slot, n] of [[0, 'rune_full_helm'], [2, 'amulet_of_strength'], [3, 'rune_scimitar'], [4, 'rune_platebody'], [7, 'rune_platelegs']]) worn.set(slot, { id: id(n), count: 1 });
+    const inv = human.getInventory(lib.InvType.INV);
+    let s = 0;
+    for (const [n, c] of [['coins', 5000], ['lawrune', 30], ['naturerune', 40], ['mithril_scimitar', 1], ['adamant_kiteshield', 1], ['lobster', 1], ['lobster', 1], ['lobster', 1], ['swordfish', 1]]) inv.set(s++, { id: id(n), count: c });
+    human.buildAppearance(lib.InvType.WORN);
+}
+function lootDieTick(tick) {
+    if (!LOOT_DIE || (MODE !== 'tour' && MODE !== 'still') || human.slot === -1) return;
+    if (!lootEp) {
+        if (tick < LOOT_DIE.every || tick % LOOT_DIE.every !== 0) return;
+        if (LOOT_DIE.kind === 'pk') {
+            const pker = sim.bots().find(b => b.botPlanner === 'extras_edgeville_pker' && wildernessLevelAt(b.x, b.z) >= 2 && wildernessLevelAt(b.x, b.z) <= 5 && !BotManager.botFor(b)?.hasSubTask());
+            if (!pker) return;
+            lootHumanLevels = [...human.baseLevels];
+            for (let st = 0; st < pker.baseLevels.length; st++) if (human.baseLevels[st] !== pker.baseLevels[st]) human.setLevel(st, pker.baseLevels[st]);
+            human.combatLevel = human.getCombatLevel();
+            sim.teleportHuman(pker.x + (pker.x < 3093 ? 2 : -2), pker.z, 0);
+            lootKit();
+            human.levels[3] = Math.max(4, Math.floor(human.baseLevels[3] / 4));
+        } else {
+            lootKit();
+            human.heroPoints.clear();
+            const script = lib.ScriptProviderB.getByName('[queue,damage_player]');
+            human.enqueueScript(script, lib.PlayerQueueTypeB.NORMAL, 0, [human.levels[3]]);
+        }
+        lootEp = { t: tick, kind: LOOT_DIE.kind, at: [human.x, human.z], died: -1, back: -1, wild: wildernessLevelAt(human.x, human.z) };
+        return;
+    }
+    if (lootEp.died < 0 && human.levels[3] === 0) lootEp.died = tick;
+    const over = lootEp.died >= 0 ? human.levels[3] > 0 && !human.delayed && tick - lootEp.died > 15 : tick - lootEp.t > 600;
+    if (!over) return;
+    lootEp.back = tick;
+    lootRecord?.episodes.push(lootEp);
+    lootEp = null;
+    if (lootHumanLevels) {
+        for (let st = 0; st < lootHumanLevels.length; st++) if (human.baseLevels[st] !== lootHumanLevels[st]) human.setLevel(st, lootHumanLevels[st]);
+        human.combatLevel = human.getCombatLevel();
+        lootHumanLevels = null;
+    }
+    const h = hubByKey.get(STILL ? AT : STOPS[stopIndex]);
+    sim.teleportHuman(h.x, h.z, 0);
+}
+function ideasBTick(tick) {
+    lootDieTick(tick);
+    if (!lootRecord || tick % LOOT_SAMPLE !== 0 || tick < WARMUP) return;
+    const near = (p, [x, z], r) => p.level === 0 && Math.max(Math.abs(p.x - x), Math.abs(p.z - z)) <= r;
+    let online = 0;
+    let grabbers = 0;
+    let giants = 0;
+    let onSafe = 0;
+    let work = 0;
+    let deep = 0;
+    let camp = 0;
+    let temple = 0;
+    for (const p of active) {
+        if (p.slot === -1) continue;
+        online++;
+        const task = BotManager.botFor(p)?.currentTask;
+        const name = task?.name ?? '';
+        if (name.startsWith('Telegrab:') && near(p, LOOT_TEMPLE, 8)) grabbers++;
+        if (name.startsWith('RangedMagic') && near(p, LOOT_GIANTS, 40) && p.z > 6400) {
+            giants++;
+            const safe = lootSafe.has(`${p.x},${p.z}`);
+            if (safe) onSafe++;
+            // (round 1's left-overs: LV14) at work there: on a tile, or of the room's step (its safespots) in a fighting state;
+            // not on its way in or out, to the bank, nor a task gone on to another step (its watchdog's)
+            if (safe || (task?.step?.extra?.safespots && LOOT_WORK.has(task?.state))) work++;
+            // (LV14's detail) where the others are: their safespot state and their task's state, or another spot's step
+            // (port/BotSafespots.safespotStateOf; an older library has none)
+            if (!safe && lootMods.safespots?.safespotStateOf) {
+                const why = task?.step?.extra?.safespots ? `${lootMods.safespots.safespotStateOf(p)}/${task?.state ?? '-'}` : 'other step';
+                lootRecord.offSafe[why] = (lootRecord.offSafe[why] ?? 0) + 1;
+            }
+        }
+        if (p.botPlanner === 'extras_pker') {
+            deep++;
+            const atCamp = LOOT_CAMPS.some(c => near(p, c, 30));
+            if (atCamp) camp++;
+            if (near(p, LOOT_CHAOS_ALTAR, 25)) temple++;
+            // (round 1's left-overs: LV15's detail) its zone (a camp's or another's) and its task's state
+            const zone = task?.zonePoolIdx;
+            const why = `${atCamp ? 'at' : 'off'}:${zone === 12 || zone === 13 ? 'camp' : zone === undefined ? (task?.name ?? 'none').split(':')[0] : 'zone'}/${task?.state ?? '-'}`;
+            lootRecord.pkWhy[why] = (lootRecord.pkWhy[why] ?? 0) + 1;
+        }
+    }
+    const target = lootMods.magic?.wineCrowdTarget ? lootMods.magic.wineCrowdTarget(online) : null;
+    // (round 1's left-overs: LV14's detail) the room's tiles claimed at the sample
+    const claimed = giants > 0 ? (lootMods.safespots?.safespotClaimed?.('edgeville-hill-giants') ?? null) : null;
+    lootRecord.samples.push({ t: tick, online, grabbers, target, giants, onSafe, work, claimed, deep, camp, temple });
+}
+function ideasBCollect() {
+    if (!lootRecord) return;
+    if (lootEp) lootRecord.episodes.push({ ...lootEp, open: true });
+    lootRecord.log = (lootMods.loot.lootLog ?? []).map(e => ({ ...e }));
+    lootRecord.wine = (lootMods.magic?.wineLog ?? []).map(e => ({ ...e }));
+    lootRecord.wineEnds = { ...(lootMods.magic?.wineEnds ?? {}) };
+    // (round 1's left-overs: LV14's detail) the safespots' queue and idle counts, and the moves to a tile with a free giant
+    lootRecord.safeStats = { ...(lootMods.safespots?.safespotStats ?? {}), ...(lootMods.safespots?.safespotMoves ? { moved: lootMods.safespots.safespotMoves.moved, idleLooks: lootMods.safespots.safespotMoves.waits, rejoined: lootMods.safespots.safespotMoves.rejoined } : {}) };
+    lootRecord.ledgers = lootMods.loot.exportLoot?.() ?? null;
+    // (H19's idle stands, 2-10 minutes of a levelling bot, by task kind: the wine crowd's and the safespots' waits)
+    lootRecord.stands = {};
+    for (const st of record.idleStands) if (M.LEVELLING.has(st.planner) && st.len >= 200 && st.len <= 1000) lootRecord.stands[st.kind] = (lootRecord.stands[st.kind] ?? 0) + 1;
+    lootRecord.die = LOOT_DIE;
+    record.tracks.loot = lootRecord;
+}
+// ---- end of Track B's block ----
+// ---- (bots ideas, round 2) the arcs (themes C and D): record.arcs (lib/humanlike-metrics.mjs
+// emptyRecord's { goals, moods, leaves, parties, whims, weddings, rumours, ties, slang, logins }), each theme's lists
+// filled from the library's logs at the end (its collect) and, where it samples, every few ticks (its tick); null with
+// an older library (lib.arcsModules n/a: an A/B run against the round's "before"), the AR and WT metrics then n/a.
+// arcsMods: { store (port/BotArcsStore), events (port/BotArcsEvents: onArcs for a listener of the runner's own), say } ----
+const arcsMods = typeof lib.arcsModules === 'function' ? await lib.arcsModules() : null;
+if (!arcsMods) record.arcs = null;
+// ---- C arcs: theme C's sampling and collect (record.arcs.goals, moods, leaves, parties, whims, weddings) ----
+// (lib/humanlike-metrics.mjs's AR block) every 100 ticks after the warm-up: the levelling bots
+// online out of newbie time and those with a goal, the level-goal holders and those at their goal's skill
+// (record.arcs.goalSamples); at the end the library's logs: goals, theme C's lines, tilt episodes, leaves, whims, 99s and
+// parties, weddings. --probe asks "whats ur goal" too (AR2), with theme C's library only.
+const cMods = arcsMods && typeof lib.arcsCModules === 'function' ? await lib.arcsCModules() : null;
+// (theme C on: test/lib/simworld's staged worlds have it off unless asked for)
+cMods?.lives.setLivesForTest?.(true);
+if (cMods && record.arcs) {
+    record.arcs.goalSamples = [];
+    PROBE_PUBLIC.push('{name} whats ur goal');
+    PROBE_PM.push('whats ur goal');
+}
+/** a task kind's skills (PlayerStat numbers), for AR5: a fight counts for the combat skills */
+const C_KIND_STATS = { Woodcut: [8], Mine: [14], Fish: [10], Cook: [7], Smith: [13], Thieve: [17], Agility: [16], Firemaking: [11], Fletching: [9], BowStringing: [9], Crafting: [12], 'Pick Flax': [12], Runecrafting: [20], Herblore: [15], Prayer: [5], Combat: [0, 1, 2, 3], RangedMagic: [4, 6] };
+function ideasCTick(tick) {
+    if (!cMods || !record.arcs || tick < WARMUP || tick % 100 !== 0) return;
+    let n = 0;
+    let withGoal = 0;
+    let lHolders = 0;
+    let lMatch = 0;
+    const byStat = {};
+    for (const p of BotManager.activeBots()) {
+        if (!M.LEVELLING.has(p.botPlanner) || !cMods.goals.keepsGoal(p)) continue;
+        n++;
+        const goal = cMods.goals.goalOf(p);
+        if (!goal) continue;
+        withGoal++;
+        if (goal.kind !== 'L') continue;
+        lHolders++;
+        const kind = taskKind(BotManager.botFor(p)?.currentTask?.name);
+        const at = (C_KIND_STATS[kind] ?? []).includes(goal.stat);
+        if (at) lMatch++;
+        const b = byStat[goal.stat] ?? (byStat[goal.stat] = [0, 0]);
+        b[0]++;
+        if (at) b[1]++;
+    }
+    record.arcs.goalSamples.push({ t: tick, n, with: withGoal, lHolders, lMatch, byStat });
+}
+function ideasCCollect() {
+    if (!cMods || !record.arcs) return;
+    const copy = list => (Array.isArray(list) ? list.map(e => ({ ...e })) : []);
+    record.arcs.goals = copy(cMods.goals.goalLog);
+    record.arcs.goalStats = { ...cMods.goals.goalStats };
+    record.arcs.cLines = copy(cMods.lives.livesLines);
+    record.arcs.moods = copy(cMods.moods.tiltEpisodes);
+    record.arcs.moodStats = JSON.parse(JSON.stringify(cMods.moods.moodStats));
+    record.arcs.leaves = copy(cMods.leaving.leaveLog);
+    record.arcs.leaveStats = { ...cMods.leaving.leaveStats };
+    record.arcs.whims = copy(cMods.whims?.whimLog);
+    record.arcs.parties = copy(cMods.ninety?.ninetyLog);
+    record.arcs.weddings = copy(cMods.weddings?.weddingLog);
+}
+// ---- end of C's block ----
+// ---- D word: theme D's sampling and collect (record.arcs.rumours, ties, slang, logins) ----
+// record.arcs.rumours: port/BotRumours' records (each party's guests who came, at its end); .ties: port/BotTies' log (the
+// greetings, grudge lines, rival picks, ties formed); .slang: port/BotSlang's adoptions; .logins: clique members' logins
+// after the fill (a mate's within 2 minutes: WT8); record.arcs.word: the counts, the catchphrase lines own and borrowed,
+// the bots online with an acquaintance at 1 h and at the end, the bot-bot steals and those of a grudge pair, and every
+// name the arcs and the rumours hold (WT10). Null without theme D's modules (an older library: the WT metrics n/a).
+const wordMods = arcsMods && typeof lib.wordModules === 'function' ? await lib.wordModules() : null;
+const wordCatch = { own: 0, borrowed: 0, ownLate: 0, borrowedLate: 0, byHub: {} };
+const wordAcquainted = [];
+if (wordMods) {
+    arcsMods.events.onArcs('said', e => {
+        if (e.catchphrase === undefined || e.catchphrase < 0) return;
+        const borrowed = arcsMods.store.peekArcs(e.bot.username)?.phrases?.some(p => p.phrase === e.catchphrase) === true;
+        const late = World.currentTick >= 6000;
+        if (borrowed) wordCatch.borrowed++;
+        else wordCatch.own++;
+        if (late) borrowed ? wordCatch.borrowedLate++ : wordCatch.ownLate++;
+        for (const hub of hubsNear(e.bot.x, e.bot.z, e.bot.level)) {
+            const h = wordCatch.byHub[hub] ?? (wordCatch.byHub[hub] = { own: 0, borrowed: 0 });
+            borrowed ? h.borrowed++ : h.own++;
+        }
+    });
+}
+function wordAcquaintedSample(tick) {
+    let online = 0;
+    let any = 0;
+    let known = 0;
+    for (const p of active) {
+        if (p.slot === -1) continue;
+        online++;
+        const ties = arcsMods.store.peekArcs(p.username)?.ties ?? [];
+        const acq = ties.filter(t => t.sign > 0).map(t => wordMods.ties.tieStrength(p.username, t.other, 1));
+        if (acq.some(s => s >= 1)) any++;
+        if (acq.some(s => s >= 2)) known++;
+    }
+    wordAcquainted.push({ t: tick, online, any, known });
+}
+function ideasDTick(tick) {
+    if (!wordMods) return;
+    if (tick === 6000 || (tick > 0 && tick % 6000 === 0)) wordAcquaintedSample(tick);
+}
+/** the clique members' logins after the fill, each with its clique (WT8's; also with the foundation alone: a before) */
+function wordLogins() {
+    const cliqueOf = lib.BotCliques?.cliqueOf;
+    const logins = [];
+    if (!cliqueOf || record.meta.fillTick < 0) return logins;
+    for (const s of record.sessions) {
+        const clique = cliqueOf(s.name);
+        if (!clique || clique.length < 2) continue;
+        logins.push({ t: s.first, name: s.name, clique: clique.join(','), afterFill: s.first > record.meta.fillTick });
+    }
+    return logins;
+}
+function ideasDCollect() {
+    record.arcs.logins = wordLogins();
+    if (!wordMods) return;
+    wordAcquaintedSample(World.currentTick);
+    const R = wordMods.rumours;
+    record.arcs.rumours = R.rumourLog.map(r => ({ ...r, via: { ...r.via }, wordGuests: r.wordGuests.map(g => ({ ...g })), wrong: r.wrong.map(w => ({ ...w })), names: [...r.names] }));
+    record.arcs.ties = wordMods.ties.tieLog.map(e => ({ ...e }));
+    record.arcs.slang = wordMods.slang.slangLog.map(e => ({ ...e }));
+    // (the bot-bot steals, and those by a bot against a bot it held a grudge against)
+    const incidents = (wordMods.rude.incidents ?? []).filter(i => !i.stealerHuman && !i.victimHuman && i.tick >= WARMUP);
+    const war = incidents.filter(i => wordMods.ties.incidentWar.has(i.id));
+    // (every name the arcs hold, as records and as ties' others, and the rumours' knowers: WT10 looks for the human's)
+    const names = new Set();
+    for (const [name, rec] of arcsMods.store.arcsEntries()) {
+        names.add(name);
+        for (const t of rec.ties ?? []) names.add(t.other);
+    }
+    for (const r of record.arcs.rumours) for (const n of r.names) names.add(n);
+    for (const e of record.arcs.slang) {
+        names.add(e.name);
+        names.add(e.from);
+    }
+    record.arcs.word = {
+        rumourStats: { ...R.rumourStats },
+        tieStats: { ...wordMods.ties.tieStats },
+        slangStats: { ...wordMods.slang.slangStats },
+        staggerStats: { ...(wordMods.cliques.staggerStats ?? {}) },
+        catchLines: { ...wordCatch, byHub: JSON.parse(JSON.stringify(wordCatch.byHub)) },
+        acquainted: wordAcquainted,
+        incidents: { botBot: incidents.filter(i => i.kind === 'ks').length, war: war.filter(i => i.kind === 'ks').length, rocks: incidents.filter(i => i.kind === 'rock').length, rocksWar: war.filter(i => i.kind === 'rock').length },
+        names: [...names],
+        human: human.username
+    };
+}
+// ---- end of D's block ----
+// ---- end of the arcs' blocks ----
+// ---- (bots ideas, round 3) period content and movement (themes G and H):
+// record.period, record.buzz and record.move (lib/humanlike-metrics.mjs emptyRecord), each filled by its block's tick
+// and collect. periodMods: { period (port/BotPeriod: periodOf, periodStats, periodLog), plan (port/BotPeriodPlan) } and
+// moveMods: { minimap (port/BotMinimap: movementRates, minimapStats), talk (port/BotTalkMoves) }, each null for an older
+// library (an A/B run against the round's "before"): the PC and MV metrics that read the library are then n/a; PC1, PC8
+// and PC9 read the runner's own samples and lines, so they have a "before" ----
+const periodMods = typeof lib.periodModules === 'function' ? await lib.periodModules() : null;
+const moveMods = typeof lib.moveModules === 'function' ? await lib.moveModules() : null;
+// ---- G period: the G builder's sampling and collect (kittens, Runelink, Gnomeball, their talk: PC3-PC6; PC8-PC10 read
+// the lines and the library's periodStats) ----
+// record.period.lib: port/BotPeriod's periodStats at the end (the buzz's asks and offers, visits by kind and key, their
+// endings, the rescue jumps of bots out by kind and reason: PC10), .log its visits, .budget the buzz budget for N
+// record.period.pc (the G builder's): every PC_SAMPLE ticks after the warm-up, the bots online, the pets out (a kitten,
+// cat or overgrown cat NPC whose follower varp is its bot's: PC3, PC4's pet-hours), the bots on the Gnomeball pitch (PC5)
+// and in the Games Room (PC6's detail); at the end the library's petStats (PC4), runelinkStats (PC6) and the minigames'
+// counts (PC5). Null with an older library (PC3-PC6 n/a)
+const contentMods = typeof lib.periodContentModules === 'function' ? await lib.periodContentModules() : null;
+const PC_SAMPLE = 10;
+const PC_PITCH = [2383, 3481, 2406, 3496];
+const PC_ROOM = [2176, 4928, 2239, 4991];
+const inBox = (p, [x0, z0, x1, z1]) => p.x >= x0 && p.x <= x1 && p.z >= z0 && p.z <= z1;
+function ideasGTick(tick) {
+    if (!contentMods || tick % PC_SAMPLE !== 0 || tick < WARMUP) return;
+    const pc = (record.period.pc ??= { sample: PC_SAMPLE, samples: 0, online: 0, pets: 0, byKind: {}, owners: [], pitch: 0, room: 0, lib: null });
+    pc.samples++;
+    pc.online += active.length;
+    for (const p of active) {
+        const pet = contentMods.pets.petOf(p);
+        if (pet) {
+            pc.pets++;
+            pc.byKind[pet.kind] = (pc.byKind[pet.kind] ?? 0) + 1;
+            if (pc.owners.length < 200 && !pc.owners.includes(p.username)) pc.owners.push(p.username);
+        }
+        if (p.level === 0 && inBox(p, PC_PITCH) && BotManager.botFor(p)?.currentTask?.name === 'Gnomeball') pc.pitch++;
+        if (inBox(p, PC_ROOM)) pc.room++;
+    }
+}
+function ideasGCollect() {
+    if (!periodMods) return;
+    record.period.lib = periodMods.period.periodStatsCopy();
+    record.period.log = periodMods.period.periodLog.map(v => ({ ...v }));
+    record.period.budget = periodMods.period.buzzBudget(N);
+    if (contentMods) {
+        const pc = (record.period.pc ??= { sample: PC_SAMPLE, samples: 0, online: 0, pets: 0, byKind: {}, owners: [], pitch: 0, room: 0, lib: null });
+        pc.lib = {
+            pets: contentMods.pets.petStatsCopy(),
+            runelink: typeof contentMods.runelink?.runelinkStatsCopy === 'function' ? contentMods.runelink.runelinkStatsCopy() : null,
+            minigames: contentMods.outings.minigameStats()
+        };
+    }
+}
+// ---- end of G period's block ----
+// ---- G buzz: the H builder's theme G sampling and collect (Rellekka, the crabs, the lighthouse, chompies: PC1, PC2,
+// PC7) ----
+// PC1's sample (the foundation's): every BUZZ_SAMPLE ticks after the warm-up, the bots online, those on level 0 in
+// Rellekka's box (VARIETY_PLACES rellekka_fremennik) and those in the lighthouse's (any floor), by place and by what they
+// do (a period visit's `<kind>:<key>`, else the task kind)
+const BUZZ_SAMPLE = record.buzz.sample;
+const BUZZ_RELLEKKA = M.VARIETY_PLACES.find(pl => pl.key === 'rellekka_fremennik');
+const [BUZZ_LH_X0, BUZZ_LH_Z0, BUZZ_LH_X1, BUZZ_LH_Z1] = M.LIGHTHOUSE_BOX;
+function ideasBuzzTick(tick) {
+    if (tick % BUZZ_SAMPLE !== 0 || tick < WARMUP) return;
+    const b = record.buzz;
+    b.samples++;
+    b.online += active.length;
+    for (const p of active) {
+        const place = p.level === 0 && p.x >= BUZZ_RELLEKKA.x0 && p.x <= BUZZ_RELLEKKA.x1 && p.z >= BUZZ_RELLEKKA.z0 && p.z <= BUZZ_RELLEKKA.z1 ? 'rellekka' : p.x >= BUZZ_LH_X0 && p.x <= BUZZ_LH_X1 && p.z >= BUZZ_LH_Z0 && p.z <= BUZZ_LH_Z1 ? 'lighthouse' : null;
+        if (place === null) continue;
+        b.there++;
+        b.byPlace[place]++;
+        const visit = periodMods?.period.periodOf(p) ?? null;
+        const kind = visit ? `${visit.kind}:${visit.key}` : taskKind(BotManager.botFor(p)?.currentTask?.name);
+        b.byKind[kind] = (b.byKind[kind] ?? 0) + 1;
+    }
+}
+// PC2's sample: with the human standing by the crabs (--at=rellekka_crabs), every BUZZ_SAMPLE ticks after the warm-up,
+// whether a bot within 15 tiles of the human targets a woken rock crab (horror_rockcrab[_small]: the game woke it for
+// the human's view); record.buzz.crabs = { samples, fights, bots (bot-samples at the rocks within 15) }
+const BUZZ_CRAB_IDS = new Set(['horror_rockcrab', 'horror_rockcrab_small'].map(n => lib.NpcType.getId(n)).filter(i => i !== -1));
+const BUZZ_ROCK_IDS = new Set(['horror_rockcrab_inactive', 'horror_rockcrab_small_inactive'].map(n => lib.NpcType.getId(n)).filter(i => i !== -1));
+record.buzz.crabs = { samples: 0, fights: 0, bots: 0, at: STILL ? AT : null };
+function ideasBuzzCrabs(tick) {
+    if (!STILL || AT !== 'rellekka_crabs' || tick % BUZZ_SAMPLE !== 0 || tick < WARMUP || human.slot === -1) return;
+    const c = record.buzz.crabs;
+    c.samples++;
+    let fight = false;
+    for (const p of active) {
+        if (p.level !== human.level || Math.max(Math.abs(p.x - human.x), Math.abs(p.z - human.z)) > 15) continue;
+        c.bots++;
+        const t = p.target;
+        if (t && t.username === undefined && (BUZZ_CRAB_IDS.has(t.type) || BUZZ_ROCK_IDS.has(t.type))) fight = true;
+    }
+    if (fight) c.fights++;
+}
+// (PC10's detail, the buzz's part: the jumps of bots out on a buzz visit, each with its visit's key and where it was)
+function ideasBuzzCollect() {
+    const visits = periodMods?.period.periodLog ?? [];
+    record.buzz.jumps = record.jumps
+        .filter(j => j.cls === 'jump')
+        .map(j => ({ j, v: visits.find(v => v.kind === 'buzz' && v.name === j.name && v.start <= j.t && (v.end === -1 || v.end >= j.t - 1)) }))
+        .filter(x => x.v)
+        .slice(0, 20)
+        .map(({ j, v }) => ({ t: j.t, name: j.name, key: v.key, task: j.task, from: j.from, to: j.to }));
+}
+// ---- end of G buzz's block ----
+// ---- H move: the H builder's sampling and collect (minimap hops, pauses, overshoots, lanes, route variants, walk-ups,
+// talk holds: MV1-MV9) ----
+// record.move.lib: port/BotMinimap's rates and minimapStats at the end (MV3's hop lengths, MV8's overshoots) and
+// port/BotTalkMoves' talkMoveStats. The runner's own (any library: MV1, MV2, MV4-MV7 and MV9 have a "before"): every bot's
+// trips after the warm-up, a trip being its moves between stands of MOVE_STAND+ still ticks (a jump of 3+ tiles drops
+// it): near: the trips of 20+ tiles all within MOVE_NEAR of the human (MV1: their tiles, the 1-7 tick stops inside;
+// MV9: their ticks), near40 (MV2: those of 40+ with a stop), repeat (MV4: one bot's trips of 20+ between the same 8-tile
+// cells, pairs overlapping 90 %+ by their tiles), cross (MV5: different bots' trips of 40+ between the same cells);
+// turns (MV6: thread turns, kind practice, to a bot, said by a walking speaker: one with waypoints or moved this tick)
+// and openings (MV7: a pair's first line after 600 ticks with the two 5+ apart). base: --move-base's ticks a tile.
+const MOVE_NEAR = 40;
+const MOVE_STAND = 8;
+const MOVE_TILES = 400;
+const MOVE_KEPT = 8000;
+const MOVE_GROUP = 12;
+Object.assign(record.move, {
+    near: { trips: 0, tiles: 0, stops: 0, ticks: 0 },
+    near40: { trips: 0, withStop: 0 },
+    repeat: { pairs: 0, over: 0 },
+    cross: { pairs: 0, over: 0 },
+    turns: { n: 0, walking: 0 },
+    openings: { n: 0, apart: 0 },
+    base: MOVE_BASE
+});
+const moveTrack = new Map();
+const moveTrips = [];
+const movePack = (x, z) => x * 16384 + z;
+const moveCell = (x, z) => `${x >> 3},${z >> 3}`;
+function moveEnd(trip, ex, ez) {
+    const m = record.move;
+    if (trip.near && trip.moved >= 20) {
+        m.near.trips++;
+        m.near.tiles += trip.moved;
+        m.near.stops += trip.stops;
+        m.near.ticks += trip.ticks;
+        if (trip.moved >= 40) {
+            m.near40.trips++;
+            if (trip.stops > 0) m.near40.withStop++;
+        }
+    }
+    const disp = Math.max(Math.abs(ex - trip.sx), Math.abs(ez - trip.sz));
+    if (disp >= 20 && moveTrips.length < MOVE_KEPT) moveTrips.push({ name: trip.name, key: `${moveCell(trip.sx, trip.sz)}>${moveCell(ex, ez)}`, disp, tiles: trip.tiles });
+}
+function ideasHTick(tick) {
+    for (const p of active) {
+        const s = moveTrack.get(p);
+        if (!s) {
+            moveTrack.set(p, { x: p.x, z: p.z, level: p.level, still: 0, trip: null });
+            continue;
+        }
+        const d = p.level !== s.level ? 99 : Math.max(Math.abs(p.x - s.x), Math.abs(p.z - s.z));
+        if (tick < WARMUP || d > 2) {
+            s.trip = null;
+            s.still = 0;
+        } else if (d > 0) {
+            if (!s.trip) s.trip = { name: p.username, sx: s.x, sz: s.z, moved: 0, ticks: 0, stops: 0, near: humanDist(s.x, s.z, s.level) <= MOVE_NEAR, tiles: new Set([movePack(s.x, s.z)]) };
+            else if (s.still > 0) {
+                s.trip.stops++;
+                s.trip.ticks += s.still;
+            }
+            s.still = 0;
+            s.trip.moved += d;
+            s.trip.ticks++;
+            if (s.trip.tiles.size < MOVE_TILES) {
+                // (a run's tile between: 274 steps one, then the next)
+                if (d === 2) s.trip.tiles.add(movePack(s.x + Math.sign(p.x - s.x), s.z + Math.sign(p.z - s.z)));
+                s.trip.tiles.add(movePack(p.x, p.z));
+            }
+            if (humanDist(p.x, p.z, p.level) > MOVE_NEAR) s.trip.near = false;
+        } else if (++s.still >= MOVE_STAND && s.trip) {
+            moveEnd(s.trip, p.x, p.z);
+            s.trip = null;
+        }
+        s.x = p.x;
+        s.z = p.z;
+        s.level = p.level;
+    }
+    if (tick % 500 === 0) for (const p of [...moveTrack.keys()]) if (p.slot === -1) moveTrack.delete(p);
+}
+{
+    const pairLast = new Map();
+    lib.sayListeners.push((player, text, meta, addressee) => {
+        if (World.currentTick < WARMUP || !player.is_bot) return;
+        const kind = typeof meta === 'string' ? meta : meta?.kind;
+        const to = addressee ?? meta?.to ?? null;
+        if (kind !== 'practice' || !to?.is_bot) return;
+        const s = moveTrack.get(player);
+        const m = record.move;
+        m.turns.n++;
+        if (player.hasWaypoints() || (s && (s.x !== player.x || s.z !== player.z))) m.turns.walking++;
+        const key = player.username < to.username ? `${player.username}|${to.username}` : `${to.username}|${player.username}`;
+        const last = pairLast.get(key);
+        if (last === undefined || World.currentTick - last > 600) {
+            m.openings.n++;
+            if (player.level !== to.level || Math.max(Math.abs(player.x - to.x), Math.abs(player.z - to.z)) >= 5) m.openings.apart++;
+        }
+        pairLast.set(key, World.currentTick);
+        if (pairLast.size > 20000) pairLast.clear();
+    });
+}
+/** the share of pairs of the trips in each group (at most MOVE_GROUP a group) whose tiles overlap 90 %+ (Jaccard) */
+function moveOverlap(groups, cross) {
+    let pairs = 0;
+    let over = 0;
+    for (const list of groups.values()) {
+        const g = list.slice(0, MOVE_GROUP);
+        for (let i = 0; i < g.length; i++) {
+            for (let j = i + 1; j < g.length; j++) {
+                if (cross === (g[i].name === g[j].name)) continue;
+                let both = 0;
+                for (const k of g[i].tiles) if (g[j].tiles.has(k)) both++;
+                pairs++;
+                if (both / (g[i].tiles.size + g[j].tiles.size - both) >= 0.9) over++;
+            }
+        }
+    }
+    return { pairs, over };
+}
+function ideasHCollect() {
+    const by = (key, filter) => {
+        const groups = new Map();
+        for (const t of moveTrips) {
+            if (!filter(t)) continue;
+            const k = key(t);
+            let list = groups.get(k);
+            if (!list) groups.set(k, (list = []));
+            list.push(t);
+        }
+        return groups;
+    };
+    record.move.repeat = moveOverlap(by(t => `${t.name}#${t.key}`, () => true), false);
+    record.move.cross = moveOverlap(by(t => t.key, t => t.disp >= 40), true);
+    if (!moveMods) return;
+    record.move.lib = { rates: { ...moveMods.minimap.movementRates }, stats: JSON.parse(JSON.stringify(moveMods.minimap.minimapStats)), talk: moveMods.talk.talkMoveStats ? JSON.parse(JSON.stringify(moveMods.talk.talkMoveStats)) : null };
+}
+// ---- end of H move's block ----
+// ---- end of round 3's blocks ----
+function ideasTick(tick) {
+    ideasATick(tick);
+    ideasBTick(tick);
+    // (round 2: themes C and D, with the library's arcs)
+    if (arcsMods) {
+        ideasCTick(tick);
+        ideasDTick(tick);
+    }
+    // (round 3: themes G and H; PC1's sample with any library)
+    ideasGTick(tick);
+    ideasBuzzTick(tick);
+    ideasBuzzCrabs(tick); // (round 3, G buzz: PC2)
+    ideasHTick(tick);
+}
+function ideasCollect() {
+    ideasACollect();
+    ideasBCollect();
+    if (arcsMods) {
+        ideasCCollect();
+        ideasDCollect();
+    }
+    ideasGCollect();
+    ideasBuzzCollect();
+    ideasHCollect();
+}
 function varietyTick(tick) {
     varietyFTick(tick);
     varietyDTick(tick);
@@ -2368,6 +3065,7 @@ while (World.currentTick < TICKS) {
     textureTick(tick); // (realism phase 5a, track F)
     partyTick(tick); // (realism phase 5b, track P)
     varietyTick(tick); // (the variety work, rounds 1 and 2: every track's sampling)
+    ideasTick(tick); // (the bots ideas work: every track's sampling)
     if (tick % SAMPLE === 0 && tick >= WARMUP) perSample(MODE === 'tour' ? STOPS[stopIndex] : MODE === 'still' ? AT : MODE);
     if (tick % 100 === 0) perPopulation();
     harnessMs.push(performance.now() - b0 + listenerMs);
@@ -2397,6 +3095,7 @@ collectParties();
 collectArena();
 // (variety round 1: every track's records)
 varietyCollect();
+ideasCollect();
 
 // ---- (realism phase 5a, Track M: movement and magic) the library's counters: teleport spells (TP1, TP2), the rescue jumps
 // by cause (TP4), wrong turns (F2), alching and law runs (AL1's detail); null with an older library ----
@@ -2436,6 +3135,8 @@ if (spOn) {
 if (MODEL) {
     const ms = lib.BotModelNs.modelStats;
     record.model = { ...modelInfo, stats: JSON.parse(JSON.stringify({ ...ms, log: undefined })), log: ms.log.map(e => ({ ...e })) };
+    // (bots ideas, round 4: I model: LM7's H7 of the same run without the model)
+    if (LM7_BASE) record.model.h7Base = LM7_BASE.metrics?.find(m => m.id === 'H7')?.value ?? null;
     if (modelHttp.url) record.model.http = { answers: modelHttp.ms.length, failed: modelHttp.failed, msMean: Math.round(modelHttp.ms.reduce((a, b) => a + b, 0) / Math.max(1, modelHttp.ms.length)), msP90: Math.round(M.quantile(modelHttp.ms, 0.9) ?? 0), promptTokens: modelHttp.promptTokens, predictedTokens: modelHttp.predictedTokens, waitSeconds: Math.round(modelHttp.waitMs / 100) / 10 };
 }
 
@@ -2466,7 +3167,7 @@ const judged = metrics.filter(m => m.ok !== null);
 const failed = judged.filter(m => !m.ok);
 const modeText = MODE === 'probe' ? `a probe every ${PROBE} ticks` : MODE === 'work' ? `the human at work (cows, then rocks, ${WORK / 100} min each)` : MODE === 'still' ? `standing at ${AT}` : `a tour of ${STOPS.length} stops (${STOP_TICKS / 100} min each)`;
 
-out(`humanlike: ${N} bots, ${TICKS} ticks, ${MEMBERS ? 'members' : 'free'} world, seed ${SEED}, XP ×${XPRATE}, ${modeText}${TALK ? `, a line every ${TALK} ticks` : ''}${record.meta.newchar ? ', a new character' : ''}${OVERLAY ? '' : ', vanilla scripts (no overlay)'}: ${judged.length - failed.length} of ${judged.length} in band; ${timing.seconds} s`);
+out(`humanlike: ${N} bots, ${TICKS} ticks, ${MEMBERS ? 'members' : 'free'} world, seed ${SEED}, XP ×${XPRATE}, ${modeText}${TALK ? `, a line every ${TALK} ticks` : ''}${record.meta.newchar ? ', a new character' : ''}${OVERLAY ? '' : ', vanilla scripts (no overlay)'}${PERIOD ? '' : ', theme G off'}${MOVEMENT ? '' : ', theme H off'}: ${judged.length - failed.length} of ${judged.length} in band; ${timing.seconds} s`);
 out(`  world: ${botHours.toFixed(1)} bot-hours, ${stats.spawned} logins, ${stats.logoffs} log-offs, ${stats.returns} returns, ${stats.newcomers} newcomers, ${stats.quits} quits; ${record.deaths.length} deaths; ${record.lines.length} lines, ${record.pms.length} PMs to the human`);
 out(`  errors: ${logStats.engine} engine, ${botErrors} bot (at most ${maxErrors}; ${logStats.errors.length} lines); warnings ${logStats.warnings}${distinctErrors.size ? `; ${[...distinctErrors].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, n]) => `${n}× ${k.slice(0, 110)}`).join(' | ')}` : ''}`);
 out(`  harness: ${timing.harnessMsPerTick.avg} ms a tick (p95 ${timing.harnessMsPerTick.p95}, max ${timing.harnessMsPerTick.max}); world tick ${timing.worldTickMs.avg} ms (bots ${timing.botTickMs.avg} ms)`);
@@ -2487,12 +3188,20 @@ if (record.model) {
     out(`  model: ${m.kind === 'stub' ? `the stub (answers ${m.latencyTicks} ticks after the request, ${Math.round(m.failRate * 100)} % failing)` : `${m.url}`}; ${m.stats.requests} requests, ${m.stats.used} said in its words${m.http ? `; ${m.http.answers} answers, ${m.http.msMean} ms each (p90 ${m.http.msP90}), ${m.http.failed} failed, ${m.http.predictedTokens} tokens out; the run waited ${m.http.waitSeconds} s` : ''}`);
     for (const line of M.formatMetrics(modelMetrics, { details: DETAILS })) out(line);
     out(modelFailed.length ? `model out of band (${modelFailed.length}): ${modelFailed.map(x => x.id).join(' ')}` : 'model: every judged metric in band');
-    const said = m.log.filter(e => e.outcome === 'used').slice(0, 15);
-    const refused = m.log.filter(e => e.outcome === 'guard').slice(0, 10);
+    const said = m.log.filter(e => e.outcome === 'used' && !e.ambient).slice(0, 15);
+    const refused = m.log.filter(e => e.outcome === 'guard' && !e.ambient).slice(0, 10);
     if (said.length) out(`  the model's lines (first ${said.length}):`);
     for (const e of said) out(`    t${e.t} ${e.bot} (${e.via}${e.intent ? ` ${e.intent}` : ', nothing understood'}): "${e.heard}" -> "${e.said ?? e.raw}"${e.ruleText ? ` (the rules: "${e.ruleText}")` : ''}`);
     if (refused.length) out(`  refused by the guard (first ${refused.length}):`);
     for (const e of refused) out(`    t${e.t} ${e.bot}: "${e.heard}" -> "${e.raw}" (${e.reason}${e.planted ? `, planted ${e.planted}` : ''})`);
+    // ---- (bots ideas, round 4: I model) the bots' own talk: its lines in the model's words, next to the rules' they replaced ----
+    const ambientSaid = m.log.filter(e => e.ambient && e.outcome === 'used').slice(0, 30);
+    const ambientRefused = m.log.filter(e => e.ambient && e.outcome === 'guard').slice(0, 10);
+    if (ambientSaid.length) out(`  the bots' own talk in the model's words (first ${ambientSaid.length}):`);
+    for (const e of ambientSaid) out(`    t${e.t} ${e.bot} (${e.via}): "${e.heard}" -> "${e.said ?? e.raw}" (the rules: "${e.ruleText}")`);
+    if (ambientRefused.length) out(`  the bots' own talk refused by the guard (first ${ambientRefused.length}):`);
+    for (const e of ambientRefused) out(`    t${e.t} ${e.bot} (${e.via}): "${e.heard}" -> "${e.raw}" (${e.reason}${e.planted ? `, planted ${e.planted}` : ''}; the rules: "${e.ruleText}")`);
+    // ---- end of I model's block ----
 }
 
 if (args.json && args.json !== 'true') {
@@ -2514,7 +3223,7 @@ if (args.json && args.json !== 'true') {
             deaths: record.deaths.map(d => `t${d.t} ${d.name} (${d.planner}, ${d.task}) by ${d.by} at ${d.x},${d.z}`)
         },
         // (realism phase 7, Track E: with --model, MD1-MD6, the stats and the first replies' stories)
-        ...(record.model ? { model: { ...modelInfo, metrics: modelMetrics, stats: record.model.stats, http: record.model.http ?? null, log: record.model.log.slice(0, 400) } } : {})
+        ...(record.model ? { model: { ...modelInfo, metrics: modelMetrics, stats: record.model.stats, http: record.model.http ?? null, log: record.model.log.filter(e => !e.ambient).slice(0, 400), ambientLog: record.model.log.filter(e => e.ambient).slice(0, 400) } } : {})
     };
     fs.writeFileSync(path.resolve(START_CWD, args.json), JSON.stringify(report, null, 1));
 }

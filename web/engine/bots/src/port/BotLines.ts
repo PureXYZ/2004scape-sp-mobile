@@ -75,7 +75,23 @@ import lines2004ActivitiesJson from '../../data/lines2004-activities.json';
 // (the variety work, round 2: Track M's groups in a file of its own; Track D2's in lines2004-activities.json, Track S2's
 // in lines2004-variety.json)
 import lines2004MembersJson from '../../data/lines2004-members.json';
+// (the bots ideas work, round 1: Track A's groups (and Track B's wine, safespot and camp groups) and Track B's loot groups)
+import lines2004EndgameJson from '../../data/lines2004-endgame.json';
+import lines2004LootJson from '../../data/lines2004-loot.json';
+// (the bots ideas work, round 2: theme C's groups (goals, moods, leaving, 99 parties, whims, weddings) and theme D's
+// (rumours, ties, slang), each said through port/BotArcsSay)
+import lines2004ArcsJson from '../../data/lines2004-arcs.json';
+import lines2004WordJson from '../../data/lines2004-word.json';
+// ---- (bots ideas, round 3: G period, G buzz) theme G's groups: the G builder's (kittens, Runelink, Gnomeball, Castle
+// Wars talk: lines2004-period.json, event 'period') and the H builder's (the Rellekka buzz, the crabs, the lighthouse,
+// chompies: lines2004-buzz.json, event 'buzz'), each said through port/BotPeriodPlan sayPeriodLine or port/BotArcsSay ----
+import lines2004PeriodJson from '../../data/lines2004-period.json';
+import lines2004BuzzJson from '../../data/lines2004-buzz.json';
+// ---- end of G's block ----
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+// ---- (bots ideas, round 2: D word) the catchphrases a bot borrowed from other bots (port/BotSlang, through the hooks) ----
+import { wordHooks } from '#/engine/bot/port/BotWordHooks.js';
+// ---- end of D's block ----
 
 // ── the lines ────────────────────────────────────────────────────────────────
 
@@ -159,6 +175,12 @@ export interface Line {
     slots?: Slot[];
     /** (variety round 1, P6) a catchphrase of the bot's own (never in ALL_LINES: pickLine adds the bot's) */
     catchphrase?: boolean;
+    // ---- (bots ideas, round 2: arcs foundation) a catchphrase's index in CATCHPHRASE_LIST (the 'said' event's) ----
+    phrase?: number;
+    // ---- end of the arcs foundation's block ----
+    // ---- (bots ideas, round 2: D word) a catchphrase it borrowed from another bot (port/BotSlang), not one of its own ----
+    borrowed?: boolean;
+    // ---- end of D's block ----
 }
 
 const tags = (lineTagsJson as unknown as { tags: Record<string, LineTag> }).tags;
@@ -170,7 +192,7 @@ interface Lines2004 {
     pk: Record<PkLineKind, string[]>;
 }
 const data2004 = lines2004Json as unknown as Lines2004;
-/** every group of 2004 lines: lines2004.json's, then phase 5a's files' (texture, events), then phase 5b's (groups, parties, arena), then the variety work's (variety, activities, members) */
+/** every group of 2004 lines: lines2004.json's, then phase 5a's files' (texture, events), then phase 5b's (groups, parties, arena), then the variety work's (variety, activities, members), then the ideas work's (endgame, loot; round 2: arcs, word; round 3: period, buzz) */
 const GROUPS_2004: Lines2004['groups'] = [
     ...data2004.groups,
     ...(lines2004TextureJson as unknown as Pick<Lines2004, 'groups'>).groups,
@@ -180,7 +202,15 @@ const GROUPS_2004: Lines2004['groups'] = [
     ...(lines2004ArenaJson as unknown as Pick<Lines2004, 'groups'>).groups,
     ...(lines2004VarietyJson as unknown as Pick<Lines2004, 'groups'>).groups,
     ...(lines2004ActivitiesJson as unknown as Pick<Lines2004, 'groups'>).groups,
-    ...(lines2004MembersJson as unknown as Pick<Lines2004, 'groups'>).groups
+    ...(lines2004MembersJson as unknown as Pick<Lines2004, 'groups'>).groups,
+    ...(lines2004EndgameJson as unknown as Pick<Lines2004, 'groups'>).groups,
+    ...(lines2004LootJson as unknown as Pick<Lines2004, 'groups'>).groups,
+    // (round 2: C's and D's, each an empty list until its builder fills it)
+    ...((lines2004ArcsJson as unknown as Partial<Pick<Lines2004, 'groups'>>).groups ?? []),
+    ...((lines2004WordJson as unknown as Partial<Pick<Lines2004, 'groups'>>).groups ?? []),
+    // (round 3: G's, the G builder's and the H builder's, each an empty list until its builder fills it)
+    ...((lines2004PeriodJson as unknown as Partial<Pick<Lines2004, 'groups'>>).groups ?? []),
+    ...((lines2004BuzzJson as unknown as Partial<Pick<Lines2004, 'groups'>>).groups ?? [])
 ];
 
 /** where a line names a player near the bot (upstream's lines had players' names cut out; port: BotPlayer filled them) */
@@ -700,7 +730,60 @@ export const EVENT_WINDOW: Readonly<Record<string, number>> = {
     'react-dance': 60,
     'react-emote': 60,
     'react-wild': 60,
-    'react-kill': 60
+    'react-kill': 60,
+    // ---- (bots ideas, Track A: the period endgame) data/lines2004-endgame.json's event, said at its moments by
+    // port/BotEndgameFight sayEndgame, never noted on a bot: named here only ----
+    endgame: 60,
+    // ---- end of Track A's event ----
+    // ---- (bots ideas, round 2: C arcs) data/lines2004-arcs.json's events: each said at its moment by its own module
+    // through port/BotArcsSay (port/BotGoals, BotMoods, BotLeaving, BotWhims, BotNinetyNine, BotWeddings), never noted on
+    // a bot as an event: named here only ----
+    'arcs-goal': 60,
+    'arcs-mood': 60,
+    'arcs-leave': 60,
+    'arcs-whim': 60,
+    'arcs-99': 60,
+    'arcs-party': 60,
+    // ---- end of C's block ----
+    // ---- (bots ideas, Track B: loot) data/lines2004-loot.json's events: each said at its moment by its own module
+    // (port/BotLoot: the killer's pk-*, the vultures', the polite word; port/BotMagicRuns: the wine crowd; port/BotSafespots:
+    // the safespot queue; the deep PKers' camps), never noted on a bot as an event: named here only ----
+    'pk-loot': 60,
+    'pk-junk': 60,
+    'pk-full': 60,
+    'vulture-wait': 60,
+    'vulture-take': 60,
+    'vulture-miss': 60,
+    'vulture-npc': 60,
+    'vulture-back': 60,
+    'pile-polite': 60,
+    'wine-lost': 60,
+    'wine-won': 60,
+    'safespot-ask': 60,
+    'safespot-answer': 60,
+    'camp-call': 60,
+    // ---- end of Track B's (ideas) block ----
+    // ---- (bots ideas, round 2: D word) data/lines2004-word.json's events: each said at its moment by theme D's modules
+    // through port/BotArcsSay (port/BotRumours: a knower's telling, a wrong place's word, a late "missed the dp", the answer
+    // to "where?"; port/BotTies: the greetings, the grudges' lines, the Edgeville rivals'), never noted on a bot as an
+    // event: named here only ----
+    'word-rumour': 60,
+    'word-fake': 60,
+    'word-missed': 60,
+    'word-answer': 60,
+    'word-greet': 60,
+    'word-greet-back': 60,
+    'word-grudge': 60,
+    'word-grudge-back': 60,
+    'word-rival': 60,
+    // ---- end of D's events ----
+    // ---- (bots ideas, round 3: G period, G buzz) data/lines2004-period.json's event (the G builder's: kittens, Runelink,
+    // Gnomeball, Castle Wars) and lines2004-buzz.json's (the H builder's: the Rellekka buzz, the crabs, the lighthouse,
+    // chompies): each said at its moment through port/BotPeriodPlan sayPeriodLine (a group's kinds name the moment),
+    // never noted on a bot as an event: named here only ----
+    period: 60,
+    buzz: 60
+    // ---- end of G's events ----
 };
 
 function role(ctx: LineContext, r: string): boolean {
@@ -1138,6 +1221,16 @@ const CATCHPHRASE_WEIGHT = 8;
 /** the persona pools catchphrases come from (lines2004-variety.json "catchphrases") */
 const CATCHPHRASE_POOLS: Readonly<Record<string, readonly string[]>> = (lines2004VarietyJson as unknown as Pick<Lines2004, 'catchphrases'>).catchphrases ?? {};
 const catchphrases = new Map<string, readonly Line[]>();
+// ---- (bots ideas, round 2: arcs foundation) every catchphrase of the pools, each once, in the pools' order: a phrase's
+// index is what the saved arcs keep (port/BotArcsStore PhraseRecord.phrase) and what the 'said' event carries, so the
+// pools are append only (test/arcs-store.test.mjs locks the list's first ones: test/ref/catchphrases.lock) ----
+export const CATCHPHRASE_LIST: readonly string[] = [...new Set(Object.values(CATCHPHRASE_POOLS).flat())];
+const CATCHPHRASE_INDEX = new Map<string, number>(CATCHPHRASE_LIST.map((text, i) => [text, i]));
+/** a catchphrase's index in CATCHPHRASE_LIST, or -1 */
+export function catchphraseIndexOf(text: string): number {
+    return CATCHPHRASE_INDEX.get(text) ?? -1;
+}
+// ---- end of the arcs foundation's block ----
 /** the pools whose catchphrases fit this persona: anyone's, its age's, a meme's, a rude or a friendly one's */
 function catchphrasePools(p: Persona): string[] {
     const pools = ['any', p.ageBand];
@@ -1158,10 +1251,26 @@ export function catchphrasesOf(name: string, persona: Persona): readonly Line[] 
             const text = pool[Math.floor(r() * pool.length)];
             if (!chosen.includes(text)) chosen.push(text);
         }
-        lines = chosen.map(text => ({ text, tag: { c: 'ambient' as const }, source: '2004' as const, named: false, catchphrase: true }));
+        // (bots ideas, round 2: arcs foundation: and its index, phrase)
+        lines = chosen.map(text => ({ text, tag: { c: 'ambient' as const }, source: '2004' as const, named: false, catchphrase: true, phrase: catchphraseIndexOf(text) }));
         if (catchphrases.size >= 4096) catchphrases.clear();
         catchphrases.set(name, lines);
     }
+    // ---- (bots ideas, round 2: D word) and the ones it borrowed from other bots (port/BotSlang: at most 2, each weighing
+    // its strength's share of a catchphrase's: tag.weight x CATCHPHRASE_WEIGHT; not memoised, they come and go). The
+    // same slot as its own: no line is added ----
+    const borrowed = wordHooks.borrowedPhrases?.(name);
+    if (borrowed && borrowed.length > 0) {
+        const own = lines;
+        const more: Line[] = [];
+        for (const b of borrowed) {
+            const text = CATCHPHRASE_LIST[b.phrase];
+            if (text === undefined || b.weight <= 0 || own.some(l => l.phrase === b.phrase)) continue;
+            more.push({ text, tag: { c: 'ambient', weight: b.weight }, source: '2004', named: false, catchphrase: true, phrase: b.phrase, borrowed: true });
+        }
+        if (more.length > 0) return [...own, ...more];
+    }
+    // ---- end of D's block ----
     return lines;
 }
 

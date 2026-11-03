@@ -37,6 +37,12 @@ export * as Slots from '#/engine/bot/port/BotSlots.js';
 export { VENDOR_BREAK, VENDOR_PATTER } from '#/engine/bot/tasks/VendorTask.js';
 // (the variety work, round 2, Track S2: the threads' pools, the clans' names for {clan})
 export { THREAD_LINES } from '#/engine/bot/port/BotThreads.js';
+// ---- (bots ideas, Track B: loot) the items a {item} slot of a loot line takes (any the human drops) ----
+export { ObjType };
+// ---- end of Track B's (ideas) block ----
+// ---- (bots ideas, round 2: D word) the words a rumour's slots take (port/BotRumours: places, mines, ores, drops, skills) ----
+export { wordSlotValues } from '#/engine/bot/port/BotRumours.js';
+// ---- end of D's block ----
 
 /** the name a vendor's adverts give a stock item (VendorTask: its alias, else the game's name) */
 export function vendorItemName(item: { itemId: number; name: string; alias?: string }): string {
@@ -118,3 +124,10 @@ export function heardLine(typed: string): string {
     buf.release();
     return WordEnc.filter(unpacked);
 }
+// ---- (bots ideas, Track A: the period endgame) a drop sale's adverts (port/BotDropSale: every short name in each form) ----
+export { dropAdvert, shortName } from '#/engine/bot/port/BotDropSale.js';
+export { default as ObjTypeForTrackA } from '#/cache/config/ObjType.js';
+// ---- end of Track A's exports ----
+// ---- (bots ideas, round 3: G period) the G builder's answers (port/BotPeriodTalk) ----
+export { PERIOD_ANSWERS } from '#/engine/bot/port/BotPeriodTalk.js';
+// ---- end of G period's exports ----

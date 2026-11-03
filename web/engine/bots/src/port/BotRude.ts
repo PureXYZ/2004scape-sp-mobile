@@ -33,6 +33,9 @@ import ServerTriggerType from '#/engine/script/ServerTriggerType.js';
 import { personaOf, isRude } from '#/engine/bot/port/BotPersona.js';
 import type { PlannerKey } from '#/engine/bot/port/BotRoster.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+// ---- (bots ideas, round 2: arcs foundation) every incident on the bus (port/BotArcsEvents: theme D's grudges, C's tilt) ----
+import { emitArcs } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- end of the arcs foundation's block ----
 
 // ── the rates and caps (the spec's defaults; tuned to the humanlike runs where said) ─────────────────────────────────
 
@@ -182,6 +185,9 @@ function record(kind: StealKind, stealer: Player, victim: Player, deliberate: bo
     };
     incidents.push(incident);
     if (incidents.length > MAX_INCIDENTS) incidents.splice(0, incidents.length - MAX_INCIDENTS);
+    // ---- (bots ideas, round 2: arcs foundation) the incident on the bus, with its two players ----
+    emitArcs({ k: 'steal', incident, stealer, victim });
+    // ---- end of the arcs foundation's block ----
     return incident;
 }
 
@@ -215,9 +221,14 @@ export function noteSteal(kind: StealKind, stealer: Player, victim: Player, targ
     if (!attempt || attempt.stealer !== stealer || now - attempt.tick > ATTEMPT_TICKS) startSteal(stealer, victim, target, multi, kind, how);
     const open = openByTarget.get(target);
     if (open && open.stealer === stealer && open.victim === victim && (now - open.incident.tick <= ATTEMPT_TICKS || open.incident.deliberate)) {
+        // (bots ideas, round 2: arcs foundation: whether it was meant before, for the bus below)
+        const meantBefore = open.incident.deliberate;
         open.incident.deliberate = true;
         open.incident.multi = open.incident.multi || multi;
         if (how && !open.incident.how) open.incident.how = how;
+        // ---- (bots ideas, round 2: arcs foundation) a noticed take that turns out meant: on the bus again (`again`) ----
+        if (!meantBefore) emitArcs({ k: 'steal', incident: open.incident, stealer, victim, again: true });
+        // ---- end of the arcs foundation's block ----
         return open.incident;
     }
     const at = target as { x: number; z: number };
@@ -450,10 +461,12 @@ const MAX_RUDE_REPLIES = 5000;
  * after it). Never for a greeting, thanks, a trade, the marketplace, a "come here", nor a "follow me" the bot agrees to
  * (it follows: `willing`).
  */
-export function rudeReply(bot: Player, intentId: string, answer: string, willing = false, random: () => number = Math.random): string | null {
+export function rudeReply(bot: Player, intentId: string, answer: string, willing = false, random: () => number = Math.random, chance?: number): string | null {
     if (!rudeTalker(bot) || willing) return null;
     const pool = RUDE_BY_INTENT[intentId];
-    if (!pool || random() >= rudeRates.reply) return null;
+    // ---- (bots ideas, round 2: C arcs) `chance`: the caller's (a tilted rude talker's x1.5: port/BotChat), else RUDE_REPLY ----
+    if (!pool || random() >= (chance ?? rudeRates.reply)) return null;
+    // ---- end of C's block ----
     const own = RUDE_LINES[pool];
     if (pool !== 'personal' && pool !== 'no' && random() < RUDE_ADDON) {
         const add = RUDE_LINES.addon[Math.floor(random() * RUDE_LINES.addon.length)];

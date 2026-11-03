@@ -2058,15 +2058,47 @@ html.ui-short #section-world .data-row {
     text-align: center;
 }
 
-/* Bot chat (host.js botChat): Think first while Rules or Claude online writes the replies: greyed out (no use there),
-   its choice still shown */
+/* Bot chat (host.js botChat): Think first while Rules or Claude online writes the replies, and (bots ideas, round 4)
+   Bots' own talk without the on-device model or with Rules: greyed out (no use there), the choice still shown */
 #botchat-think.unused .data-name,
-#botchat-think.unused .data-detail {
+#botchat-think.unused .data-detail,
+#botchat-ambient.unused .data-name,
+#botchat-ambient.unused .data-detail {
     color: #8c8c8c;
 }
 
-#botchat-think.unused .seg {
+#botchat-think.unused .seg,
+#botchat-ambient.unused .seg {
     opacity: 0.5;
+}
+
+/* (bots ideas, round 4) Bot chat with Bots' own talk, a row more: its rows a little tighter on a phone in landscape (410 px
+   tall at most), so that the page still fits without scrolling. (Round 4 fixes) On a shorter layer (html.ui-short: under
+   370 HUD px, Display Zoom's 320 and Android's 360) tighter still: each row as tall as what is in it (a two-line row's
+   text is 33 px), its Set key and Test buttons as tall as the choices' (31 px), the intro and the note closer (the page
+   was 14 px too tall at 320, its last line cut off; gallery.mjs's botchat fails if it scrolls) */
+@media (max-height: 410px) {
+    #section-botchat .row,
+    #section-botchat .data-row {
+        min-height: 38px;
+    }
+}
+
+html.ui-short #section-botchat .row,
+html.ui-short #section-botchat .data-row {
+    min-height: 32px;
+}
+
+html.ui-short #section-botchat .data-btn {
+    height: 31px;
+}
+
+html.ui-short #section-botchat .section-intro {
+    margin: 3px 0 1px;
+}
+
+html.ui-short #section-botchat .section-note {
+    margin-top: 4px;
 }
 
 /* Tap options: a key to the four choices */

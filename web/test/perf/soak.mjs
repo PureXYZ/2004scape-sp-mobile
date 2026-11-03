@@ -7,7 +7,9 @@
 // A soak: {name?, description, bots, startup?: {launches, trace?, traceSec?}, phases: [...]}; a phase: {name, sec,
 // where?: 'title' | 'ingame', settleSec?, tele?, waitFill?, vars?, webkitLowMemory? (org.WebKit.lowMemory before the
 // window), pageGcEverySec? (the app's page collections every n s, 0 = none), audioOff?, walk?, walkEveryMs?,
-// lm?: {everySec, think}, background?, traces?: [{set, at, sec}]} (autotest.js's soak section says what each does).
+// lm?: {everySec, think}, settings?: {botChat?, botThink?, botAmbient?} (bots ideas, round 4: Settings › Bot chat for
+// the phase and on, as the player sets it; set back at the soak's end), background?, traces?: [{set, at, sec}]}
+// (autotest.js's soak section says what each does). A soak may carry `notes` (its runs and pass bars, as text).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +17,9 @@ import { fileURLToPath } from 'node:url';
 export const SOAK_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(SOAK_DIR, '..', '..', '..');
 const TRACE_SETS = ['am', 'tp', 'gpu', 'disk', 'full', 'tpo'];
-const PHASE_KEYS = new Set(['name', 'description', 'sec', 'where', 'settleSec', 'tele', 'waitFill', 'vars', 'webkitLowMemory', 'pageGcEverySec', 'audioOff', 'walk', 'walkEveryMs', 'lm', 'background', 'traces']);
+const PHASE_KEYS = new Set(['name', 'description', 'sec', 'where', 'settleSec', 'tele', 'waitFill', 'vars', 'webkitLowMemory', 'pageGcEverySec', 'audioOff', 'walk', 'walkEveryMs', 'lm', 'settings', 'background', 'traces']);
+/** (bots ideas, round 4: I model) a phase's `settings`: Settings › Bot chat's rows, and the values each offers */
+export const SOAK_SETTINGS = Object.freeze({ botChat: ['rules', 'local', 'online'], botThink: [false, true], botAmbient: ['rules', 'model'] });
 
 /** A soak by name (web/test/perf/<name>.json) or path, checked; `bots` (app-test --bots) takes the soak's place. */
 export function loadSoak(nameOrPath, { bots } = {}) {
@@ -85,6 +89,13 @@ function checkSoak(soak) {
         }
         if (p.vars !== undefined && !(p.vars && typeof p.vars === 'object' && Object.entries(p.vars).every(([k, v]) => /^[a-z0-9_]+$/.test(k) && Number.isInteger(v)))) {
             problems.push(`${at}: vars is {varp: integer}`);
+        }
+        // (bots ideas, round 4: I model)
+        if (p.settings !== undefined && !(p.settings && typeof p.settings === 'object' && Object.keys(p.settings).length > 0 && Object.entries(p.settings).every(([k, v]) => SOAK_SETTINGS[k]?.includes(v)))) {
+            problems.push(`${at}: settings is {${Object.entries(SOAK_SETTINGS).map(([k, v]) => `${k}: ${v.join('|')}`).join(', ')}} (one or more)`);
+        }
+        if (p.where === 'title' && p.settings) {
+            problems.push(`${at}: Bot chat's settings are set in the world (a phase after the login)`);
         }
         for (const t of p.traces ?? []) {
             if (!TRACE_SETS.includes(t?.set) || !(t.sec > 0) || !(t.at >= 0)) {

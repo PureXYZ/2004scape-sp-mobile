@@ -1760,6 +1760,11 @@ try {
         await tapElement(`#section-botchat .seg[data-setting="botChat"] button[data-value="${value}"]`);
         await sleep(150);
     };
+    // (bots ideas, round 4: I model) Bots' own talk: its row, as thinkRow
+    const ambientRow = () => evaluate(`(() => { const row = document.getElementById('botchat-ambient'); const r = row?.getBoundingClientRect(); const s = document.getElementById('settings-pane');
+        return { shown: !!row && !row.hidden && row.offsetHeight > 0, choices: row ? [...row.querySelectorAll('.seg button')].map(b => b.textContent) : [], on: row ? [...row.querySelectorAll('.seg button.on')].map(b => b.textContent) : [],
+            hint: row?.querySelector('.data-detail')?.textContent ?? '', row: r ? [r.left, r.top, r.right, r.bottom].map(Math.round) : null, fits: s.scrollHeight <= s.clientHeight + 1, setting: window.LostCityHost.settings.botAmbient,
+            unused: !!row?.classList.contains('unused'), disabled: row ? [...row.querySelectorAll('.seg button')].map(b => b.disabled) : [], oneLine: row ? row.querySelector('.data-name').getBoundingClientRect().height < 30 : false }; })()`);
     const lmStatus = think => evaluate(`window.LostCityHost.bots.lmStatus({ local: { available: true, loaded: false, name: '2004 chat (Qwen3.5 0.8B + LoRA)', bytes: 529297472, think: ${JSON.stringify(think)} }, online: { keySet: true, hint: '…a1b2', valid: true } })`);
     const noThink = await thinkRow();
     check('...Think first hidden: the status says the model never writes its note (no native here)', !noThink.shown && typeof noThink.setting === 'boolean', JSON.stringify(noThink));
@@ -1771,8 +1776,11 @@ try {
     await chatModel('local');
     const think = await thinkRow();
     await screenshot('botchat-think');
+    const ambientUsed = await ambientRow();
+    check("...(bots ideas, round 4) On-device: Bots' own talk in use, Rules / Model (Rules, its default), its hint, its name on one line, in the safe area", ambientUsed.shown && !ambientUsed.unused && same(ambientUsed.choices, ['Rules', 'Model']) && same(ambientUsed.on, ['Rules']) && ambientUsed.setting === 'rules' && ambientUsed.hint === 'Talk between bots near you' && same(ambientUsed.disabled, [false, false]) && ambientUsed.oneLine && ambientUsed.row[0] >= SAFE.left && ambientUsed.row[2] <= VIEW.width - SAFE.right && (ambientUsed.fits || VIEW.height / ZOOM < 375), JSON.stringify(ambientUsed));
     // (on screen without scrolling at an iPhone's 375 HUD px and up; Android's 2.625 phones have 360 (the pixel snap):
-    // there the page with Think first may scroll a few px, as on iOS with Display Zoom)
+    // there the page with Think first may scroll a few px, as on iOS with Display Zoom. (Bots ideas, round 4 fixes) Since
+    // the page's rows are tighter on a layer under 370 HUD px it fits there too: gallery.mjs's botchat checks it from 320)
     check('...On-device: Think first in use, Off / On (at its default), with its hint; the page still in the safe area, on screen without scrolling', think.shown && !think.unused && think.grey !== thinkRules.grey && same(think.disabled, [false, false]) && same(think.choices, ['Off', 'On']) && same(think.on, [think.setting ? 'On' : 'Off']) && think.hint.startsWith('The bots plan each reply first') && think.panel[0] >= SAFE.left && think.panel[2] <= VIEW.width - SAFE.right && think.panel[1] >= 0 && think.panel[3] <= VIEW.height && (think.fits || VIEW.height / ZOOM < 375), JSON.stringify(think));
     await tapElement('#botchat-think .seg button[data-value="true"]');
     await sleep(150);
@@ -1792,6 +1800,8 @@ try {
     await tapElement('#botchat-think .seg button[data-value="false"]');
     await chatModel('rules'); // (as before: no native here)
     await sleep(150);
+    const ambientRules = await ambientRow();
+    check("...(bots ideas, round 4) Rules: Bots' own talk greyed out (Rules / Model disabled, Rules shown, \"Only with a chat model (not Rules).\")", ambientRules.shown && ambientRules.unused && same(ambientRules.disabled, [true, true]) && same(ambientRules.on, ['Rules']) && ambientRules.hint === 'Only with a chat model (not Rules).', JSON.stringify(ambientRules));
     await lmStatus('always');
     await sleep(100);
     const always = await thinkRow();

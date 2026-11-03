@@ -35,6 +35,9 @@ import { Items } from '#/engine/bot/BotKnowledge.js';
 import { pressInvButtonExact, walkDialogue, type DialogueWalk } from '#/engine/bot/port/BotScreens.js';
 import { botReactionTicks } from '#/engine/bot/port/BotTiming.js';
 import { carriedFood, eatBestFood } from '#/engine/bot/tasks/BotTaskBase.js';
+// ---- (bots ideas, round 2: arcs foundation) a duel's end on the bus (port/BotArcsEvents: theme C's tilt and elation) ----
+import { emitArcs } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- end of the arcs foundation's block ----
 
 /** %duelstatus (game_duelarena/configs/duelarena.constant) */
 export const DuelStatus = { RESET: 0, RECEIVED: 1, PENDING_ACCEPT: 2, ACCEPT: 3, PENDING_CONFIRM: 4, CONFIRM: 5, START: 6, LOST: 7, VICTORY: 8, OPPONENT_RESIGNED: 9 } as const;
@@ -442,6 +445,10 @@ export class DuelSession {
             return null;
         }
         if (now - this.facts.endedAt < 20 && (inFightZone(bot.x, bot.z, bot.level) || (this.won && !this.sawWin))) return null;
+        // ---- (bots ideas, round 2: arcs foundation) the duel's end on the bus, once a duel: the winning bot's side, or the
+        // losing bot's when a human won ----
+        if (partner && (this.won || partner.is_bot !== true)) emitArcs({ k: 'duel', winner: this.won ? bot : partner, loser: this.won ? partner : bot, stake: this.facts.stake });
+        // ---- end of the arcs foundation's block ----
         return this.end(bot, this.won ? 'won' : 'lost');
     }
 

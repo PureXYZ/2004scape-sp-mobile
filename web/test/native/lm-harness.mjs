@@ -6,7 +6,11 @@
 // back (a refused key, rate limits, overload, a server error, a refusal, an empty reply), the Test (no fallback), a slow
 // API given up on in time, and 'busy' past 3 at once; the requests' think (Settings › Bot chat › Think first) with a model
 // that offers the choice (template 'qwen-chatml-hybrid'): no note when off, the note first when on (also on Claude's
-// fallback to the model), the note never in the reply, the timings' noteTokens; and the templates that decide alone. Last
+// fallback to the model), the note never in the reply, the timings' noteTokens; and the templates that decide alone;
+// (bots ideas, round 4) the bots' own talk (`ambient`): the on-device model even with Claude online and a key, refused
+// 'hot' at thermal fair (a reply still answered), 'busy' behind a reply, 'unavailable' while resting, never the note,
+// the model's queue serving the replies first, (round 4 fixes) one running stopped by a reply ('busy') and not counted
+// toward the replies' 3, a load for it, the counters. Last
 // it checks every request the mock got: the API's fields, as docs/ARCHITECTURE.md §7.1 lists them (a request the mock
 // found wrong fails the run: Claude online ignores think). No real API call, no key.
 //

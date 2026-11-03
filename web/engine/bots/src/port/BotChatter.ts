@@ -34,6 +34,7 @@ import ObjType from '#/cache/config/ObjType.js';
 import type Player from '#/engine/entity/Player.js';
 import { PlayerStat } from '#/engine/entity/PlayerStat.js';
 import World from '#/engine/World.js';
+import Environment from '#/util/Environment.js';
 import { BotManager } from '#/engine/bot/BotManager.js';
 import { BotChat } from '#/engine/bot/port/BotChat.js';
 import { wildernessLevelAt } from '#/engine/bot/port/BotContent.js';
@@ -72,6 +73,18 @@ import { inThread, startThread } from '#/engine/bot/port/BotThreads.js';
 import { voiceFree } from '#/engine/bot/port/BotVoice.js';
 import { dropBrag, respondTo } from '#/engine/bot/port/BotWitness.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+// ---- (bots ideas, round 2: arcs foundation) the bus: every event noted, every level-up (port/BotArcsEvents) ----
+import { emitArcs, statIndexOf, type SaidTags } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- (bots ideas, round 2: C arcs) theme C's hooks (port/BotLives: a goal's celebration, a mood's idle line, a drop's worth) ----
+import { LIVES, type LivesPending } from '#/engine/bot/port/BotLives.js';
+// ---- end of C's block ----
+// ---- end of the arcs foundation's block ----
+// ---- (bots ideas, round 2: D word) a rumour told in the place of the due line (port/BotRumours, through the hooks) ----
+import { wordHooks } from '#/engine/bot/port/BotWordHooks.js';
+// ---- end of D's block ----
+// ---- (bots ideas, round 3 tune: G period) the period's idle talk (port/BotPeriodTalk, through the leaf) ----
+import { periodTalk } from '#/engine/bot/port/BotPeriod.js';
+// ---- end of G's import ----
 
 /** A moment that comes with a line: going away for a moment, coming back, leaving the game. */
 export type Occasion = 'brb' | 'back' | 'departure';
@@ -117,6 +130,19 @@ const MILESTONE_GAP_TICKS = 3000;
  * 10× XP, with events and level-ups every few minutes, the lines after them were a quarter more idle lines
  */
 const LEVELUP_BURST_CHANCE = 0.25;
+/**
+ * (the ideas work: the talk budget at high XP rates) a level-up line, milestone or not, is said this much less often per
+ * step of the world's XP rate: (1 / rate)^0.6, so 1 at 1×, 0.25 at 10×, 0.14 at 25×, 0.1 at 50× (a 99 always may). At 10×
+ * a bot reached a milestone every few minutes, and with 500 bots online its level-up lines, the gz they drew and the
+ * thanks after them were about 2.3 lines a bot-hour against 0.6 at 1× (H7 14.6, band 4-10): a 2004 player announced a
+ * notable level, not every level an hour brought
+ */
+const LEVELUP_RATE_EXPONENT = 0.6;
+/** the world's XP rate as level-up lines feel it (1 when unset) */
+function levelUpRateDamp(): number {
+    const rate = Environment.node.xpRate;
+    return typeof rate === 'number' && rate > 1 ? Math.pow(1 / rate, LEVELUP_RATE_EXPONENT) : 1;
+}
 const EVENT_BURST_CHANCE = 0.5;
 /** a newbie's first line comes this many ticks after it logs in (1-4 minutes) */
 const NEWBIE_FIRST_LINE: [number, number] = [60, 240];
@@ -237,6 +263,9 @@ interface Pending {
     stat?: string;
     level?: number;
     cb?: number | null;
+    // ---- (bots ideas, round 2: C arcs) a goal's celebration in the level-up line's place (port/BotGoals) ----
+    arc?: LivesPending;
+    // ---- end of C's block ----
 }
 
 interface ChatState {
@@ -457,6 +486,9 @@ export function calm(bot: Player, now: number = World.currentTick): boolean {
  */
 export function noteEvent(bot: Player, name: string, data: { level?: number; stat?: string; kind?: string; item?: string } = {}): void {
     const now = World.currentTick;
+    // ---- (bots ideas, round 2: arcs foundation) every event of a bot on the bus, with its data ----
+    if (bot.is_bot === true) emitArcs({ k: 'event', bot, name, item: data.item, kind: data.kind, level: data.level, stat: data.stat });
+    // ---- end of the arcs foundation's block ----
     const st = states.get(bot);
     if (!st) return;
     st.events.set(name, { tick: now, ...data });
@@ -488,7 +520,8 @@ function observe(bot: Player, st: ChatState, now: number): void {
         st.lowSince = -1;
         // (the realism work's phase 5a, Track F: its carelessness halves for the session, a second death within 30
         // minutes ends its plan: port/BotFumble; one on White Wolf Mountain is the wolves' doing: "stupid wolves")
-        noteDeath(bot);
+        // (bots ideas, round 2: arcs foundation: and whether it was in the Wilderness, for the bus's 'death')
+        noteDeath(bot, wild);
         if (onWhiteWolfMountain(st.x, st.z)) noteEvent(bot, 'wolves');
     }
     st.lastSeen = now;
@@ -718,6 +751,9 @@ function poll(bot: Player, st: ChatState, now: number): void {
                 if (st.inv.has(id)) continue;
                 const obj = ObjType.get(id);
                 const name = (obj?.debugname ?? '').toLowerCase();
+                // ---- (bots ideas, round 2: C arcs) a pick-up's worth (port/BotMoods: elation, the big-drop leave) ----
+                LIVES.dropValue?.(bot, id);
+                // ---- end of C's block ----
                 // (variety round 1, P3: the item, as a line's {item} names it: "omg rune med")
                 const item = itemSay(obj?.name ?? '') ?? undefined;
                 if (name === 'big_bones') noteEvent(bot, 'big-bones', { item });
@@ -883,6 +919,10 @@ function sayDue(bot: Player, st: ChatState, now: number): boolean {
         return true;
     }
     if (!voiceFree(bot, now)) return false;
+    // ---- (bots ideas, round 2: D word) a rumour it knows, now and then, told instead of the due line (port/BotRumours:
+    // LineKind 'rumour', out of H7; the due line's place, so nothing is added) ----
+    if (!ctx.newbie && wordHooks.dueLine?.(bot, now)) return true;
+    // ---- end of D's block ----
     // (variety round 2, S2-1: now and then the line due opens a thread with a bot near it: port/BotThreads)
     // (in a crowd less often: a bank of 30 at 500 online is no more talk with each than a spot of 4)
     const crowdShare = Math.min(1, THREAD_CROWD / Math.max(1, ctx.near.length));
@@ -890,6 +930,14 @@ function sayDue(bot: Player, st: ChatState, now: number): boolean {
         talk.threads++;
         return true;
     }
+    // ---- (bots ideas, round 2: C arcs) a mood's line in the due idle line's place (tilt, elation, boredom: port/BotMoods) ----
+    if (!ctx.newbie && LIVES.idleLine?.(bot)) return true;
+    // ---- end of C's block ----
+    // ---- (bots ideas, round 3 tune: G period) now and then the period's talk in the due idle line's place ("rock crabs r
+    // so good", "love the new games room": port/BotPeriodTalk periodIdleLine, kind 'idle': H7 stays); theme G off or a free
+    // world: false at once, no dice ----
+    if (!ctx.newbie && periodTalk.idleLine?.(bot)) return true;
+    // ---- end of G's block ----
     const picked = pickLine(ctx, 'idle', Math.random, undefined, st.followUp);
     return picked !== null && say(bot, st, ctx, picked, now);
 }
@@ -930,7 +978,8 @@ function say(bot: Player, st: ChatState, ctx: LineContext, picked: Picked, now: 
     const spoke: SpokeKind = kind === 'newbie' ? 'newbie' : question ? 'question' : kind === 'event' ? 'event' : 'idle';
     // (variety round 1: the line as picked for the registry (SAY-14), its class for the responses near it (SAY-6), its look (P10))
     const cls = heardClassOf(tag, picked.text);
-    speak(bot, text, kind, spoke, picked.to?.player ?? null, correction, now, { raw: picked.text, template: picked.template, cls, style: lineStyle(bot, picked) });
+    // (bots ideas, round 2: arcs foundation: a catchphrase's index on its 'said' event)
+    speak(bot, text, kind, spoke, picked.to?.player ?? null, correction, now, { raw: picked.text, template: picked.template, cls, style: lineStyle(bot, picked), tags: picked.line.phrase !== undefined && picked.line.phrase >= 0 ? { catchphrase: picked.line.phrase } : undefined });
     noteTalk(bot, picked, kind, cls, ctx, now);
     // (variety round 1, S6: a "dance!" comes with a dance; an everyday one since 2026-10-19, port/BotEmote)
     if (tag.emote && (EMOTES as readonly string[]).includes(tag.emote)) everydayEmote(bot, tag.emote as Emote, true);
@@ -998,8 +1047,9 @@ function sayNewbieLine(bot: Player, st: ChatState, ctx: LineContext, now: number
  * the line as picked, before its style, and a slot line's `template`: the registry's keys (SAY-14, P3); `cls` its class
  * for the responses near it (SAY-6); `style` its colour and effect (P10).)
  */
-function speak(bot: Player, text: string, kind: LineKind, spoke: SpokeKind, to: Player | null, correction: string | null, now: number, opts: { raw?: string; template?: string; cls?: HeardClass; style?: ChatStyle } = {}): void {
-    botSay(bot, text, opts.style, kind, to);
+function speak(bot: Player, text: string, kind: LineKind, spoke: SpokeKind, to: Player | null, correction: string | null, now: number, opts: { raw?: string; template?: string; cls?: HeardClass; style?: ChatStyle; tags?: SaidTags } = {}): void {
+    // (bots ideas, round 2: arcs foundation: `tags`, what its 'said' event carries)
+    botSay(bot, text, opts.style, kind, to, opts.tags);
     noteSaid(bot, opts.raw ?? text, now, opts.template);
     noteSpoke(bot, spoke, now, to, opts.cls);
     if (correction !== null) {
@@ -1091,6 +1141,15 @@ export function chatterLevelUp(bot: Player, stat: string, level: number, milesto
     const since = now - st.lastLevelUp;
     st.lastLevelUp = now;
     st.events.set('levelup', { tick: now, level, stat });
+    // ---- (bots ideas, round 2: arcs foundation) every level-up on the bus (theme C's goals, a 99) ----
+    emitArcs({ k: 'levelup', bot, stat: statIndexOf(stat), skill: stat, level, milestone });
+    // ---- end of the arcs foundation's block ----
+    // ---- (bots ideas, round 2: C arcs) a level-up that completed the bot's goal: its celebration ("finally 60 wc!!") in
+    // the level-up line's pending slot (80 % with company, 30 % alone: port/BotGoals). Where the level-up's own line would
+    // have been said (its roll below) the celebration is that line, the bots near may gz it; else it is said in the place
+    // of the bot's next due line and goes to nobody for a gz (no line added: H7, C8) ----
+    const arc = LIVES.levelUp?.(bot, stat, level) ?? null;
+    // ---- end of C's block ----
     const chatty = Math.min(1, st.persona.chattiness / 15);
     let chance: number;
     // (variety round 1, P2: alone, a level-up line half as often, 99 always)
@@ -1098,17 +1157,44 @@ export function chatterLevelUp(bot: Player, stat: string, level: number, milesto
     // (variety round 2, S2-6: a bot quiet for 10 minutes or more, in a spell of grinding in silence, says one less often:
     // a level-up at 10x XP was the commonest line alone in a 10-minute window, H6)
     const spell = level < 99 && inQuietSpell(bot, now) ? QUIET_SPELL_LEVELUP : 1;
-    if (milestone) chance = (0.55 + 0.4 * chatty) * (level >= 99 ? 1 : Math.min(1, (now - st.lastLevelUpLine) / MILESTONE_GAP_TICKS)) * alone * spell;
+    // (the ideas work: fewer at a high XP rate, a 99 always may)
+    const rate = level < 99 ? levelUpRateDamp() : 1;
+    if (milestone) chance = (0.55 + 0.4 * chatty) * (level >= 99 ? 1 : Math.min(1, (now - st.lastLevelUpLine) / MILESTONE_GAP_TICKS)) * alone * spell * rate;
     else {
-        if (level < 5 || now - st.lastLevelUpLine < LEVELUP_LINE_TICKS) return;
-        chance = (0.1 + 0.3 * chatty) * Math.min(1, since / LEVELUP_DAMP_TICKS) * alone * spell;
+        // ---- (bots ideas, round 2: C arcs) a celebration's roll as a line not due (chance 0) ----
+        if (level < 5 || now - st.lastLevelUpLine < LEVELUP_LINE_TICKS) {
+            if (!arc) return;
+            chance = 0;
+        }
+        // ---- end of C's block ----
+        else chance = (0.1 + 0.3 * chatty) * Math.min(1, since / LEVELUP_DAMP_TICKS) * alone * spell * rate;
     }
+    // ---- (bots ideas, round 2: C arcs) the celebration in the pending slot: the level-up's line (its roll passed) or one
+    // in the place of the next due line ----
+    if (arc) {
+        const passed = chance > 0 && Math.random() < chance;
+        arc.budget = passed ? 'slot' : 'own';
+        arc.gz = arc.gz && passed;
+        const typing = typingTicks(st.persona, '40 wc done!!');
+        st.pending = { at: now + typing, until: now + typing + EVENT_HOLD_TICKS, what: 'levelup', stat, level, cb, arc };
+        return;
+    }
+    // ---- end of C's block ----
     if (Math.random() >= chance) return;
     const typing = typingTicks(st.persona, '40 wc!!');
     st.pending = { at: now + typing, until: now + typing + EVENT_HOLD_TICKS, what: 'levelup', stat, level, cb };
 }
 
 function sayLevelUp(bot: Player, st: ChatState, p: Pending, now: number): void {
+    // ---- (bots ideas, round 2: C arcs) the goal's celebration said (its line counted in the place of the next due one) ----
+    if (p.arc) {
+        if (LIVES.sayPending?.(bot, p.arc)) {
+            st.lastLevelUpLine = now;
+            afterLine(bot, st, now, false);
+        }
+        return;
+    }
+    // ---- end of C's block ----
     const raw = levelUpLine(p.stat!, p.level!, Math.random, p.cb ?? null);
     const { line, correction } = styleLine(raw, st.persona);
     st.lastLevelUpLine = now;

@@ -1,0 +1,21 @@
+{
+    "description": "The phone heat test of the model for the bots' own talk (bots ideas round 4, theme I stage 1), runs 1 and 2: Varrock West bank with 500 bots, the chat model On-device with Think first, Bots' own talk on Model (the engine's real ambient flow: thread turns and bots' answers near the player, at most one request in 20 s), the player's own chat as a reply every 30 s with the note; then the cap: a reply every 12 s without the note on top (the ambient cap of 180 an hour plus the player's 120). Activity Monitor + FPS + Thermal State samples (3 s) at the marks. Run with the phone's saves backed up.",
+    "bots": 500,
+    "xctrace": true,
+    "notes": [
+        "Run 1 = phases title, hub-baseline, hub-45min (45 min, the real flow). Run 2 = phase cap-30min (30 min, the cap), right after run 1 in the same launch: it starts warm, which the bar allows (it may sit at fair).",
+        "Pass bars (HI-move-model.md §4 I4): thermal never serious; fair at most in the last third of hub-45min; cap-30min may sit at fair.",
+        "Frame rate: median 50 and p05 >= 45 in each 10 s window, against title and hub-baseline (soak.jsonl fps, frames).",
+        "Engine tick: the late p95 (hub-45min's last 15 min) within hub-baseline's p95 + 15 ms (soak.jsonl ticks.tickMs).",
+        "Memory: no memory warning, no model rest, no WebContent termination (the app log: 'memory warning', 'the on-device model rests', 'reloaded during'; soak check 'the page is not reloaded during a phase').",
+        "Replies to the player (the lm list of each phase: the soak's own generations, and the app log's '[lm] #N local' lines that are not '(ambient)'): median <= 1.6 s plain / 2.5 s with the note, p95 <= 4 s, no 'busy' because of the bots' own talk (the app log's 'ambient refused' lines say when one was refused for a reply, never the other way).",
+        "The bots' own talk: its requests and outcomes in the app log ('[bots] model #N <bot> thread (ambient): ...', native's '#N local (ambient)', 'ambient refused (...)'); the phase summaries' chat.counters (ambient, ambientRefused).",
+        "Battery: report only (native.battery every 15 s), %/h against a model-off run of the same length (the off variant); above +25 % relative is flagged."
+    ],
+    "phases": [
+        { "name": "title", "where": "title", "settleSec": 10, "sec": 60, "traces": [{ "set": "am", "at": 2, "sec": 3, "tag": "-a" }] },
+        { "name": "hub-baseline", "tele": "0,49,53,49,44", "waitFill": 300, "settings": { "botChat": "local", "botThink": true, "botAmbient": "rules" }, "settleSec": 30, "sec": 300, "traces": [{ "set": "am", "at": 120, "sec": 3, "tag": "-a" }] },
+        { "name": "hub-45min", "settings": { "botChat": "local", "botThink": true, "botAmbient": "model" }, "lm": { "everySec": 30, "think": true }, "settleSec": 30, "sec": 2700, "traces": [{ "set": "am", "at": 120, "sec": 3, "tag": "-a" }, { "set": "am", "at": 900, "sec": 3, "tag": "-b" }, { "set": "am", "at": 1800, "sec": 3, "tag": "-c" }, { "set": "am", "at": 2640, "sec": 3, "tag": "-d" }] },
+        { "name": "cap-30min", "settings": { "botChat": "local", "botThink": true, "botAmbient": "model" }, "lm": { "everySec": 12, "think": false }, "settleSec": 10, "sec": 1800, "traces": [{ "set": "am", "at": 120, "sec": 3, "tag": "-a" }, { "set": "am", "at": 900, "sec": 3, "tag": "-b" }, { "set": "am", "at": 1740, "sec": 3, "tag": "-c" }] }
+    ]
+}

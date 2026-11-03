@@ -21,7 +21,7 @@ import InvType from '#/cache/config/InvType.js';
 import { PlayerStat } from '#/engine/entity/PlayerStat.js';
 import { Items, Locations, SkillProgression, type SkillStep } from '#/engine/bot/BotKnowledge.js';
 import { getBaseLevel, countItem } from '#/engine/bot/BotAction.js';
-import { bankInvId, edibleFoodIds } from '#/engine/bot/tasks/BotTaskBase.js';
+import { bankInvId, carriedFood, edibleFoodIds, isInventoryFull } from '#/engine/bot/tasks/BotTaskBase.js';
 import ObjType from '#/cache/config/ObjType.js';
 import { bankedId } from '#/engine/bot/port/BotInventoryCompat.js';
 import { CombatTask, combatWeaponFor, fitToFight } from '#/engine/bot/tasks/CombatTask.js';
@@ -36,8 +36,16 @@ import { bestMeleeWeapon, stripForWilderness, wearCarried } from '#/engine/bot/p
 import { wildernessLevelAt } from '#/engine/bot/port/BotContent.js';
 import World from '#/engine/World.js';
 import { ErrandTask, act, bank, fight, inner, obj, owned, say, soft, talk, walk, when, withinRange, type At, type ErrandPlan, type Step } from '#/engine/bot/tasks/ErrandTask.js';
+// (bots ideas, Track A: the endgame's spots among the trips: its leaf modules)
+import { BosserErrand, emitEndgameEvent, tripsAt } from '#/engine/bot/port/BotEndgameCore.js';
+import { fightWatcher, foodIds, foodWithdraw, goodFoodCarried, goodFoodOwned, FOOD_CARRY, FOOD_GATE } from '#/engine/bot/port/BotEndgameFight.js';
+// ---- (bots ideas, round 2: D word) theme D's hooks (port/BotWordHooks: rumours, ties) ----
+import { wordHooks } from '#/engine/bot/port/BotWordHooks.js';
+// ---- end of D's block ----
 
 const EDGEVILLE_BANK = Locations.EDGEVILLE_BANK as At;
+/** (bots ideas, Track A) the endgame spots' capacities (the Ruins 2, the fire giants 2, the red dragons 1) */
+const WILD_ENDGAME_CAP: Readonly<Record<string, number>> = { ruins: 2, firegiants: 2, reddragons: 1 };
 /** where 274 puts a player who died (Lumbridge's courtyard) */
 const LUMBRIDGE_SPAWN: At = [3222, 3218, 0];
 const level = (p: Player, stat: PlayerStat): number => getBaseLevel(p, stat);
@@ -61,6 +69,17 @@ interface WildSpot {
     step(): SkillStep;
     /** the anti-dragon shield first */
     shield?: boolean;
+    // ---- (bots ideas, Track A: the period endgame) an endgame spot's own: offered this far from the bot (the deep spots
+    // lie 366-512 steps north of the ditch: OFFER_RANGE's 300 never reached Edgeville), and its trip a bosser's (the role
+    // 'bosser', its drop moments, its death in the endgame's log: port/BotEndgameCore) ----
+    range?: number;
+    endgame?: boolean;
+    /** the walk's waypoints on the way (and back, the other way round): the deep dungeon's stairs stand in a fenced
+     * corner entered by the members' gate at 2948,3904 from the west, which no walk found (two rescue jumps a trip) */
+    via?: readonly At[];
+    /** where the trip comes up from its dungeon (the walk home starts there) */
+    surface?: At;
+    // ---- end of Track A's fields ----
 }
 
 const spotsMemo = new Map<string, SkillStep>();
@@ -89,11 +108,20 @@ export const WILD_SPOTS: readonly WildSpot[] = [
     { key: 'runite', kind: 'mine', fits: p => level(p, PlayerStat.MINING) >= 85 && p.combatLevel >= 50, step: () => (SkillProgression.MINING ?? []).find(s => s.location === Locations.MINE_RUNITE)! },
     // (the variety work, round 2, the fixes: not for a bot whose best weapon is a two-hander: no shield beside it, and its
     // fight's bank stop wields it again, the shield to the bank)
-    { key: 'greendragons', kind: 'fight', members: true, shield: true, fits: p => p.combatLevel >= 65 && !twoHanderBest(p), step: memo('greendragons', () => fightStep(3098, 3814, ['green_dragon'], 60, 99, Items.MITHRIL_SCIMITAR ?? Items.IRON_SCIMITAR)) }
+    { key: 'greendragons', kind: 'fight', members: true, shield: true, fits: p => p.combatLevel >= 65 && !twoHanderBest(p), step: memo('greendragons', () => fightStep(3098, 3814, ['green_dragon'], 60, 99, Items.MITHRIL_SCIMITAR ?? Items.IRON_SCIMITAR)) },
+    // ---- (bots ideas, Track A: the period endgame, A2) the Wilderness's endgame spots, under today's WILD_SHARE (WT1
+    // holds): the Demonic Ruins' four greater demons (45-47; the probe: 17 kills in 15 minutes on 7 swordfish at combat
+    // 87), the deep Wilderness dungeon's five fire giants (51-53, by its stairs and three gates: BotKnowledge
+    // DUNGEON_ENTRIES; 16 in 15 minutes), the red dragons (38-42, combat 100+, the anti-dragon shield) ----
+    { key: 'ruins', kind: 'fight', members: true, range: 420, endgame: true, fits: p => p.combatLevel >= 75, step: memo('ruins', () => fightStep(3290, 3882, ['greater_demon'], 70, 99, Items.ADAMANT_SCIMITAR ?? Items.MITHRIL_SCIMITAR)) },
+    { key: 'firegiants', kind: 'fight', members: true, range: 450, endgame: true, via: [[2949, 3895, 0], [2958, 3924, 0]], surface: [3044, 3928, 0], fits: p => p.combatLevel >= 75, step: memo('firegiants', () => ({ ...fightStep(3049, 10342, ['firegiant'], 70, 99, Items.ADAMANT_SCIMITAR ?? Items.MITHRIL_SCIMITAR), extra: { npcTypes: ['firegiant'], hitsToKill: 10, dungeon: true } })) },
+    // (the red dragons' ground is entered by the members' gate at 3202,3856 from its north: round by 3248,3846)
+    { key: 'reddragons', kind: 'fight', members: true, shield: true, range: 420, endgame: true, via: [[3246, 3848, 0], [3212, 3859, 0]], fits: p => p.combatLevel >= 100 && !twoHanderBest(p), step: memo('reddragons', () => fightStep(3200, 3836, ['red_dragon'], 90, 99, Items.ADAMANT_SCIMITAR ?? Items.MITHRIL_SCIMITAR)) }
+    // ---- end of Track A's spots ----
 ];
 
 /** (the fixes) is the best melee weapon the bot owns (worn, carried, banked: CombatTask's pick) a two-hander? */
-function twoHanderBest(p: Player): boolean {
+export function twoHanderBest(p: Player): boolean { // (bots ideas, Track A, round 1 fixes: A5, shared with the endgame's shield spots and the KBD)
     const bid = bankInvId();
     const best = bestMeleeWeapon(p, [p.getInventory(InvType.WORN), p.getInventory(InvType.INV), bid === -1 ? null : p.getInventory(bid)]);
     return best !== undefined && ObjType.get(best.id).wearpos2 === 5;
@@ -131,7 +159,7 @@ export const wildStats = { trips: {} as Record<string, number>, shields: 0 };
 // ── the trip ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** its worn rares to the bank (as BotGear's bank stops take armour off: the bank's own inventory), at a bank */
-function bankWornRares(): Step {
+export function bankWornRares(): Step { // (bots ideas, Track A: shared with the endgame's trips)
     return act('rares to the bank', p => {
         const worn = p.getInventory(InvType.WORN);
         const bid = bankInvId();
@@ -151,7 +179,7 @@ function bankWornRares(): Step {
  * worn after. The act ignored wearCarried's answer: the shield stayed in the pack over an armour shield, and went on beside
  * a two-hander, and the bot fought the dragons without it
  */
-function wearDragonShield(p: Player, shield: number): boolean {
+export function wearDragonShield(p: Player, shield: number): boolean { // (bots ideas, Track A: shared with the endgame's trips)
     const worn = p.getInventory(InvType.WORN);
     const bid = bankInvId();
     const bankInv = bid === -1 ? null : p.getInventory(bid);
@@ -172,7 +200,7 @@ function wearDragonShield(p: Player, shield: number): boolean {
 }
 
 /** (the fixes) the anti-dragon shield back to the bank at the trip's end (the bot's own shield goes on at its next fight's bank stop) */
-function bankDragonShield(shield: number): Step {
+export function bankDragonShield(shield: number): Step { // (bots ideas, Track A: shared with the endgame's trips)
     return act('shield off', p => {
         const worn = p.getInventory(InvType.WORN);
         const bid = bankInvId();
@@ -206,7 +234,7 @@ function watcher(): (p: Player) => void {
 
 function trip(spot: WildSpot): ErrandPlan {
     const food = (): number[] => edibleFoodIds();
-    return {
+    const plan: ErrandPlan = {
         // (a mining trip's time is mining in the 2004 mix: its own kind, WildMine; a fight's WildTrip, combat)
         kind: spot.kind === 'mine' ? 'WildMine' : 'WildTrip',
         key: spot.key,
@@ -214,12 +242,16 @@ function trip(spot: WildSpot): ErrandPlan {
         members: spot.members,
         ok(p) {
             const step = spot.step();
-            if (spot.kind === 'fight') return combatWeaponFor(p, step) !== null && fitToFight(p, step);
+            // (bots ideas, Track A, round 1 fixes: A4, an endgame spot's food gate, as the solo trips': FOOD_GATE pieces of
+            // food that heal 12 or more owned; a bot with none at full Hitpoints went to the greater demons)
+            if (spot.kind === 'fight') return combatWeaponFor(p, step) !== null && fitToFight(p, step) && (!spot.endgame || goodFoodOwned(p) >= FOOD_GATE);
             if (spot.kind === 'mine') return step.toolItemIds.some(id => owned(p, id) > 0);
             return true;
         },
         build(p) {
             const length = tripTicks[0] + Math.floor(Math.random() * (tripTicks[1] - tripTicks[0]));
+            // (bots ideas, Track A, round 1 fixes: A4, an endgame spot's 15-20 pieces of good food, its die only for one)
+            const carry = spot.endgame ? FOOD_CARRY[0] + Math.floor(Math.random() * (FOOD_CARRY[1] - FOOD_CARRY[0] + 1)) : 0;
             const step = spot.step();
             const best = food().filter(id => owned(p, id) > 0).sort((a, b) => owned(p, b) - owned(p, a))[0] ?? -1;
             const pick = step.toolItemIds.find(id => owned(p, id) > 0) ?? -1;
@@ -230,15 +262,35 @@ function trip(spot: WildSpot): ErrandPlan {
             // again, a death at a skill twice, D1)
             let died = false;
             let wasWild = false;
-            const timeUp = (): boolean => {
+            const deathSeen = (): boolean => {
                 if (wildernessLevelAt(p.x, p.z) > 0) wasWild = true;
-                if (started >= 0 && !died && (p.levels[PlayerStat.HITPOINTS] <= 0 || (wasWild && Math.max(Math.abs(p.x - LUMBRIDGE_SPAWN[0]), Math.abs(p.z - LUMBRIDGE_SPAWN[1])) <= 12))) died = true;
-                return died || (started >= 0 && World.currentTick - started >= length);
+                // (bots ideas, Track A, round 1 fixes: A1, an endgame spot's death looked for from its first step too)
+                if ((started >= 0 || spot.endgame === true) && !died && (p.levels[PlayerStat.HITPOINTS] <= 0 || (wasWild && Math.max(Math.abs(p.x - LUMBRIDGE_SPAWN[0]), Math.abs(p.z - LUMBRIDGE_SPAWN[1])) <= 12))) died = true;
+                // ---- (bots ideas, Track A) an endgame spot's death in the endgame's log, and its event ----
+                if (died && spot.endgame) noteEndgameDeath(plan, p, spot.key);
+                // ---- end of Track A's block ----
+                return died;
             };
-            const watch = watcher();
+            const timeUp = (): boolean => deathSeen() || (started >= 0 && World.currentTick - started >= length);
+            // ---- (bots ideas, Track A, round 1 fixes: A1) an endgame spot's steps on the way there and home each passed
+            // over once it died (its waypoints walked a bot killed on the way from Lumbridge back into the deep
+            // Wilderness, the fight's first look at the spot never saw the death); the other spots' as before ----
+            const alive = (s: Step): Step => (spot.endgame ? { label: s.label, dialog: s.dialog, tick: (q, t) => (deathSeen() ? 'done' : s.tick(q, t)) } : s);
+            // ---- end of Track A's block ----
+            const wildWatch = watcher();
+            // ---- (bots ideas, Track A) an endgame spot's fight: its drop moments and loot (port/BotEndgameFight) too ----
+            const egWatch = spot.endgame ? fightWatcher(null, spot.key) : null;
+            const watch = (q: Player): void => {
+                wildWatch(q);
+                egWatch?.watch(q);
+            };
+            // ---- end of Track A's block ----
             const steps: Step[] = [
                 // (rares to the bank; the trip's food and tool out)
-                bank({ near: EDGEVILLE_BANK, keep: () => [best, pick, shield], withdraw: [[best, spot.kind === 'fight' ? 8 : 0], [pick, spot.kind === 'mine' ? 1 : 0, spot.kind === 'mine'], [shield, spot.shield ? 1 : 0]] }),
+                // (bots ideas, Track A, round 1 fixes: A4, an endgame spot's: its 15-20 pieces of good food, as the solo trips')
+                spot.endgame
+                    ? bank({ near: EDGEVILLE_BANK, keep: () => [...foodIds(), shield], withdraw: q => [...foodWithdraw(carry)(q), [shield, spot.shield ? 1 : 0]] })
+                    : bank({ near: EDGEVILLE_BANK, keep: () => [best, pick, shield], withdraw: [[best, spot.kind === 'fight' ? 8 : 0], [pick, spot.kind === 'mine' ? 1 : 0, spot.kind === 'mine'], [shield, spot.shield ? 1 : 0]] }),
                 // (the variety work, round 2, the fixes: track W2's strip at the booth, every trip's (a mining trip's too): its
                 // show pieces to the bank, the plain pieces it owns on; then any rare left)
                 act('strip', q => {
@@ -247,6 +299,8 @@ function trip(spot: WildSpot): ErrandPlan {
                 }),
                 bankWornRares()
             ];
+            // (bots ideas, Track A, round 1 fixes: A4, no trip on less than the gate's food carried)
+            if (spot.endgame) steps.push(act('food', q => (goodFoodCarried(q) >= Math.min(FOOD_GATE, carry) ? 'done' : 'fail')));
             if (spot.shield) {
                 // (no shield of its own: the Duke gives one to anyone who did Dragon Slayer, every bot)
                 steps.push(
@@ -254,12 +308,16 @@ function trip(spot: WildSpot): ErrandPlan {
                     act('shield on', q => (wearDragonShield(q, shield) ? 'done' : 'fail'))
                 );
             }
+            // (bots ideas, Track A: an endgame spot's waypoints first)
+            if (spot.via) steps.push(...spot.via.map(v => alive(soft(walk(v, 3, 2500, 'via')))));
             steps.push(
                 say('wild-go', 0.4),
-                act('start', () => {
-                    started = World.currentTick;
-                    return 'done';
-                })
+                alive(
+                    act('start', () => {
+                        started = World.currentTick;
+                        return 'done';
+                    })
+                )
             );
             if (spot.kind === 'fight') {
                 steps.push(
@@ -271,7 +329,10 @@ function trip(spot: WildSpot): ErrandPlan {
                                 task.holdStep = true;
                                 return task;
                             },
-                            () => timeUp(),
+                            // (bots ideas, Track A: an endgame spot's fight ends too when its food is down to 2 with its
+                            // Hitpoints under half or its pack is full: its walk home is the trip's (its waypoints), not a
+                            // fight's flight to a bank, stuck in the red dragons' ground and jumped)
+                            q => timeUp() || (spot.endgame === true && endgameFightOver(q)),
                             length + 600,
                             watch
                         )
@@ -298,16 +359,41 @@ function trip(spot: WildSpot): ErrandPlan {
             }
             // (home: the trip over, however it went; a walk that cannot get out leaves the bot to its next task's)
             // (after a death none: the next plan begins where 274 put it)
-            steps.push(when(() => !died, say('wild-back', 0.3), soft(walk(EDGEVILLE_BANK, 4, 3000, 'back to Edgeville')), bank({ near: EDGEVILLE_BANK }), ...(spot.shield ? [bankDragonShield(shield)] : [])));
+            if (egWatch) steps.push(act('loot noted', q => ((egWatch.end(q), 'done')))); // (bots ideas, Track A)
+            // (bots ideas, Track A: an endgame spot's way up and its waypoints back)
+            const back: Step[] = [...(spot.surface ? [soft(walk(spot.surface, 4, 1500, 'up'))] : []), ...(spot.via ? [...spot.via].reverse().map(v => soft(walk(v, 3, 2500, 'via'))) : [])];
+            steps.push(when(() => !died, say('wild-back', 0.3), ...[...back, soft(walk(EDGEVILLE_BANK, 4, 3000, 'back to Edgeville')), bank({ near: EDGEVILLE_BANK }), ...(spot.shield ? [bankDragonShield(shield)] : [])].map(alive)));
             return steps;
         }
     };
+    return plan;
 }
+
+// ---- (bots ideas, Track A: the period endgame) an endgame spot's trip is a bosser's errand (port/BotEndgameCore: the role,
+// the registry, the log), its death marked there ----
+const endgameTasks = new WeakMap<ErrandPlan, BosserErrand>();
+function taskFor(spot: WildSpot, plan: ErrandPlan): ErrandTask {
+    if (!spot.endgame) return new ErrandTask(plan);
+    const task = new BosserErrand(plan, 'wild');
+    endgameTasks.set(plan, task);
+    return task;
+}
+function endgameFightOver(p: Player): boolean {
+    const hp = p.levels[PlayerStat.HITPOINTS] / Math.max(1, p.baseLevels[PlayerStat.HITPOINTS]);
+    return (carriedFood(p) <= 2 && hp < 0.5) || isInventoryFull(p);
+}
+function noteEndgameDeath(plan: ErrandPlan, p: Player, key: string): void {
+    const task = endgameTasks.get(plan);
+    if (!task || task.died) return;
+    task.died = true;
+    emitEndgameEvent(p, 'bossDeath', { spot: key });
+}
+// ---- end of Track A's block ----
 
 /** a trip's task to this spot (the tests'; the planner's through wildTripFor) */
 export function wildTripTask(key: string): ErrandTask | null {
     const spot = WILD_SPOTS.find(s => s.key === key);
-    return spot ? new ErrandTask(trip(spot)) : null;
+    return spot ? taskFor(spot, trip(spot)) : null;
 }
 
 /**
@@ -316,7 +402,9 @@ export function wildTripTask(key: string): ErrandTask | null {
  */
 export function wildTripFor(p: Player, roll: number = Math.random()): ErrandTask | null {
     if (roll >= WILD_SHARE || !isLevelling(p.botPlanner as PlannerKey) || isNewbie(p) || !isWildBold(p.username)) return null;
-    const open = WILD_SPOTS.filter(s => (!s.members || isMembersWorld()) && s.fits(p) && withinRange(p, [s.step().location[0], s.step().location[1], 0]));
+    // (bots ideas, Track A: an endgame spot's own range, its capacity: port/BotEndgameCore's registry)
+    // (bots ideas, round 2: D word: not a spot it heard of pkers at lately: port/BotRumours)
+    const open = WILD_SPOTS.filter(s => (!s.members || isMembersWorld()) && s.fits(p) && withinRange(p, [s.step().location[0], s.step().location[1], 0], s.range) && (!s.endgame || tripsAt(s.key) < WILD_ENDGAME_CAP[s.key]) && !wordHooks.wildTripAvoid?.(p, s.step().location[0], s.step().location[1]));
     const plans = open.map(trip).filter(plan => !plan.ok || plan.ok(p));
     if (plans.length === 0) return null;
     // (the variety work, round 2, the fixes: a fight four times as likely as a mine: the trips hold their spot now (WT1
@@ -332,5 +420,5 @@ export function wildTripFor(p: Player, roll: number = Math.random()): ErrandTask
         }
     }
     wildStats.trips[plan.key] = (wildStats.trips[plan.key] ?? 0) + 1;
-    return new ErrandTask(plan);
+    return taskFor(WILD_SPOTS.find(s => s.key === plan.key)!, plan);
 }

@@ -22,8 +22,24 @@ import '#/engine/bot/port/BotModBot.js';
 // (the variety work, round 2, Track M: members places and minigames: the far towns' outings and the minigames through the
 // planner's hook, after the arena's)
 import '#/engine/bot/port/BotMinigames.js';
+// ---- (bots ideas, round 3: G period) theme G: the update buzz's planner hook beside the members hook (after it, before
+// the show-off visits), its keep hook, the rescue jumps' listener, and the G and H builders' theme G modules
+// (port/BotPeriodIndex) ----
+import '#/engine/bot/port/BotPeriodIndex.js';
+// ---- end of G period's block ----
 // (Track W2 after Track M: a bot on an outing keeps it, and no show-off visit asks for it)
 // (the variety work, round 2, Track W2: fashion: a rich bot's show-off visits to the trade hubs, through the planner's hook)
 import '#/engine/bot/port/BotShowOff.js';
+
+// ---- (bots ideas, round 2: C arcs) theme C's modules (goals, moods, leaving, whims, 99 parties: port/BotLivesIndex),
+// their listeners on the arcs' bus and their entries in port/BotLives ----
+import '#/engine/bot/port/BotLivesIndex.js';
+// ---- end of C's block ----
+// ---- (bots ideas, round 2: D word) theme D's modules, for their listeners on the arcs' bus and the hooks the shared files
+// ask (port/BotWordHooks): rumours, ties, slang ----
+import '#/engine/bot/port/BotRumours.js';
+import '#/engine/bot/port/BotTies.js';
+import '#/engine/bot/port/BotSlang.js';
+// ---- end of D's block ----
 
 export {};

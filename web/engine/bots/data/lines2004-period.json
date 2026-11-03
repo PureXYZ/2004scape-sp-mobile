@@ -1,0 +1,384 @@
+{
+    "about": "The bots ideas work, round 3: theme G's lines of the G builder (period content: kittens and cats, the Games Room's Runelink, Gnomeball, Castle Wars talk in the future tense), in a late-2004 voice, the same shape and rules as lines2004.json: each group's tag says where and when it is true. Each set-piece group's tag carries the event 'period' (never noted on a bot, so the idle picker never says them out of turn), members true, and its kinds by moment (pet-*, games-*, gnomeball-*, cw-*); its lines are said only through port/BotPeriodPlan sayPeriodLine (kind 'setpiece': out of H7, counted in X2, in the place of the speaker's next unprompted line) or port/BotArcsSay sayArcLine with a budget mode. New thread topics' lines go to data/threads.json. Every line (a {slot} filled from the samples the G builder gives in test/chat-filter.test.mjs's G period block) through the 274 filter and charset (test/chat-filter.test.mjs covers every group of GROUPS_2004). (Round 3's tune, 2026-11-01: the talk-* groups (talk-games, talk-gnomeball, talk-kitten, talk-pet, talk-cw) are the period's idle talk, said through port/BotPeriodTalk periodIdleLine in the place of the speaker's due idle line, kind 'idle' (in H7, a substitution); the same event 'period', so the idle picker never says them either.)",
+    "groups": [
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "pet-buy"
+                ],
+                "members": true
+            },
+            "lines": [
+                "got a kitten!!",
+                "aww shes so cute",
+                "got a kitty from gertrude",
+                "my new kitten :)",
+                "look at my kitten lol",
+                "100gp for a kitten, worth it",
+                "i got a kitten"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "pet-feed"
+                ],
+                "members": true
+            },
+            "lines": [
+                "brb feeding my kitten",
+                "feeding my kitty",
+                "kitten was hungry lol",
+                "gotta feed my kitten"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "pet-lost"
+                ],
+                "members": true
+            },
+            "lines": [
+                "noo my kitten ran away",
+                "omg my kitten ran off",
+                "forgot to feed my kitten lol",
+                "my kitty ran away :(",
+                "nooo my kitten"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "pet-grow"
+                ],
+                "members": true
+            },
+            "lines": [
+                "my kitten grew into a cat!!",
+                "my kitten is a cat now",
+                "omg my kitten grew up",
+                "my kitty is all grown up"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "games-go"
+                ],
+                "members": true
+            },
+            "lines": [
+                "going to the games room",
+                "off to play runelink",
+                "gonna try the new games room",
+                "games room time",
+                "heading to burthorpe for runelink"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "games-there"
+                ],
+                "members": true
+            },
+            "lines": [
+                "new games room!!",
+                "this place is cool",
+                "the games room is sick",
+                "so many tables lol",
+                "where do u sit lol"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "games-call"
+                ],
+                "members": true
+            },
+            "lines": [
+                "any1 wanna play runelink?",
+                "runelink anyone?",
+                "anyone up for runelink",
+                "who wants a game"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "games-gg"
+                ],
+                "members": true
+            },
+            "lines": [
+                "gg wp",
+                "good game",
+                "ggs",
+                "nice game",
+                "gg that was close"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "games-win"
+                ],
+                "members": true
+            },
+            "lines": [
+                "my rank went up",
+                "4 in a row :)",
+                "got u lol",
+                "gg i win",
+                "4 in a row lol"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "games-lose"
+                ],
+                "members": true
+            },
+            "lines": [
+                "lol u got me",
+                "didnt see that",
+                "dang",
+                "gg u got me",
+                "noo i missed that"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "games-rematch"
+                ],
+                "members": true
+            },
+            "lines": [
+                "rematch? lol",
+                "again?",
+                "one more?",
+                "best of 3?"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "gnomeball-go"
+                ],
+                "members": true
+            },
+            "lines": [
+                "gnomeball anyone?",
+                "gonna play some gnomeball",
+                "off to the gnome stronghold",
+                "gnomeball is good agility xp"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "gnomeball-score"
+                ],
+                "members": true
+            },
+            "lines": [
+                "i scored",
+                "goal!",
+                "lol these gnomes",
+                "scored lol",
+                "another goal"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "gnomeball-tackled"
+                ],
+                "members": true
+            },
+            "lines": [
+                "got tackled lol",
+                "ow that gnome tackled me",
+                "these gnomes r rough",
+                "lol tackled again"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "gnomeball-win"
+                ],
+                "members": true
+            },
+            "lines": [
+                "5 goals easy",
+                "i won!",
+                "won a gnomeball",
+                "gnomeball is fun lol"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "gnomeball-leave"
+                ],
+                "members": true
+            },
+            "lines": [
+                "ok done with gnomeball",
+                "bye gnomes",
+                "enough gnomeball for today"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "talk-games"
+                ],
+                "members": true
+            },
+            "lines": [
+                "love the new games room",
+                "games room is so cool",
+                "runelink is addictive lol",
+                "runelink is just connect 4 lol",
+                "the games room is packed",
+                "gonna try runelink later",
+                "runelink is better than draughts",
+                "new games room under burthorpe!"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "talk-gnomeball"
+                ],
+                "members": true
+            },
+            "lines": [
+                "gnomeball is actually fun",
+                "gnomeball is underrated lol",
+                "those gnomeball gnomes r rough",
+                "gnomeball takes forever lol",
+                "gonna play gnomeball later",
+                "gnomeball is so weird lol"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "talk-kitten"
+                ],
+                "members": true
+            },
+            "lines": [
+                "i want a kitten",
+                "kittens r so cute",
+                "thinking of getting a kitten",
+                "every1 has a kitten now lol",
+                "gonna get a kitten soon",
+                "need 100gp for a kitten lol",
+                "kittens r the best pets"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "talk-pet"
+                ],
+                "members": true
+            },
+            "lines": [
+                "love my kitty",
+                "my kitty is so cute",
+                "my kitty follows me everywhere lol",
+                "my kitty keeps meowing lol",
+                "dont step on my kitty lol",
+                "my kitty is the best"
+            ]
+        },
+        {
+            "track": "G",
+            "tag": {
+                "c": "event",
+                "event": "period",
+                "kinds": [
+                    "talk-cw"
+                ],
+                "members": true
+            },
+            "lines": [
+                "castle wars next month cant wait",
+                "castle wars is gonna be huge",
+                "cant wait till castle wars",
+                "castle wars better come out soon",
+                "gonna be sara in castle wars",
+                "castle wars is gonna be so fun"
+            ]
+        }
+    ]
+}

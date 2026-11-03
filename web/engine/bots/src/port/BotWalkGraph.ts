@@ -217,17 +217,38 @@ let aPrev = new Int32Array(0);
 let aStamp = new Int32Array(0);
 let aDone = new Int32Array(0);
 let aGen = 0;
-const CACHE_SIZE = 512;
+// ---- (bots ideas, round 3: H move) route variants: three routes cached per trip
+// (variant 0, today's, and 1 and 2), so the cache holds three times as many: about 100 KB ----
+const CACHE_SIZE = 1536;
+/** a variant's edge costs: each edge's × (1 + VARIANT_NOISE × h), h a hash in [0, 1) of the edge's two nodes and the variant */
+export const VARIANT_NOISE = 0.4;
+/** the edge's hash for variant `v` (1 or 2): the same both ways along the edge (a trip back takes the same variant's way) */
+export function variantHash(a: number, b: number, v: number): number {
+    const lo = a < b ? a : b;
+    const hi = a < b ? b : a;
+    let h = Math.imul(lo + 1, 0x9e3779b1) ^ Math.imul(hi + 1, 0x85ebca77) ^ Math.imul(v, 0xc2b2ae3d);
+    h ^= h >>> 15;
+    h = Math.imul(h, 0x2c1b3c6d);
+    h ^= h >>> 12;
+    h = Math.imul(h, 0x297a2d39);
+    h ^= h >>> 15;
+    return (h >>> 0) / 4294967296;
+}
+// ---- end of H move's variants ----
 
 /**
  * The nodes from `start` to `goal`, both included (A*, Chebyshev), or null when the graph does not join them (another
- * region: a gateway lies between). Cached (the same trips repeat: a bank and a spot).
+ * region: a gateway lies between). Cached (the same trips repeat: a bank and a spot). (Bots ideas, round 1's left-overs:
+ * `stepCost`, a factor of at least 1 on each step from a node to the next, port/BotDanger.fearCost; `allowedKey` names it
+ * too. Bots ideas, round 3, theme H: `variant` 1 or 2, a route variant, each edge's cost noised by variantHash; 0, the
+ * default, today's route.)
  */
-export function route(start: number, goal: number, allowed?: Allowed, allowedKey = ''): number[] | null {
+export function route(start: number, goal: number, allowed?: Allowed, allowedKey = '', stepCost?: (from: number, to: number) => number, variant = 0): number[] | null {
     const g = load();
     if (start < 0 || goal < 0) return null;
     if (start === goal) return [start];
-    const key = `${start}>${goal}>${allowedKey}`;
+    // (bots ideas, round 3: H move) a variant's own entry (variant 0's key as before)
+    const key = `${start}>${goal}>${allowedKey}${variant ? `#${variant}` : ''}`;
     const hit = cache.get(key);
     if (hit !== undefined) {
         cache.delete(key);
@@ -316,7 +337,10 @@ export function route(start: number, goal: number, allowed?: Allowed, allowedKey
             const vx = g.nodeX[v];
             const vz = g.nodeZ[v];
             if (v !== goal && allowed && !allowed(vx, vz)) continue;
-            const c = g.adjCost[e] * (!toWild && inWilderness(vx, vz) ? WILDERNESS_COST : 1);
+            let c = g.adjCost[e] * (!toWild && inWilderness(vx, vz) ? WILDERNESS_COST : 1) * (stepCost ? stepCost(u, v) : 1);
+            // ---- (bots ideas, round 3: H move) a route variant's noise: costs only grow, so the heuristic stays admissible ----
+            if (variant) c *= 1 + VARIANT_NOISE * variantHash(u, v, variant);
+            // ---- end of H move's noise ----
             const nd = dist[u] + c;
             if (nd < (stamp[v] === gen ? dist[v] : Infinity)) {
                 stamp[v] = gen;

@@ -59,6 +59,11 @@ import { DEPTH_FRIENDS, inThread, startThread } from '#/engine/bot/port/BotThrea
 import { voiceFree } from '#/engine/bot/port/BotVoice.js';
 import { logNormal } from '#/engine/bot/port/BotTiming.js';
 import { botFilter } from '#/engine/bot/port/BotFilter.js';
+// ---- (bots ideas, round 2: D word) staggered logins (the arcs' bus: logins, the play clock), the bored follower (theme
+// C's moods, through the bus: none until C provides them) ----
+import { arcsMood, arcsPlay, onArcs } from '#/engine/bot/port/BotArcsEvents.js';
+import { seededRandom } from '#/engine/bot/port/BotSeed.js';
+// ---- end of D's block ----
 
 type Kind = 'levelling' | 'extras_pker' | 'extras_edgeville_pker';
 interface Clique {
@@ -101,9 +106,17 @@ const GREET_BACK_CHANCE: [number, number] = [0.4, 0.3];
 const BYE_RANGE = 15;
 const BYE_NAMED = 0.7;
 const LEAVE_TOGETHER = 0.3;
-/** a friend who leaves too logs out within this many play ticks (its wrap-up after), and says no second goodbye for this long */
-const LEAVE_SOON: [number, number] = [30, 120];
+/**
+ * a friend who leaves too logs out within this many play ticks (its wrap-up after), and says no second goodbye for this
+ * long. (bots ideas, round 2: D word: 1-6 minutes, was 30-120 ticks: friends leaving at once were a tell, the research's
+ * probe D: a fifth of clique logouts within 2 minutes of a mate's)
+ */
+const LEAVE_SOON: [number, number] = [100, 600];
+/** (bots ideas, round 2: D word) the "me too" logout's play ticks before D4, with its clique timing off (setCliqueStaggerForTest) */
+const LEAVE_SOON_BEFORE: [number, number] = [30, 120];
 const NO_SECOND_BYE = 1500;
+/** (bots ideas, round 2: D word) a follower this bored (theme C's moods) skips a clique follow and keeps to its own plan */
+const BORED_FOLLOWER = 0.6;
 
 /** The lines (data/social.json "clique"), for test/chat-filter.test.mjs. */
 export const CLIQUE_LINES = socialJson.clique;
@@ -293,8 +306,81 @@ export function cliqueReturnBonus(name: string, isOnline: (name: string) => bool
     const self = botNameKey(name);
     let n = 0;
     for (const mate of clique.names) if (mate !== self && isOnline(mate)) n++;
+    // ---- (bots ideas, round 2: D word) only after this mate's stagger since the clique's last login, and only for the
+    // mates that answer the call at all (staggerOk) ----
+    if (n > 0 && !staggerOk(self, clique)) return 0;
+    // ---- end of D's block ----
     return n === 0 ? 0 : Math.min(RETURN_BONUS_MAX, RETURN_BONUS + RETURN_BONUS_STEP * (n - 1));
 }
+
+// ---- (bots ideas, round 2: D word) de-synchronised logins: the research's probe found
+// 52 % of clique logins within 2 minutes of a mate's (the return bonus brought a due mate in at the next free place). Now
+// a due mate's bonus applies only once its stagger has passed (log-normal, median 10 minutes, 3-30 minutes), and only 60 %
+// of the mates answer at all (the others keep their own schedule); both drawn when the first mate of its clique logs in,
+// seeded per pair and session (the mate, the first mate, its login's play tick: salt 'clique-stagger'). The stagger counts
+// from the clique's latest login, not its first: counted from the first, a clique online for an hour had every answering
+// mate past it, and two of them due together came in at consecutive returns (WT8 24-28 % at 500 bots, the band 25). The
+// bonus's weight and the role mix are unchanged. ----
+/** a mate's stagger: log-normal round STAGGER_MEDIAN (σ STAGGER_SIGMA) within STAGGER_RANGE play ticks; STAGGER_ANSWER of the mates answer */
+export const STAGGER_MEDIAN = 1000;
+export const STAGGER_SIGMA = 0.55;
+export const STAGGER_RANGE: readonly [number, number] = [300, 3000];
+export const STAGGER_ANSWER = 0.6;
+/** each clique with a mate online: its first mate's login (name, play tick), its latest login's play tick, who of it is in */
+const cliqueIn = new Map<Clique, { first: string; since: number; last: number; names: Set<string> }>();
+let staggerOn = true;
+/** Tests only: D4's clique timing off (false: the return bonus and the "me too" logout as before) or on (the default). Never set by the game. */
+export function setCliqueStaggerForTest(on: boolean): void {
+    staggerOn = on;
+}
+/** the stagger's draws (the humanlike runner, the tests): asked, answered (past its stagger), refused (too soon or not one to answer) */
+export const staggerStats = { asked: 0, ok: 0, soon: 0, own: 0 };
+
+/** a mate's stagger after its clique's first login (play ticks), or null: it keeps its own schedule (one of the 40 %) */
+export function staggerOf(name: string, first: string, since: number): number | null {
+    const r = seededRandom(nameSeed(`${botNameKey(name)}|${botNameKey(first)}|${since}`, 'clique-stagger'));
+    if (r() >= STAGGER_ANSWER) return null;
+    return Math.max(STAGGER_RANGE[0], Math.min(STAGGER_RANGE[1], Math.round(logNormal(STAGGER_MEDIAN, STAGGER_SIGMA, r))));
+}
+
+function staggerOk(self: string, clique: Clique): boolean {
+    if (!staggerOn) return true;
+    const s = cliqueIn.get(clique);
+    // (no mate's login on the bus: one queued, or a world restored before the bus heard it: the bonus as before)
+    if (!s || s.names.has(self)) return true;
+    staggerStats.asked++;
+    const stagger = staggerOf(self, s.first, s.since);
+    if (stagger === null) {
+        staggerStats.own++;
+        return false;
+    }
+    if (arcsPlay() - s.last < stagger) {
+        staggerStats.soon++;
+        return false;
+    }
+    staggerStats.ok++;
+    return true;
+}
+
+onArcs('login', e => {
+    const clique = cliqueByName(e.name);
+    if (!clique) return;
+    const key = botNameKey(e.name);
+    const s = cliqueIn.get(clique);
+    const play = arcsPlay();
+    if (s) {
+        s.names.add(key);
+        s.last = play;
+    } else cliqueIn.set(clique, { first: key, since: play, last: play, names: new Set([key]) });
+});
+onArcs('logout', e => {
+    const clique = cliqueByName(e.name);
+    const s = clique ? cliqueIn.get(clique) : undefined;
+    if (!clique || !s) return;
+    s.names.delete(botNameKey(e.name));
+    if (s.names.size === 0) cliqueIn.delete(clique);
+});
+// ---- end of D's block ----
 
 /**
  * A clique-mate's current step (the nearest mate's first) of this skill that this bot can do at its level and that
@@ -583,7 +669,8 @@ function travel(members: Player[], now: number): void {
     if (trips.length < 2) return;
     trips.sort((a, b) => a.d - b.d);
     for (const lead of trips) {
-        const followers = trips.filter(t => t !== lead && t.p.level === lead.p.level && cheb(t.p, lead.p) <= FOLLOW_START && sameWay(t.dest, lead.dest) && now - (followEnded.get(t.p) ?? -Infinity) >= FOLLOW_AGAIN);
+        // (bots ideas, round 2: D word: not a bored one, which keeps to its own plan this time: theme C's moods, none without C)
+        const followers = trips.filter(t => t !== lead && t.p.level === lead.p.level && cheb(t.p, lead.p) <= FOLLOW_START && sameWay(t.dest, lead.dest) && now - (followEnded.get(t.p) ?? -Infinity) >= FOLLOW_AGAIN && (arcsMood(t.p)?.boredom ?? 0) < BORED_FOLLOWER);
         if (followers.length === 0) continue;
         for (const f of followers) startFollow(f, lead, now);
         return;
@@ -653,7 +740,8 @@ export function cliqueDeparture(bot: Player): string | null {
                 kind: 'botreply',
                 then: () => {
                     byeSaid.set(mate, World.currentTick);
-                    leavingSoon.set(mate.username, LEAVE_SOON[0] + Math.floor(Math.random() * (LEAVE_SOON[1] - LEAVE_SOON[0] + 1)));
+                    const soon = staggerOn ? LEAVE_SOON : LEAVE_SOON_BEFORE;
+                    leavingSoon.set(mate.username, soon[0] + Math.floor(Math.random() * (soon[1] - soon[0] + 1)));
                 }
             }, reactionTicks(persona, 'notice'));
         } else if (Math.random() < 0.4 + 0.5 * persona.sociability) {

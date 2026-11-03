@@ -62,6 +62,16 @@ import { BotManager } from '#/engine/bot/BotManager.js';
 import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
 import type { PkRaid } from '#/engine/bot/port/BotPkTeam.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+// ---- (bots ideas, Track B: loot) the human's pile, the loot ledger, the booth (port/BotLoot, tasks/LootPileTask) ----
+import { clearPackForRestock, lootBankDue, needsBooth, pkKitFamily, startKillLoot } from '#/engine/bot/port/BotLoot.js';
+import { LootBooth } from '#/engine/bot/tasks/LootPileTask.js';
+// ---- end of Track B's (ideas) block ----
+// ---- (bots ideas, round 2: arcs foundation) a kill on the bus (port/BotArcsEvents: theme D's grudges and rivals, C's moods) ----
+import { emitArcs } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- end of the arcs foundation's block ----
+// ---- (bots ideas, round 2: D word) its rival at the edge (port/BotTies, through the hooks) ----
+import { wordHooks } from '#/engine/bot/port/BotWordHooks.js';
+// ---- end of D's block ----
 
 /** port (the realism work, phase 5b): the PK team raid this PKer has a part in (port/BotPkTeam), or null */
 function raidOf(p: Player): PkRaid | null {
@@ -397,6 +407,14 @@ function findNearbyTarget(bot: Player, radius: number, blacklist?: Map<string, n
     const raid = raidOf(bot);
     const team = raid?.teamTarget(bot) ?? null;
     if (team && !blacklist?.has(team.username) && chebyshev(bot.x, bot.z, team.x, team.z) <= radius && inCombatRange(pvpWildernessLevel(bot, team), bot.combatLevel, team.combatLevel)) return team;
+    // ---- (bots ideas, round 2: D word) a rival (a grudge from a fight at the edge: port/BotTies) first, when it is a valid
+    // target by the same rules as the nearest below: on its floor, not blacklisted, no clique friend, near the leader, in
+    // combat range at both players' Wilderness levels, no team-mate, not claimed, not fought by a third in single combat ----
+    if (!raid && wordHooks.rival) {
+        const rival = wordHooks.rival(bot, radius, p => p !== bot && p.slot !== -1 && p.level === bot.level && !blacklist?.has(p.username) && !sameClique(bot.username, p.username) && (!near || chebyshev(near.x, near.z, p.x, p.z) <= CLIQUE_FIGHT_NEAR) && inCombatRange(pvpWildernessLevel(bot, p), bot.combatLevel, p.combatLevel) && !isTargetClaimed(p, bot, raid) && !foughtByOther(p, bot));
+        if (rival) return rival;
+    }
+    // ---- end of D's block ----
     let best: Player | null = null;
     let bestDist = radius + 1;
     for (const p of worldPlayers()) {
@@ -480,6 +498,14 @@ export class EdgevillePKerTask extends BotTask {
     /** port (PK tactics, round 2: "PJing"): the fight a PJer waits by (port/BotPkPj), and its own last fight's end */
     private pj: PkPjWatch | null = null;
     private fightEndAt = -1000;
+    // ---- (bots ideas, Track B: loot) its kit's items (what a restock may delete), its stop at the booth ----
+    private kit: Set<number> | null = null;
+    private booth: LootBooth | null = null;
+    private kitOf(): Set<number> {
+        if (!this.kit) this.kit = pkKitFamily(this.profile!);
+        return this.kit;
+    }
+    // ---- end of Track B's (ideas) block ----
 
     constructor() {
         super('EdgevillePKer');
@@ -560,7 +586,9 @@ export class EdgevillePKerTask extends BotTask {
         this.inRaid = raid !== null;
         // port: not while it walks there (from Lumbridge after a death, from wherever it logged in): upstream teleported
         // it to Edgeville first, so only a death left it this far
-        if (!raid && this.state !== 'init' && this.state !== 'walk_to_wild' && (dist > DIESPAWN_DIST || (dist < 10 && (this.state === 'idle' || this.state === 'engage')))) {
+        // (bots ideas, Track B: loot: not on its way to the booth with the human's items, from Lumbridge after a death)
+        const toBooth = this.state === 'banking' && needsBooth(player);
+        if (!raid && !toBooth && this.state !== 'init' && this.state !== 'walk_to_wild' && (dist > DIESPAWN_DIST || (dist < 10 && (this.state === 'idle' || this.state === 'engage')))) {
             this.target = null;
             this.state = 'init';
             this.stackFixed = false;
@@ -701,6 +729,7 @@ export class EdgevillePKerTask extends BotTask {
         this.blacklist.clear();
         this.stuck.reset();
         this.watchdog.reset();
+        this.booth = null; // (bots ideas, Track B: loot)
     }
 
     private handleInit(player: Player): void {
@@ -713,6 +742,13 @@ export class EdgevillePKerTask extends BotTask {
             return;
         }
 
+        // ---- (bots ideas, Track B: loot) the human's items in its pack (a death, a login): the booth first ----
+        if (needsBooth(player)) {
+            this.state = 'banking';
+            this.cooldown = randInt(2, 4);
+            return;
+        }
+        // ---- end of Track B's (ideas) block ----
         this.replenish(player);
 
         const [wx, wz] = this.getWildernessSpot(player, this.cliqueLeader(player));
@@ -727,7 +763,10 @@ export class EdgevillePKerTask extends BotTask {
 
     private replenish(player: Player): void {
         const p = this.profile!;
-        player.getInventory(InvType.INV)?.removeAll();
+        // ---- (bots ideas, Track B: loot) the pack emptied as upstream's removeAll did, but the ledger's quantities: the
+        // human's items it looted vanished at its next restock (port/BotLoot) ----
+        clearPackForRestock(player);
+        // ---- end of Track B's (ideas) block ----
         stripMembersItems(player); // port: (a free world) nothing members-only stays worn
 
         // port: usableOnThisWorld below: no members item on a free world, whatever the profile says (a free world's
@@ -793,6 +832,14 @@ export class EdgevillePKerTask extends BotTask {
         }
         if (this._outOfFight(player)) return;
         const [bx, bz] = EDGEVILLE_CENTER;
+        // ---- (bots ideas, Track B: loot) at the bank with the human's items: the booth first, then the restock ----
+        if (this.booth || (isNear(player, bx, bz, BANK_DIST) && needsBooth(player))) {
+            this.booth ??= new LootBooth();
+            this.watchdog.notifyActivity();
+            if (this.booth.tick(player) === 'walk') return;
+            this.booth = null;
+        }
+        // ---- end of Track B's (ideas) block ----
         this.stuckWalk(player, bx, bz);
         if (isNear(player, bx, bz, BANK_DIST)) {
             this.replenish(player);
@@ -852,6 +899,14 @@ export class EdgevillePKerTask extends BotTask {
         }
         // port (PK tactics): a bite when hurt; out when hit by one it may not hit back
         if (this._outOfFight(player)) return;
+        // ---- (bots ideas, Track B: loot) the human's items to the booth: a good take, an item of its kit, its session over ----
+        if (lootBankDue(player, this.kitOf())) {
+            this.pj = null;
+            this.state = 'banking';
+            this.watchdog.notifyActivity();
+            return;
+        }
+        // ---- end of Track B's (ideas) block ----
         // port (PK tactics, round 2: "PJing"): a PJer by a fight, off it a few tiles, until it may jump the one
         // left of it (port/BotPkPj: the game's 8 ticks after its last hit); no "gl" to one it jumps
         if (this.pj) {
@@ -1064,6 +1119,12 @@ export class EdgevillePKerTask extends BotTask {
                 this._dropTarget(player);
                 // (PK tactics) little food left after it: the bank first, as people restocked between fights
                 this.state = pkFoodLeft(player, this.profile) <= pkWaysOf(player.username).restockAt ? 'banking' : 'idle';
+                // ---- (bots ideas, Track B: loot) the human's pile: its items before the reveal (a sub-task: port/BotLoot) ----
+                if (!t.is_bot) startKillLoot(player, t);
+                // ---- end of Track B's (ideas) block ----
+                // ---- (bots ideas, round 2: arcs foundation) the kill on the bus (its victim a bot or the human) ----
+                emitArcs({ k: 'kill', killer: player, victim: t, edge: true });
+                // ---- end of the arcs foundation's block ----
                 this.watchdog.notifyActivity();
                 return;
             }

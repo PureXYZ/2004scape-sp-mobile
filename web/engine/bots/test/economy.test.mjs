@@ -89,8 +89,13 @@ const highAlch = id => Math.floor(T.itemValue(id) * 0.6);
     // (the variety work, round 2, track W2: the status pieces and the Fremennik helms, labelled estimates: priced for the
     // vendors that stock some of them and the price checks, not all of them stocked; counted apart)
     const STATUS_ROW = /_trim$|_gold$|_goldplate$|^rune_\w+_(zamorak|saradomin|guthix)$|^viking_helmet_/;
+    // (bots ideas, Track A: the endgame's drop rows, sold only by the bots that got them in their drop sales, never a
+    // vendor's stock: counted apart, an estimate each)
+    const ENDGAME_ROW = /^dragon_chainbody$/;
+    const endgame = all.filter(([d]) => ENDGAME_ROW.test(d));
+    check('the street table: the endgame\'s drop rows (dragon chainbody), estimates, 274 items', endgame.length === 1 && endgame.every(([d, r]) => /^estimate/.test(r.source) && ObjType.getId(d) !== -1), endgame.map(([d]) => d));
     const status = all.filter(([d]) => STATUS_ROW.test(d));
-    const rows = all.filter(([d]) => !STATUS_ROW.test(d));
+    const rows = all.filter(([d]) => !STATUS_ROW.test(d) && !ENDGAME_ROW.test(d));
     const rares = rows.filter(([, r]) => r.rare);
     const missing = all.filter(([debugname]) => ObjType.getId(debugname) === -1).map(([d]) => d);
     const misnamed = all.filter(([debugname, r]) => ObjType.getId(debugname) !== -1 && !r.name.startsWith(ObjType.get(ObjType.getId(debugname)).name)).map(([d, r]) => `${d}: "${r.name}" is "${ObjType.get(ObjType.getId(d)).name}"`);

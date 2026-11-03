@@ -13,12 +13,16 @@
 //   page -> engine  {type:'lifecycle', event:'resume'|'foreground'}
 //                       A bot store that could not be written (it is kept in memory) is written first.
 // The language model (the realism work, phase 7: '#/engine/bot/port/BotModelTypes' has the shapes):
-//   engine -> page  {type:'bots-lm', id, mode, local, online, maxChars, timeoutMs}
+//   engine -> page  {type:'bots-lm', id, mode, ambient?, local, online, maxChars, timeoutMs}
 //                       A bot's reply for the model to write (the page hands it to native: docs/ARCHITECTURE.md §7).
+//                       (bots ideas, round 4: I model) `ambient: true`: a line of the bots' own talk near the human
+//                       (port/BotModelAmbient), always mode 'local'; the page sends it with think false.
 //   page -> engine  {type:'bots-lm-reply', id, text, source, error?, ms}
 //                       The model's line (or null, and why); the bots guard it and say it, or the rules' line.
-//                   {type:'bots-lm-mode', mode, local, online}
+//                   {type:'bots-lm-mode', mode, local, online, ambient?}
 //                       The player's choice (Settings › Bot chat) and what is there; until it comes, the rules alone.
+//                       (bots ideas, round 4: I model) `ambient`: Bots' own talk is Model and usable there (the
+//                       on-device model in the app, a chat model chosen): port/BotModel setModelMode reads it.
 //                   {type:'bots-lm-notice', lines}
 //                       Lines for the humans' chatboxes, as game messages (host.js lm.notice: the on-device model rests
 //                       while the phone is low on memory, and is back).

@@ -29,6 +29,7 @@
 // online (who wears what, who passes whom).
 import InvType from '#/cache/config/InvType.js';
 import ObjType from '#/cache/config/ObjType.js';
+import VarPlayerType from '#/cache/config/VarPlayerType.js';
 import Player from '#/engine/entity/Player.js';
 import { PlayerStat } from '#/engine/entity/PlayerStat.js';
 import World from '#/engine/World.js';
@@ -52,6 +53,8 @@ import { notableGearOf as fashionNotableGear, statusPieceOf } from '#/engine/bot
 import { inThread } from '#/engine/bot/port/BotThreads.js';
 import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+// (bots ideas, Track B: loot) the human's death pile
+import { notePileDeath, tickPiles } from '#/engine/bot/port/BotLoot.js';
 
 // ── the log (the humanlike runner: W10, W14, W15) ────────────────────────────
 
@@ -234,8 +237,30 @@ function pkGround(x: number, z: number): boolean {
 
 // ── a death near ─────────────────────────────────────────────────────────────
 
-/** each player's Hitpoints at the last tick (a fall to 0 is a death, seen where it fell) */
+/** each player's Hitpoints at the last tick (a fall to 0 is a death, seen where it fell; 0 while it is dying) */
 const hpSeen = new WeakMap<Player, number>();
+
+// ---- (bots ideas, round 1's left-overs) a death in its Hitpoints' regen tick ----
+/** the death script's queue entry, and its varp (~player_death sets %death for the fall's animation) */
+const DEATH_QUEUE = '[queue,player_death]';
+let deathVarp: number | undefined;
+/**
+ * The player is dying: its Hitpoints at 0, or at 1 with its death under way. 274's [timer,health_regen] (stat_heal 1)
+ * runs after the queue in the player's turn, so a killing hit in the regen's tick reads 1 Hitpoint by the end of it, the
+ * death queued all the same (damage_self) and played out (~player_death). A fall to 0 alone missed such a death: no pile,
+ * no vulture, no witness (loot.test seeds 6 and 10: an NPC's queued damage and a PKer's kill, about one death in 100, one
+ * in 50 with Rapid Heal). Its own regen +1 is all it can have then.
+ */
+export function playerDying(p: Player): boolean {
+    const hp = p.levels[PlayerStat.HITPOINTS];
+    if (hp === 0) return true;
+    if (hp !== 1) return false;
+    if (deathVarp === undefined) deathVarp = VarPlayerType.getByName('death')?.id ?? -1;
+    if (deathVarp !== -1 && p.getVar(deathVarp) === 1) return true;
+    for (const request of p.queue.all()) if (request.script.name === DEATH_QUEUE) return true;
+    return false;
+}
+// ---- end of the left-overs' block ----
 
 /** the Duel Arena's grounds: a duel's loss is no death (274's duel heals both; the arena's crowd has its own lines) */
 function atDuelArena(x: number, z: number): boolean {
@@ -248,11 +273,18 @@ function deaths(now: number): void {
         if (p.slot === -1) continue;
         const hp = p.levels[PlayerStat.HITPOINTS];
         const was = hpSeen.get(p);
-        hpSeen.set(p, hp);
-        if (hp !== 0 || was === undefined || was === 0 || atDuelArena(p.x, p.z) || eventRoleOf(p)?.role === 'duellist') continue;
+        // (round 1's left-overs: and at 1 in its death, the regen's tick: playerDying; held at 0 while it dies, one death)
+        const dying = playerDying(p);
+        hpSeen.set(p, dying ? 0 : hp);
+        if (!dying || was === undefined || was === 0 || atDuelArena(p.x, p.z) || eventRoleOf(p)?.role === 'duellist') continue;
         witnessStats.deaths++;
         if (p.is_bot) witnessDeath(p, p.x, p.z, p.level);
-        else reactToHuman(p, 'react-death', p.x, p.z, p.level);
+        else {
+            // ---- (bots ideas, Track B: loot) the human's pile to come: the killer's, the vultures' (port/BotLoot) ----
+            notePileDeath(p, now);
+            // ---- end of Track B's (ideas) block ----
+            reactToHuman(p, 'react-death', p.x, p.z, p.level);
+        }
     }
     void now;
 }
@@ -416,6 +448,20 @@ export function reactToHuman(human: Player, event: string, x: number, z: number,
     return true;
 }
 
+// ---- (bots ideas, Track B: loot) the human's minute for port/BotLoot's words to it (W15: "finders keepers lol", "ur stuff
+// is still here") ----
+/** may a bot say a word to this human now (none in the last minute)? */
+export function humanReactionFree(human: Player, now: number = World.currentTick): boolean {
+    return now - (humanSaid.get(human)?.at ?? -Infinity) >= HUMAN_GAP;
+}
+/** a word was said to this human now (port/BotLoot's) */
+export function noteHumanReaction(human: Player, now: number = World.currentTick): void {
+    let h = humanSaid.get(human);
+    if (!h) humanSaid.set(human, (h = { at: -Infinity, kinds: new Map() }));
+    h.at = now;
+}
+// ---- end of Track B's (ideas) block ----
+
 // ── the scan: gear, rares, levels, show-off ──────────────────────────────────
 
 /** what a player wears that people noticed in 2004: a rare, trimmed or god armour, dragon, full rune */
@@ -559,6 +605,9 @@ let lastScan = -1;
 export function tickWitness(): void {
     const now = World.currentTick;
     deaths(now);
+    // ---- (bots ideas, Track B: loot) the human's piles: their drop, their items' ends, the words back (port/BotLoot) ----
+    tickPiles(now);
+    // ---- end of Track B's (ideas) block ----
     if (now - lastScan < SCAN_EVERY) return;
     lastScan = now;
     fightsSeen(now);

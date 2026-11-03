@@ -1,7 +1,7 @@
 {
   "_doc": [
     "port (the variety work, round 2, Track S2: P4, topic threads): conversations of 3-6 turns between two bots (port/BotThreads), from 2004 player culture's topics: levels and the race to an unlock, what u doing, goals and saving up, members, how long u been playing, asl and where u from, drops, randoms, clans, the bank, school, Halo 2, World of Warcraft, Castle Wars next month, Zezima, the lag, food, music, films, being tired, a friend hacked, a million gp, Dragon Slayer, the weather.",
-    "Each topic's pools by turn: 'ask' opens it (a's line), 'answer' the other's ({v}: its own value from its state: a level, what it does, where it lives ...), and the opener's own answer to a counter-question ('own'); 'lower'/'higher'/'same' the opener's own answer by how its value compares with the other's; 'after' the other's word on it ('afterLower' ... when it compares); 'more' a second question and its answers (depth 6 only: clique mates and hub regulars); 'follow' and 'followUp' when the pair talked of it earlier this session (bots only: 'still 41?', 'u get 50 yet?'), never asked again from scratch.",
+    "Each topic's pools by turn: 'ask' opens it (a's line), 'answer' the other's ({v}: its own value from its state: a level, what it does, where it lives ...), and the opener's own answer to a counter-question ('own'); 'lower'/'higher'/'same' the opener's own answer by how its value compares with the other's; 'after' the other's word on it ('afterLower' ... when it compares); 'more' a second question and its answers (depth 6 only: clique mates and hub regulars); 'follow' and 'followUp' when the pair talked of it earlier this session (bots only: 'still 41?', 'u get 50 yet?'), never asked again from scratch. (The KQ fixes, T-3: the update's quest topics, 'update' and 'fremmy', answer from 'yes' or 'no' by what the speaker has done, as its own answer to \"did you do X\" says (port/BotAnswers saysQuestDone, combat 45), the quest topic's pools; 'ownYes' the opener's own words only one who did it says.)",
     "Shared pools: 'counter' joins a counter-question to an answer ({x}: the answer): the asker then answers from its own state (the counter-question rule); 'segue' opens a second topic (once a thread); 'closers' end one now and then.",
     "Every line, its slots filled from every value they take, passes the 274 word filter and chat codec (test/chat-filter.test.mjs). The words are the period's: lower case, u/ur/r, no apostrophes, nothing after November 2004. Said in the speaker's style (port/BotStyle)."
   ],
@@ -179,6 +179,26 @@
       "own": ["gonna be so fun", "its like capture the flag", "its gonna be sick", "sara or zammy lol"],
       "after": ["sweet", "nice", "cool", "ya"]
     },
+    "update": {
+      "ask": ["done hftd yet?", "u done the new quest?", "anyone done horror from the deep", "done horror from the deep?"],
+      "yes": ["ya the mother was hard", "ya got my god book", "ya", "ya hftd was so hard"],
+      "no": ["not yet", "nah need more lvl", "not yet is it hard"],
+      "after": ["gl", "lol", "same", "nice"]
+    },
+    "fremmy": {
+      "ask": ["did ur fremennik trials?", "done fremmy trials yet?", "u a fremennik yet?"],
+      "yes": ["ya got my helm", "ya u need 7 votes", "ya took ages", "ya the fremmy trials took ages"],
+      "no": ["the drinking contest lol", "not yet its so long", "nah"],
+      "own": ["the drinking contest lol", "u need 7 votes", "brundt is so annoying lol", "fremmy trials r so long"],
+      "ownYes": ["got my fremmy helm"],
+      "after": ["nice", "lol", "gl", "same"]
+    },
+    "crabs": {
+      "ask": ["u been to crabs?", "rock crabs r the best xp now", "anyone tried rock crabs", "crabs r good xp"],
+      "answer": ["ya theyre north of rellekka", "not yet where r they", "ya so good", "ya they look like rocks lol", "whats rock crabs", "ya crabs r so good"],
+      "own": ["theyre north of rellekka", "they look like rocks lol", "u gotta walk by them", "so many people there now", "crabs r the best xp"],
+      "after": ["nice", "lol", "gonna go", "ya"]
+    },
     "zezima": {
       "ask": ["saw zezima once", "zezima is so high lvl", "zezima has like 99 everything"],
       "answer": ["no way", "lol where", "hes a no life", "lucky", "who"],
@@ -238,6 +258,32 @@
       "ask": ["in what?", "what lvl?", "in what lol"],
       "answer": ["{v}", "{v} lol", "{v}!!"],
       "after": ["nice", "gz", "nice gz", "gz lol"]
+    },
+    "gamesroom": {
+      "ask": ["u tried the games room?", "been to the games room yet?", "anyone play runelink?", "the new games room is sick", "u play runelink?"],
+      "answer": ["under burthorpe right?", "ya its sick", "not yet", "whats that", "ya its like connect 4 lol", "ya i played runelink", "nah where is it", "ya runelink is fun"],
+      "after": ["nice", "lol", "cool", "ya", "gonna try it", "games room is sick"]
+    },
+    "pet": {
+      "ask": ["is that ur kitten?", "aww is that ur cat?", "where u get the kitten?", "cute kitten lol", "is that cat urs?"],
+      "answer": ["ya from gertrude", "ya shes mine", "ya got her from gertrude", "ya lol", "yep my kitty"],
+      "moreAsk": ["how much?", "where?", "where do u get one?"],
+      "moreAnswer": ["west of varrock, 100gp", "gertrude west of varrock", "100gp from gertrude", "gertrude sells them"],
+      "show": ["look at my kitten lol", "my kitten is so cute", "my cat follows me everywhere", "got a kitten :)"],
+      "reply": ["aww", "where u get it?", "cute lol", "nice", "aww cute"],
+      "own": ["gertrude west of varrock", "100gp from gertrude", "gertrude sells them"],
+      "after": ["aww", "cute", "nice", "lol", "i want one"]
+    },
+    "cwSoon": {
+      "ask": ["castle wars next month!!", "cant wait for castle wars", "castle wars soon", "they said castle wars soon", "castle wars comes out next month", "gonna be sara or zammy in castle wars?"],
+      "answer": ["ya cant wait", "whats castle wars", "finally", "ya", "sweet", "sara for sure", "zammy lol", "ya next month", "castle wars gonna be sick"],
+      "own": ["gonna be so fun", "its like capture the flag", "its gonna be sick", "sara or zammy lol", "gonna be sara", "cant wait", "they said castle wars soon", "sara or zammy?"],
+      "after": ["sweet", "nice", "cool", "ya"]
+    },
+    "gnomeball": {
+      "ask": ["u ever play gnomeball?", "anyone play gnomeball?", "gnomeball any good?"],
+      "answer": ["ya its so random", "nah whats gnomeball", "ya the gnomes tackle u lol", "its ok", "ya at the gnome stronghold", "gnomeball is fun"],
+      "after": ["lol", "nice", "ya", "might try it"]
     }
   }
 }

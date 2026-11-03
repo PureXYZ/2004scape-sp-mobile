@@ -101,6 +101,9 @@ lib.setHabitRatesForTest({ breaks: 0, lingers: 0, watch: 0, abrupt: 0 });
 lib.setHangoutRateForTest(0.0001);
 lib.setArenaRatesForTest(0);
 lib.setDirectorForTest({ first: 1e9, gap: 1e9 });
+// (bots ideas, round 4 fixes) and the first gap it drew in the ticks before (its default, 2000-5000) dropped: none comes. A
+// clan walk took the feathers' bot mid-errand (errands.test seed 8)
+lib.resetDirectorForTest();
 lib.setCliqueBehaviourForTest(false);
 lib.setEventRatesForTest({ odds: 0 });
 lib.setTrainRatesForTest({ ask: 0, form: 0, yes: 0, join: 0 });
@@ -132,9 +135,13 @@ check('the world: 30 bots online', sim.bots().length === 30, `${sim.bots().lengt
     check("the map: capacities a player would share (Draynor's five willows: 10 cutters; Lumbridge's trees, more)", draynorWillows === 10 && lumbyTrees >= 5, { draynorWillows, lumbyTrees });
 
     const bad = [];
+    // (bots ideas, the KQ track: the Kalphite lair is entered by the KQ attempt's own ropes on the burrow and the chamber)
+    const ENTERED_BY_ERRAND = new Set(['kbd_lair', 'kalphite_lair']);
     for (const entry of lib.DUNGEON_ENTRIES) {
         const { entrance, floor, enter, exit } = entry.route;
-        const enterOk = (enter ?? []).some(e => lib.locNear(entrance[0], entrance[1], 0, e.loc, 8));
+        // (bots ideas, Track A: the endgame's KBD lair is entered by the trip's own click, the lever from the lever room: no
+        // `enter` of a walk's; its way out is checked as all)
+        const enterOk = ENTERED_BY_ERRAND.has(entry.name) ? !enter : (enter ?? []).some(e => lib.locNear(entrance[0], entrance[1], 0, e.loc, 8));
         // (variety round 2, the fixes: on the floor's own level: the Agility Arena's is 3)
         const exitOk = !exit || lib.locNear(floor[0], floor[1], floor[2] ?? 0, exit.loc, 4);
         const walkable = sim.isWalkable(entrance[0], entrance[1], 0) && sim.isWalkable(floor[0], floor[1], floor[2] ?? 0);

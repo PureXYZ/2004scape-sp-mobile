@@ -41,7 +41,7 @@ import { botConsole as console } from '#/engine/bot/port/BotLog.js';
 import { isMultiCombat, pvpWildernessLevel, wildernessLevelAt } from '#/engine/bot/port/BotContent.js';
 import { botSay } from '#/engine/bot/port/BotSay.js';
 import { pkFixedLine, pkLine } from '#/engine/bot/port/BotLines.js';
-import { isMembersWorld } from '#/engine/bot/port/BotWorldRules.js';
+import { isAllowedCoord, isMembersWorld } from '#/engine/bot/port/BotWorldRules.js';
 import {
     F2P_PK_ITEMS,
     freeWorldPkProfiles,
@@ -73,6 +73,13 @@ import ServerTriggerType from '#/engine/script/ServerTriggerType.js';
 import { eventRoleOf } from '#/engine/bot/port/BotSetPieces.js';
 import type { PkRaid } from '#/engine/bot/port/BotPkTeam.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+// ---- (bots ideas, Track B: loot) the human's pile, the loot ledger, the booth (port/BotLoot, tasks/LootPileTask) ----
+import { clearPackForRestock, lootBankDue, needsBooth, pkKitFamily, sayLootLine, startKillLoot } from '#/engine/bot/port/BotLoot.js';
+import { LootBooth } from '#/engine/bot/tasks/LootPileTask.js';
+// ---- end of Track B's (ideas) block ----
+// ---- (bots ideas, round 2: arcs foundation) a kill on the bus (port/BotArcsEvents: theme D's grudges and rivals, C's moods) ----
+import { emitArcs } from '#/engine/bot/port/BotArcsEvents.js';
+// ---- end of the arcs foundation's block ----
 
 /** port (the realism work, phase 5b): the PK team raid this PKer has a part in (port/BotPkTeam), or null */
 function raidOf(p: Player): PkRaid | null {
@@ -296,8 +303,51 @@ const HUNTING_ZONES: [number, number][] = [
     [3050, 3790],  //  8 — far west                   (~wild 34)
     [3105, 3800],  //  9 — far mid (Lava Maze area)    (~wild 36)
     [3240, 3800],  // 10 — far east                   (~wild 36)
-    [2972, 3820],  // 11 — far west deep               (~wild 38)
+    // (bots ideas, Track B: loot, B4: the Chaos Temple's yard, the Wilderness's only chaos altar, multi-combat, ~wild 38;
+    // it was 2972,3820, 25 tiles east of it, and no deep PKer ever stood by the temple: 0 of 38 within 30 tiles)
+    [2952, 3822],  // 11 — the Chaos Temple (far west deep, ~wild 38)
+    // (bots ideas, Track B: A8, the lever camps: where the KBD's bossers come up and the Demonic
+    // Ruins' greater demons, cowardly in 274, are fought)
+    [3017, 3846],  // 12 — camp: the west Lava Maze ladder to the KBD (~wild 42)
+    [3287, 3880],  // 13 — camp: the Demonic Ruins (~wild 45)
 ];
+
+// ---- (bots ideas, Track B: loot, B4) the zones a deep PKer's walk from zone to zone (one of the two nearest) never
+// reaches: each is a zone change's pick, half as often as one zone's and stayed at twice as long (a camp; their long
+// walks come seldom), about one zone's share of the time each (_neighbourZone) ----
+const FAR_ZONES: readonly number[] = [11, 12, 13];
+const FAR_STAY = 2;
+/**
+ * (A8) the lever camps: their zones, and the bossers who pass one (a bot on an endgame trip: its set-piece role 'bosser',
+ * Track A's): the campers go for at most 1 in 3 of them, decided once a pass; humans as everywhere
+ */
+const CAMP_ZONES: ReadonlySet<number> = new Set([12, 13]);
+/**
+ * may a PKer hunt zone `i` on this world: every zone on a members world; on a free world only the free map's (the KBD
+ * lever camp is members map: a free world's PKer that drew it stalled there and was rescue-jumped off the free map)
+ */
+function zoneOpen(i: number): boolean {
+    return isAllowedCoord(HUNTING_ZONES[i][0], HUNTING_ZONES[i][1]);
+}
+const CAMP_RANGE = 30;
+const CAMP_BOSSERS = 1 / 3;
+const CAMP_PASS_TICKS = 3000;
+const CAMP_CALL = 0.12;
+const bosserPasses = new WeakMap<Player, { until: number; yes: boolean }>();
+/** may the campers of a camp at `at` go for this bot: a bosser there, one of the 1 in 3 its pass drew */
+export function campMayAttack(p: Player, at: readonly [number, number]): boolean {
+    if (eventRoleOf(p)?.role !== 'bosser' || chebyshev(p.x, p.z, at[0], at[1]) > CAMP_RANGE) return false;
+    const now = World.currentTick;
+    let pass = bosserPasses.get(p);
+    if (!pass || now >= pass.until) bosserPasses.set(p, (pass = { until: now + CAMP_PASS_TICKS, yes: Math.random() < (campRate ?? CAMP_BOSSERS) }));
+    return pass.yes;
+}
+/** Tests only: the share of passing bossers the campers go for (null: the game's 1 in 3). */
+let campRate: number | null = null;
+export function setCampRateForTest(rate: number | null): void {
+    campRate = rate;
+}
+// ---- end of Track B's (ideas) block ----
 
 const EDGEVILLE_BANK: [number, number] = [3093, 3491];
 /** port: just north of the Wilderness border above Edgeville (274 has no ditch yet): a rescue's landing on the way out */
@@ -415,7 +465,7 @@ function isTargetClaimed(target: Player, excludeBot: Player, raid: PkRaid | null
     return false;
 }
 
-function findNearbyRealPlayer(bot: Player, radius: number, blacklist?: Map<string, number>): Player | null {
+function findNearbyRealPlayer(bot: Player, radius: number, blacklist?: Map<string, number>, camp: readonly [number, number] | null = null): Player | null {
     const wildLevel = wildernessLevel(bot.z);
     if (wildLevel <= 0) return null;
     if (wildernessLevelAt(bot.x, bot.z) <= 0) return null; // port: the real wilderness (x bounds too)
@@ -428,13 +478,14 @@ function findNearbyRealPlayer(bot: Player, radius: number, blacklist?: Map<strin
     let bestDist = radius + 1;
     for (const p of worldPlayers()) {
         if (p === bot) continue;
-        if ((p as any).is_bot) continue;
         if (p.level !== bot.level) continue;
         if (p.slot === -1) continue;
         // port: the cheap tests first, and the claim (a pass over every player) only for a player nearer than the best
         // so far: upstream checked the claim of every player in the world, a scan cost players²
         const d = chebyshev(bot.x, bot.z, p.x, p.z);
         if (d >= bestDist) continue;
+        // (humans only; bots ideas, Track B, A8: at a lever camp also a bosser passing, 1 in 3)
+        if ((p as any).is_bot && (camp === null || !campMayAttack(p, camp))) continue;
         if (blacklist?.has(p.username)) continue;
         // port: the game's rule, the lower of both wilderness levels (the target must be in the wilderness too)
         if (!inCombatRange(pvpWildernessLevel(bot, p), bot.combatLevel, p.combatLevel)) continue;
@@ -521,10 +572,19 @@ export class PKerTask extends BotTask {
     /** port (PK tactics, round 2: "PJing"): the fight a PJer waits by (port/BotPkPj), and its own last fight's end */
     private pj: PkPjWatch | null = null;
     private fightEndAt = -1000;
+    // ---- (bots ideas, Track B: loot) its kit's items (what a restock may delete), its stop at the booth ----
+    private kit: Set<number> | null = null;
+    private booth: LootBooth | null = null;
+    private kitOf(): Set<number> {
+        if (!this.kit) this.kit = pkKitFamily(this.profile!);
+        return this.kit;
+    }
+    // ---- end of Track B's (ideas) block ----
 
     constructor() {
         super('PKer');
         this.zonePoolIdx  = Math.floor(Math.random() * HUNTING_ZONES.length);
+        if (!zoneOpen(this.zonePoolIdx)) this.zonePoolIdx = 0;
         this.zoneDuration = randInt(ZONE_DURATION_MIN, ZONE_DURATION_MAX);
         // port: a stalled PKer's rescue jump (unseen, as every jump) lands on its way: past the Edgeville ditch from
         // south of the Wilderness, else in its zone. With no destination it went to Lumbridge's spawn, where the
@@ -744,6 +804,7 @@ export class PKerTask extends BotTask {
         this.blacklist.clear();
         this.stuck.reset();
         this.watchdog.reset();
+        this.booth = null; // (bots ideas, Track B: loot)
         // profile and zonePoolIdx intentionally kept — bot retains identity across cycles
     }
 
@@ -759,6 +820,13 @@ export class PKerTask extends BotTask {
             return;
         }
 
+        // ---- (bots ideas, Track B: loot) the human's items in its pack (a death, a login): the booth first ----
+        if (needsBooth(player)) {
+            this.state = 'banking';
+            this.cooldown = randInt(2, 4);
+            return;
+        }
+        // ---- end of Track B's (ideas) block ----
         this.replenish(player);
 
         // port: walked to (walk; a rescue jump only for a stuck bot, unseen): the zone nearest the
@@ -775,7 +843,10 @@ export class PKerTask extends BotTask {
 
     private replenish(player: Player): void {
         const p = this.profile!;
-        player.getInventory(InvType.INV)?.removeAll();
+        // ---- (bots ideas, Track B: loot) the pack emptied as upstream's removeAll did, but the ledger's quantities: the
+        // human's items it looted vanished at its next restock (port/BotLoot) ----
+        clearPackForRestock(player);
+        // ---- end of Track B's (ideas) block ----
         stripMembersItems(player); // port: (a free world) nothing members-only stays worn
 
         // port: usableOnThisWorld below: no members item on a free world, whatever the profile says (a free world's
@@ -859,6 +930,9 @@ export class PKerTask extends BotTask {
         if (led && player.target === led.lead) player.clearInteraction();
         this.waypointSet = false;
         this.state = 'patrol';
+        // ---- (bots ideas, Track B: A8) at a lever camp, now and then a word of it ("lever camp", "kbd ppl incoming") ----
+        if (CAMP_ZONES.has(this.zonePoolIdx) && !this.raidSpot && Math.random() < CAMP_CALL) sayLootLine(player, 'camp-call', { kind: 'pk' });
+        // ---- end of Track B's (ideas) block ----
     }
 
     private handleBanking(player: Player): void {
@@ -884,6 +958,14 @@ export class PKerTask extends BotTask {
             return;
         }
         const [bx, bz] = EDGEVILLE_BANK;
+        // ---- (bots ideas, Track B: loot) at the bank with the human's items: the booth first, then the restock ----
+        if (this.booth || (isNear(player, bx, bz, 5) && needsBooth(player))) {
+            this.booth ??= new LootBooth();
+            this.watchdog.notifyActivity();
+            if (this.booth.tick(player) === 'walk') return;
+            this.booth = null;
+        }
+        // ---- end of Track B's (ideas) block ----
         this.stuckWalk(player, bx, bz);
 
         if (isNear(player, bx, bz, 5)) {
@@ -906,6 +988,15 @@ export class PKerTask extends BotTask {
         }
         // port (PK tactics): a bite when hurt; out when hit by one it may not hit back
         if (this._outOfFight(player)) return;
+        // ---- (bots ideas, Track B: loot) the human's items to the booth: a good take, an item of its kit, its session over ----
+        if (lootBankDue(player, this.kitOf())) {
+            this.pj = null;
+            releaseStandTile(player);
+            this.state = 'banking';
+            this.watchdog.notifyActivity();
+            return;
+        }
+        // ---- end of Track B's (ideas) block ----
         this.zoneTicks++;
 
         // port (PK tactics, round 2: "PJing"): a PJer by a fight, off it a few tiles, until it may jump the one
@@ -947,7 +1038,8 @@ export class PKerTask extends BotTask {
                     return;
                 }
             }
-            const found = findNearbyRealPlayer(player, SCAN_RADIUS, this.blacklist);
+            // (bots ideas, Track B, A8: at a lever camp a passing bosser too)
+            const found = findNearbyRealPlayer(player, SCAN_RADIUS, this.blacklist, CAMP_ZONES.has(this.zonePoolIdx) && !this.raidSpot ? HUNTING_ZONES[this.zonePoolIdx] : null);
             if (found) {
                 // (a team-mate on it already: the team piles on, in multi-combat only: port/BotPkTeam)
                 const raid = raidOf(player);
@@ -981,6 +1073,8 @@ export class PKerTask extends BotTask {
             // port: on to one of the two zones nearest this one, walked (upstream: the next in a fixed order, often 150+
             // tiles off, by teleport)
             this.zonePoolIdx  = this._neighbourZone(this.zonePoolIdx);
+            // (bots ideas, Track B: B4, A8: a far zone, the temple or a camp, is a longer stay: a camp; drawn half as often)
+            if (FAR_ZONES.includes(this.zonePoolIdx)) this.zoneDuration *= FAR_STAY;
             this.waypointSet  = false;
             if (Math.random() < ZONE_TAUNT_CHANCE) sayPk(player, pkLine(player, 'patrol', PATROL_TAUNTS));
             this.state = 'walk';
@@ -1134,6 +1228,12 @@ export class PKerTask extends BotTask {
                 this._dropTarget(player);
                 // (PK tactics) little food left after it: the bank first, as people restocked between fights
                 this.state = pkFoodLeft(player, this.profile) <= pkWaysOf(player.username).restockAt ? 'banking' : 'patrol';
+                // ---- (bots ideas, Track B: loot) the human's pile: its items before the reveal (a sub-task: port/BotLoot) ----
+                if (!t.is_bot) startKillLoot(player, t);
+                // ---- end of Track B's (ideas) block ----
+                // ---- (bots ideas, round 2: arcs foundation) the kill on the bus (its victim a bot or the human) ----
+                emitArcs({ k: 'kill', killer: player, victim: t, edge: false });
+                // ---- end of the arcs foundation's block ----
                 this.watchdog.notifyActivity();
                 return;
             }
@@ -1212,15 +1312,22 @@ export class PKerTask extends BotTask {
     private _nearestZone(x: number, z: number): number {
         let best = 0;
         for (let i = 1; i < HUNTING_ZONES.length; i++) {
-            if (Math.max(Math.abs(HUNTING_ZONES[i][0] - x), Math.abs(HUNTING_ZONES[i][1] - z)) < Math.max(Math.abs(HUNTING_ZONES[best][0] - x), Math.abs(HUNTING_ZONES[best][1] - z))) best = i;
+            if (zoneOpen(i) && Math.max(Math.abs(HUNTING_ZONES[i][0] - x), Math.abs(HUNTING_ZONES[i][1] - z)) < Math.max(Math.abs(HUNTING_ZONES[best][0] - x), Math.abs(HUNTING_ZONES[best][1] - z))) best = i;
         }
         return best;
     }
 
     /** port: one of the two zones nearest zone `i` */
     private _neighbourZone(i: number): number {
+        // ---- (bots ideas, Track B: loot, B4) the zones past the patrol's chain of nearest zones (no zone has them among
+        // its two nearest: the Chaos Temple's): a zone change's pick at one zone's weight each ----
+        // (a free world: the free map's zones only, zoneOpen; the same weights over those)
+        const far = FAR_ZONES.filter(j => j !== i && zoneOpen(j));
+        const open = HUNTING_ZONES.reduce((n, _, j) => n + (zoneOpen(j) ? 1 : 0), 0);
+        if (far.length > 0 && Math.random() < FAR_ZONES.filter(zoneOpen).length / (FAR_STAY * open)) return far[Math.floor(Math.random() * far.length)];
+        // ---- end of Track B's (ideas) block ----
         const [x, z] = HUNTING_ZONES[i];
-        const others = HUNTING_ZONES.map(([zx, zz], j) => [j, Math.max(Math.abs(zx - x), Math.abs(zz - z))] as const).filter(([j]) => j !== i).sort((a, b) => a[1] - b[1]);
+        const others = HUNTING_ZONES.map(([zx, zz], j) => [j, Math.max(Math.abs(zx - x), Math.abs(zz - z))] as const).filter(([j]) => j !== i && zoneOpen(j)).sort((a, b) => a[1] - b[1]);
         return others[Math.floor(Math.random() * Math.min(2, others.length))][0];
     }
 

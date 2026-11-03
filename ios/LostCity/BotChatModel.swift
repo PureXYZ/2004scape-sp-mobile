@@ -14,7 +14,14 @@ import os
 /// - `think` (Settings › Bot chat › Think first; absent: false): the on-device model writes its short note before the
 ///   reply, when it is a model that offers the choice (`LocalModel.ThinkSupport`); also on Claude's fallback to it.
 ///   Claude online ignores it.
-/// - At most 3 requests at a time; more are answered 'busy' at once. Each has the page's `timeoutMs` (9 s) in all.
+/// - At most 3 requests at a time; more are answered 'busy' at once. Each has the page's `timeoutMs` (9 s) in all. (Bots
+///   ideas, round 4 fixes) A line of the bots' own talk is not counted toward the replies' 3 (`ambientInFlight`).
+/// - (bots ideas, round 4: I model) `ambient: true` (Settings › Bot chat › Bots' own talk: a line of the bots' talk near
+///   the player, the engine's port/BotModelAmbient): always the on-device model, never the note, and refused at once
+///   ('hot' at thermal fair or above, where a reply's gate is serious; 'unavailable' while the model rests for memory;
+///   'busy' while a reply to the player waits or runs on the model). It may load the model. The model's queue serves
+///   the replies first (`LocalModel.generate`'s `ambient`); (round 4 fixes) one running when a reply comes stops at its
+///   next token and is answered 'busy'.
 /// - Memory: after a memory warning, iOS announcing memory pressure for the phone, or a load refused for memory (the app's
 ///   own room, or the phone under pressure), the on-device model rests (`memoryRest`, 10 min, then until the phone is
 ///   not under pressure): requests get 'unavailable' at once and the status says `local.rest: 'memory'`, so the page
@@ -45,6 +52,8 @@ final class BotChatModel {
     var onWillLoad: (() -> Void)?
 
     private var inFlight = 0
+    /// (bots ideas, round 4 fixes) of them, lines of the bots' own talk: not counted toward the replies' maxInFlight
+    private var ambientInFlight = 0
     /// bumped when the page goes away (pageReset): a reply asked by an older page is dropped
     private var generation = 0
     /// The phone is hot (iOS's thermal state serious or critical): the on-device model does not run until it cools down
@@ -72,7 +81,19 @@ final class BotChatModel {
     /// nil until Claude answered or refused the key; false after a 401.
     private var keyValid: Bool?
     private var onlineProblem: String?
-    private var stats = (requests: 0, local: 0, online: 0, failed: 0, busy: 0, hot: 0, memory: 0)
+    private var stats = (requests: 0, local: 0, online: 0, failed: 0, busy: 0, hot: 0, memory: 0, ambient: 0, ambientRefused: 0, ambientStopped: 0)
+
+    // (bots ideas, round 4: I model)
+    /// The phone is warm for the bots' own talk (thermal fair or above): the heat's headroom stays the player's replies'.
+    private var warmForAmbient: Bool { thermalState().rawValue >= ProcessInfo.ThermalState.fair.rawValue }
+
+    /// Why a line of the bots' own talk is not written now (the page's error, and the log's words), or nil.
+    private func ambientRefusal() -> (error: String, why: String)? {
+        if warmForAmbient { return ("hot", "thermal state \(DeviceStats.name(thermalState()))") }
+        if restingUntil != nil { return ("unavailable", "the model rests for memory") }
+        if local.queuedReplies > 0 { return ("busy", "a reply to the player is on the model") }
+        return nil
+    }
 
     init(local: LocalModel = LocalModel()) {
         self.local = local
@@ -275,11 +296,13 @@ final class BotChatModel {
         }
         let started = DispatchTime.now()
         let gen = generation
-        let mode = message["mode"] as? String ?? "local"
+        // (bots ideas, round 4: I model: the bots' own talk, the on-device model's alone and never with the note)
+        let ambient = message["ambient"] as? Bool ?? false
+        let mode = ambient ? "local" : message["mode"] as? String ?? "local"
         let localPrompt = message["local"] as? [String: Any] ?? [:]
         let onlinePrompt = message["online"] as? [String: Any] ?? [:]
         let fallback = message["fallback"] as? Bool ?? true
-        let think = message["think"] as? Bool ?? false  // (the on-device model's note: Settings › Bot chat › Think first)
+        let think = !ambient && message["think"] as? Bool ?? false  // (the on-device model's note: Settings › Bot chat › Think first)
         let timeoutMs = min(30_000, max(1000, (message["timeoutMs"] as? NSNumber)?.intValue ?? Self.defaultTimeoutMs))
         let deadline = started + .milliseconds(timeoutMs)
         stats.requests += 1
@@ -300,30 +323,47 @@ final class BotChatModel {
             reply(nil, source: nil, error: "unavailable")  // ('rules': the page answers those itself)
             return
         }
-        guard inFlight < Self.maxInFlight else {
+        // (bots ideas, round 4 fixes: a reply's cap counts the replies; a line of the bots' own talk, all, as before)
+        guard (ambient ? inFlight : inFlight - ambientInFlight) < Self.maxInFlight else {
             stats.busy += 1
             reply(nil, source: nil, error: "busy")
             return
         }
+        // (bots ideas, round 4: I model) the bots' own talk: refused when warm, while resting, behind a reply
+        if ambient {
+            stats.ambient += 1
+            if let refusal = ambientRefusal() {
+                stats.ambientRefused += 1
+                Log.info("lm", "#\(id) ambient refused (\(refusal.why)): \(refusal.error)")
+                reply(nil, source: nil, error: refusal.error)
+                return
+            }
+        }
         inFlight += 1
+        if ambient { ambientInFlight += 1 }
+        /// the request answered (or given up): out of the counts (bots ideas, round 4 fixes: the bots' own talk's too)
+        func finished() {
+            inFlight -= 1
+            if ambient { ambientInFlight -= 1 }
+        }
 
         let runLocal: (String?) -> Void = { [weak self] onlineError in
             guard let self else { return }
             guard fallback || mode == "local", self.local.available else {
-                self.inFlight -= 1
+                finished()
                 self.stats.failed += 1
                 reply(nil, source: nil, error: onlineError ?? "unavailable")
                 return
             }
             guard !self.tooHot else {
-                self.inFlight -= 1
+                finished()
                 self.stats.hot += 1
                 Log.info("lm", "#\(id) the phone is hot (thermal state \(DeviceStats.name(self.thermalState()))): no on-device reply")
                 reply(nil, source: nil, error: onlineError ?? "busy")
                 return
             }
             if let refusal = self.memoryRefusal() {
-                self.inFlight -= 1
+                finished()
                 self.stats.memory += 1
                 Log.info("lm", "#\(id) the phone is short of memory (\(refusal)): no on-device reply")
                 reply(nil, source: nil, error: onlineError ?? "unavailable")
@@ -332,19 +372,24 @@ final class BotChatModel {
             if !self.local.isLoaded {
                 self.onWillLoad?()
             }
-            self.local.generate(system: localPrompt["system"] as? String ?? "", user: localPrompt["user"] as? String ?? "", think: think, deadline: deadline) { result in
-                self.inFlight -= 1
+            self.local.generate(system: localPrompt["system"] as? String ?? "", user: localPrompt["user"] as? String ?? "", think: think, deadline: deadline, ambient: ambient) { result in
+                finished()
                 switch result {
                 case .success(let output):
                     self.stats.local += 1
                     let t = output.timings
                     // (the mode the model ran in: the request's think, as the model allows it)
-                    Log.info("lm", "#\(id) local, think \(t.think ? "on" : "off")\(t.think != think ? " (asked \(think ? "on" : "off"))" : ""), in \(Int(t.totalMs)) ms\(t.loadMs.map { " (load \(Int($0)) ms)" } ?? ""): prompt \(t.promptTokens) tokens at \(Int(t.promptTokensPerSecond))/s\(t.think ? ", note \(t.noteTokens) tokens in \(Int(t.noteMs)) ms" : ""), \(t.generatedTokens) tokens at \(Int(t.generateTokensPerSecond))/s")
+                    Log.info("lm", "#\(id) local\(ambient ? " (ambient)" : ""), think \(t.think ? "on" : "off")\(t.think != think ? " (asked \(think ? "on" : "off"))" : ""), in \(Int(t.totalMs)) ms\(t.loadMs.map { " (load \(Int($0)) ms)" } ?? ""): prompt \(t.promptTokens) tokens at \(Int(t.promptTokensPerSecond))/s\(t.think ? ", note \(t.noteTokens) tokens in \(Int(t.noteMs)) ms" : ""), \(t.generatedTokens) tokens at \(Int(t.generateTokensPerSecond))/s")
                     reply(output.text.isEmpty ? nil : output.text, source: output.text.isEmpty ? nil : "local",
                           error: output.text.isEmpty ? "failed: empty" : nil, extra: ["timings": t.dictionary])
+                case .failure(.preempted):
+                    // (bots ideas, round 4 fixes: a line of the bots' own talk stopped for a reply to the player)
+                    self.stats.ambientStopped += 1
+                    Log.info("lm", "#\(id) local (ambient): stopped for a reply to the player: busy")
+                    reply(nil, source: nil, error: LocalModel.Failure.preempted.description)
                 case .failure(let failure):
                     self.stats.failed += 1
-                    Log.info("lm", "#\(id) local, think \(self.local.thinkSupport.writesNote(asked: think) ? "on" : "off"), failed: \(failure)\(onlineError.map { " (after Claude: \($0))" } ?? "")")
+                    Log.info("lm", "#\(id) local\(ambient ? " (ambient)" : ""), think \(self.local.thinkSupport.writesNote(asked: think) ? "on" : "off"), failed: \(failure)\(onlineError.map { " (after Claude: \($0))" } ?? "")")
                     if case .unavailable("memory") = failure {
                         self.rest("not loaded: too little left for the app")
                     }
@@ -356,7 +401,7 @@ final class BotChatModel {
         let key = mode == "online" ? readKey() : nil
         guard let key else {
             if mode == "online", !fallback {
-                inFlight -= 1
+                finished()
                 reply(nil, source: nil, error: "unavailable")
                 return
             }
@@ -366,7 +411,7 @@ final class BotChatModel {
         // (signed: the key's Keychain read on this thread may have run past the deadline; an unsigned subtraction traps)
         let remaining = Double(Int64(bitPattern: deadline.uptimeNanoseconds) - Int64(bitPattern: DispatchTime.now().uptimeNanoseconds)) / 1e9
         guard remaining > 0.5 else {
-            inFlight -= 1
+            finished()
             reply(nil, source: nil, error: "timeout")
             return
         }
@@ -375,7 +420,7 @@ final class BotChatModel {
             guard let self else { return }
             switch result {
             case .success(let output):
-                self.inFlight -= 1
+                finished()
                 self.stats.online += 1
                 let u = output.usage
                 Log.info("lm", "#\(id) Claude in \(Int(output.ms)) ms (input \(u.input), cache read \(u.cacheRead), write \(u.cacheWrite), output \(u.output) tokens)")
@@ -396,7 +441,7 @@ final class BotChatModel {
                 if fallback {
                     runLocal(failure.reason)
                 } else {
-                    self.inFlight -= 1
+                    finished()
                     self.stats.failed += 1
                     reply(nil, source: nil, error: failure.reason)
                 }
@@ -406,7 +451,8 @@ final class BotChatModel {
 
     /// For the phone spike's log.
     var counters: [String: Any] {
-        ["requests": stats.requests, "local": stats.local, "online": stats.online, "failed": stats.failed, "busy": stats.busy, "hot": stats.hot, "memory": stats.memory, "inFlight": inFlight]
+        ["requests": stats.requests, "local": stats.local, "online": stats.online, "failed": stats.failed, "busy": stats.busy, "hot": stats.hot, "memory": stats.memory,
+         "ambient": stats.ambient, "ambientRefused": stats.ambientRefused, "ambientStopped": stats.ambientStopped, "inFlight": inFlight]
     }
 }
 

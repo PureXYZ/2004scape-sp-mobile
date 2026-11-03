@@ -492,7 +492,7 @@ Page → native: `window.webkit.messageHandlers.native.postMessage(msg)`
 | `{type:'settings', values}` | Persist settings (native stores them; injected again on next launch). At boot the page checks them against the Settings sheet: a value it no longer offers becomes the nearest offered number (an earlier version's 450 ms hold: 400) or the default, saved once. |
 | `{type:'fatal', message}` | Unrecoverable error. The page shows its own 2004 error screen with Restart; native logs it, plays the error haptic (unless Vibration is off) and lets the screen lock (no alert). |
 | `{type:'clear-log'}` | Settings › Saved data › Delete everything: native empties its log (`Log.clear`: both files and the lines not yet written; the next line is `log cleared`). |
-| `{type:'lm', id, mode, think, local, online, maxChars, timeoutMs, fallback?}` | **Bots**: a bot's reply for the chat model to write (§7.1; `think`: Settings › Bot chat › Think first). Answered through `LostCityHost.bots.lmReply`. |
+| `{type:'lm', id, mode, think, ambient?, local, online, maxChars, timeoutMs, fallback?}` | **Bots**: a bot's reply for the chat model to write (§7.1; `think`: Settings › Bot chat › Think first; `ambient`: a line of the bots' own talk, Settings › Bot chat › Bots' own talk). Answered through `LostCityHost.bots.lmReply`. |
 | `{type:'lm-key', action}` | **Bots**: `set` opens native's secure box for the Claude key; `remove` deletes it (§7.1). Answered with a status. |
 | `{type:'lm-warm'}` | **Bots**: the player starts to chat with the on-device model chosen (and it is not loaded), or enters the world while no quick load is on record: native loads it in the background (§7.1). |
 | `{type:'socket', action:'open'\|'send'\|'close', id, purpose?, data?}` | **Online**: the page's WebSockets, opened natively to the page load's server (§7.2, §7.4). |
@@ -541,18 +541,22 @@ fallback (the rules' line). Three choices, Settings › Bot chat (the setting `b
 Claude Haiku 5.5 with the player's own key, falling back to the on-device model, then to nothing). With a model trained
 both ways the same page offers **Think first** (the setting `botThink`): the on-device model writes a short note before
 each reply ("asks: … uses: … tone: …", Qwen's think block), the page asks for it with every On-device request
-(`think`).
+(`think`). (Bots ideas, round 4) **Bots' own talk** (the setting `botAmbient`, `rules` or `model`; Rules by default
+until the phone heat test passes and the player agrees): with Model the on-device model also words the bots' talk
+between themselves near the player (a topic thread's turns after its opener, a bot's answer to another bot's question:
+the engine's `port/BotModelAmbient`), always on the device and never with the note, even with Claude online.
 
 ```
 engine worker (engine-bots.js)           page (host.js lm)                          native (BotChatModel, app process)
  {type:'bots-lm', id, mode, local,  ->   Rules, no native, the chosen model    ->   {type:'lm', ..., think}: at most 3
-  online, maxChars, timeoutMs}           not there: null 'unavailable' at once;     at once (more: 'busy'); online:
+  online, maxChars, timeoutMs,           not there: null 'unavailable' at once;     at once (more: 'busy'); online:
+  ambient?}                              ambient: local, think false
                                          else to native, + think (Think first)      OnlineModel, then LocalModel;
  {type:'bots-lm-reply', id, text,   <-   ms from the page's send; no answer    <-   local: LocalModel (think: the note
   source, error?, ms}                    by timeoutMs + 3 s: 'timeout'              first, if the model offers it)
                                                                                     LostCityHost.bots.lmReply(...)
  {type:'bots-lm-mode', mode, local, <-   before the world starts (on 'booted')      LostCityHost.bots.lmStatus(...)
-  online}                                and on every change                        Keychain (the key), Model/ (GGUF)
+  online, ambient}                       and on every change                        Keychain (the key), Model/ (GGUF)
 ```
 
 - **Only the bots' engine hears any of it.** With the bots off the engine is `engine.js` and the page sends it no
@@ -560,7 +564,9 @@ engine worker (engine-bots.js)           page (host.js lm)                      
 - **page → engine, `bots-lm-mode`**: `{mode, local, online}`: the player's choice and what is there (`local`: a model in
   the app; `online`: a key saved), sent right after `booted` (before `start`) and whenever the choice or the status
   changes. The engine asks only when the chosen backend, or its fallback, is there. While the model in the app rests
-  for memory (the status's `local.rest`) `local` is false: the bots say their own lines and ask nothing.
+  for memory (the status's `local.rest`) `local` is false: the bots say their own lines and ask nothing. (Bots ideas,
+  round 4) `ambient`: Bots' own talk is Model and can be used (`lm.ambientUsable`: a model in the app and a chat model
+  other than Rules); false, the bots' own talk is the rules' and nothing of it draws a random number.
 - **page → engine, `bots-lm-notice`**: `{lines}`: game messages for the humans in the world (at most 80 characters each),
   from host.js `lm.notice`: while the bots talk with the model in the app (On-device, or Claude online with no key), the
   player reads "Warning: low memory. The on-device chat model is off for 10+ minutes." and "Bots use scripted replies. Fewer bots (Settings > World) helps." once when a
@@ -572,7 +578,11 @@ engine worker (engine-bots.js)           page (host.js lm)                      
   `'unavailable'`, when there is no native app (a desktop browser), when the choice is Rules, or when the chosen backend
   and its fallback are missing; otherwise it posts `{type:'lm', id, mode, think, local, online, maxChars, timeoutMs}`
   to native (the mode is the page's current choice; `think` the player's Think first as it is now, `botThink`, with
-  On-device, else false: the engine never hears of it).
+  On-device, else false: the engine never hears of it). (Bots ideas, round 4) `ambient: true`: a line of the bots' own
+  talk near the player (`port/BotModelAmbient`; at most one request in 20 s world-wide, only with no request in flight,
+  so a reply to the player never waits behind one): always `mode: 'local'`, and the page sends it with `think: false`
+  and `ambient: true`, or answers `'unavailable'` at once when Bots' own talk is Rules, cannot be used, or the model
+  rests.
 - **page → native, `think`** (absent: false): the on-device model writes its note before the reply, if it is a model
   that offers the choice (the status's `local.think` `'option'`); a model that always or never writes one does as it
   was trained. The page sends it only with On-device: with Claude online it is false, so Claude's fallback to the
@@ -618,8 +628,17 @@ bots (2026-10-27): with the model loaded again 12 s after a memory warning, the 
 ended the game's WebContent process 0.2 s after it (the page reloaded); before that iOS had ended WebKit's GPU process
 twice (the whole screen black for a moment). The app also collects the page's heap on a warning and before a load
 (§7.7). Claude online is not affected. At most 3 requests run at a time (the model
-generates one at a time on its own queue; the others wait); a fourth is answered `'busy'` at once. Each request has the
-page's `timeoutMs` (9 s) in all.
+generates one at a time on its own queue; the others wait); a fourth is answered `'busy'` at once ((bots ideas, round 4
+fixes) a line of the bots' own talk is not counted toward the replies' 3). Each request has the
+page's `timeoutMs` (9 s) in all. (Bots ideas, round 4) **An ambient request** (the bots' own talk) is the on-device
+model's whatever its `mode`, never with the note, and is refused at once: `'hot'` at thermal state fair or above (a
+reply's gate stays serious: the heat's headroom is the player's), `'unavailable'` while the model rests for memory, and
+`'busy'` while a reply to the player waits or runs on the model. It may load the model (so a trial is real: the model
+then stays in while the player is near talking bots, and unloads after 5 quiet minutes). The model's queue serves the
+replies first (`LocalModel.generate`'s `ambient`: a line of the bots' own talk waits behind every reply asked before it
+runs; (round 4 fixes) one running when a reply is asked stops at its next token, `LocalModel.Failure.preempted`, and is
+answered `'busy'`, which the engine falls back on: "#N local (ambient): stopped for a reply to the player: busy"). Its
+log lines say `(ambient)`; the counters (`lm-status`) count them (`ambient`, `ambientRefused`, `ambientStopped`).
 
 **The on-device model** (`ios/LostCity/LocalModel.swift`): llama.cpp (the prebuilt framework of release **b11297**, linked
 for the device only: its release has no simulator slice, so on the simulator the model is `unavailable`, reason
@@ -695,8 +714,15 @@ simulator", "Only in the iPhone app"), **Think first** (Off / On, the setting `b
 its buttons off and its choice kept, with "Only with the On-device chat model." while Rules or Claude online is chosen
 (it has no use there: the page sends `think` only with On-device); applied at once:
 the next request carries it; its default is host.js's `BOT_THINK_DEFAULT`, On), the Claude key (Not set / Ends in …abcd, and why it does not work; Set key / Change, Remove with a confirm
-box), Test (one line from Claude) and what Claude online sends ("the chat and the bot's state go to Anthropic"). It fits
-an iPhone 13 mini without scrolling, also with Display Zoom (320 px tall: its rows a little tighter there).
+box), Test (one line from Claude) and what Claude online sends ("the chat and the bot's state go to Anthropic"). (Bots
+ideas, round 4) **Bots' own talk** (Rules / Model, the setting `botAmbient`, default Rules; "Talk between bots near
+you" (round 4 fixes: stage 1 words no reactions to the player; stage 2's row would say "Reactions to you and talk
+between bots near you"); greyed out, its buttons off and its choice kept, unless the on-device model is in the app and a
+chat model other than Rules is chosen: "Only with the on-device model.", "Only with a chat model (not Rules).", "Only in
+the iPhone app"; applied at once: the engine hears it in `bots-lm-mode`). It fits
+an iPhone 13 mini without scrolling, also with Display Zoom (320 px tall: its rows a little tighter there; (round 4
+fixes) tighter still on a layer under 370 HUD px, `html.ui-short`, Display Zoom's and Android's 360, so it fits there
+too: gallery.mjs's `botchat` fails if it scrolls from 320 HUD px up).
 
 **DEBUG builds** add `{type:'lm-bench', id, action, …}` (a benchmark of the on-device model: `generate` {system, user, think?, timeoutMs}:
 the line, its timings and its note; `stats` (the model's note support among them), `options`, `unload`; answered through
@@ -706,12 +732,19 @@ the tests never call the real API), `lm-key-alert` (type into the key's secure b
 
 **Tests**: `web/test/e2e.mjs --lm-stub` (the relay in Chrome, a stub native, a request posted from inside the engine
 worker; Think first: shown for `'option'`, the requests' `think` as the setting says at once, kept across a reload;
+(bots ideas, round 4) Bots' own talk: Rules by default, Model saved and heard by the engine at once, an ambient request
+to native with `mode: 'local'` and `think: false` (also with Claude online), greyed out with Rules and without native,
+kept across a reload;
 the warm-up: a chat line typed either way loads the model once; a Jmod's `::` command typed any way, with no gap
 between the keys too, never does; with `--no-jmod` the chat keyboard's opening does),
 `web/test/native/lm-harness.mjs` (the app's BotChatModel, OnlineModel and LocalModel compiled for the Mac against the
 macOS framework and a local mock of the Messages API, `web/test/lm/mock-claude.mjs`; with a hybrid model, the base GGUF
 with a model.json `"template": "qwen-chatml-hybrid"` beside it put in by `prepare-model.sh`: no note when off, the note
-first when on, also on Claude's fallback, never in the reply, and the templates that decide alone), the `lm` phase of
+first when on, also on Claude's fallback, never in the reply, and the templates that decide alone; (bots ideas, round
+4) an ambient request: the on-device model even with a key, refused 'hot' at fair (a reply still answered), 'busy'
+behind a reply, 'unavailable' while resting, never the note, the queue serving the replies first, (round 4 fixes) one
+running stopped by a reply ('busy') and not counted toward the replies' 3, a load for it;
+Android's `android/test/native/lm-harness.mjs` the same), the `lm` phase of
 `web/test/native/drive.mjs` (the simulator: status (`think` 'never': no model runs there), the key's secure box,
 requests to the mock with and without `think`, `botThink` kept across a reload), `web/test/hud.mjs` (the page's fit,
 Think first shown or not by the status), `web/test/gallery/gallery.mjs` (the page on every phone size, `mini-zoomed`

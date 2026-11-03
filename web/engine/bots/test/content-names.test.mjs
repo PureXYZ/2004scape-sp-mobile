@@ -249,6 +249,9 @@ const DYNAMIC = {
     'port/BotPkFight.ts:ObjType.getId(n)': ['obj', 'exact', () => stringsIn('port/BotPkFight.ts', n => insideVariable('NAMES')(n) || insideVariable('VIALS')(n) || insideMethod('glories')(n) || insideMethod('pkFoods')(n))],
     // (round 2) the d'hide tiers of a 1-Attack ranger's body (and their chaps, matched)
     'port/BotPkFight.ts:ObjType.getId(tier.body)': ['obj', 'exact', () => stringsIn('port/BotPkFight.ts', insideVariable('DHIDE'))],
+    // ---- (bots ideas, Track B: loot) a PK kit's leftovers (port/BotLoot pkKitFamily: the empty vial, the glories) ----
+    'port/BotLoot.ts:ObjType.getId(name)': ['obj', 'exact', () => stringsIn('port/BotLoot.ts', insideMethod('pkKitFamily'))],
+    // ---- end of Track B's (ideas) block ----
     'port/BotPkFight.ts:ParamType.getId(name)': ['param', 'exact', () => stringsIn('port/BotPkFight.ts', callArg('objParam', 1))],
     'port/BotPkFight.ts:VarPlayerType.getByName(name)': ['varp', 'exact', () => stringsIn('port/BotPkFight.ts', callArg('varp', 1))],
     'tasks/RangedMagicTask.ts:findNpcByName(this.currentShop.npcName)': ['npc', 'exact', () => stringsIn('tasks/RangedMagicTask.ts', propertyValue('npcName'))],
@@ -331,8 +334,36 @@ const DYNAMIC = {
     // ---- end of Track M's (variety) block ----
     // ---- (variety round 2, Track W2: fashion) port/BotFashion's objects: the status pieces (STATUS_NAMES), the robes
     // (ROBE_NAMES), the members fashion's, the novelty pieces' and the PK variety's (membersItems, noveltyItems, pkItems), id()'s ----
-    'port/BotFashion.ts:ObjType.getId(name)': ['obj', 'exact', () => stringsIn('port/BotFashion.ts', n => insideVariable('STATUS_NAMES')(n) || insideVariable('ROBE_NAMES')(n) || insideMethod('membersItems')(n) || insideMethod('noveltyItems')(n) || insideMethod('pkItems')(n) || callArg('id', 0)(n))]
+    'port/BotFashion.ts:ObjType.getId(name)': ['obj', 'exact', () => stringsIn('port/BotFashion.ts', n => insideVariable('STATUS_NAMES')(n) || insideVariable('ROBE_NAMES')(n) || insideMethod('membersItems')(n) || insideMethod('noveltyItems')(n) || insideMethod('pkItems')(n) || callArg('id', 0)(n))],
     // ---- end of Track W2's (variety) block ----
+    // ---- (bots ideas, Track A: the period endgame) its computed names ----
+    'BotAction.ts:ObjType.getId(keyName)': ['obj', 'exact', () => Object.values(lib.KEY_DOORS ?? { deepdungeondoor: 'dusty_key', dungeonjail: 'jail_key' })],
+    'port/BotAge.ts:ObjType.getId(capeName)': ['obj', 'exact', () => ['zamorak_cape', 'saradomin_cape', 'guthix_cape']],
+    'port/BotAge.ts:ObjType.getId(staffName)': ['obj', 'exact', () => ['zamorak_staff', 'saradomin_staff', 'guthix_staff']],
+    // (and round 3's G period: the Games Room's stairs up, port/BotExits gamesRoomOut)
+    'port/BotExits.ts:findLocByName(name)': ['loc', 'exact', () => ['magearena_waterportal2', 'magearena_ladder_from_cellar', 'board_game_stairs_base', 'board_game_stairs_grey_base2']],
+    'port/BotEndgameFight.ts:VarPlayerType.getByName(PROTECT[key].varp)': ['varp', 'exact', () => stringsIn('port/BotEndgameFight.ts', propertyValue('varp'))],
+    'port/BotEndgameFight.ts:interactIfButtonByName(PROTECT[key].button)': ['com', 'exact', () => stringsIn('port/BotEndgameFight.ts', propertyValue('button'))],
+    'port/BotEndgameTeams.ts:findLocByName(name)': ['loc', 'exact', () => ['dragonkinginlever', 'dragonkingoutlever']],
+    // (the KQ track: the Kalphite lair's ropes, port/BotKqTeams climbRope's)
+    'port/BotKqTeams.ts:findLocByName(name)': ['loc', 'exact', () => ['kalphite_burrow_entrance_withrope', 'kalphite_chamber_entrance_withrope', 'kalphite_chamber_exit', 'kalphite_burrow_exit']],
+    // ---- end of Track A's names ----
+    // ---- (bots ideas, round 3: G period) theme G's computed names: the Games Room's stairs down and the board's columns
+    // (tasks/GamesRoomTask), the Gnomeball tacklers holding a ball (tasks/GnomeballTask), the pets' items (port/BotPets),
+    // the Runelink pieces (port/BotRunelink) ----
+    'tasks/GamesRoomTask.ts:findLocByName(name)': ['loc', 'exact', () => ['board_game_stairs_grey_all', 'board_game_stairs_top']],
+    'tasks/GamesRoomTask.ts:interactIfButtonByName(`boardgames_runelink:column_${col}`)': ['com', 'exact', () => [1, 2, 3, 4, 5, 6, 7].map(c => `boardgames_runelink:column_${c}`)],
+    'tasks/GnomeballTask.ts:NpcType.getId(n)': ['npc', 'exact', () => ['gnomeballer_red_withball', 'gnomeballer_orange_withball', 'gnomeballer_yellow_withball']],
+    'port/BotPets.ts:ObjType.getId(`${prefix}${colour}`)': ['obj', 'exact', () => ['kittenobject', 'growncatobject', 'overgrowncatobject'].flatMap(p => ['', '_light', '_brown', '_black', '_browngrey', '_bluegrey'].map(c => `${p}${c}`))],
+    'port/BotRunelink.ts:ObjType.getId(`boardgames_runelink_${r}`)': ['obj', 'exact', () => ['firerune', 'waterrune', 'earthrune', 'airrune', 'mindrune', 'bodyrune', 'naturerune', 'chaosrune', 'lawrune', 'cosmicrune', 'bloodrune', 'soulrune'].map(r => `boardgames_runelink_${r}`)],
+    // ---- end of G period's block ----
+    // ---- (bots ideas, round 3: G buzz) the rock crabs' two forms (tasks/CrabTask ACTIVE, ROCKS), the causeway's jumping
+    // spots (horror_jumping_spot1..10: PeriodPlaces' CAUSEWAY_NORTH and CAUSEWAY_SOUTH spot numbers) and the lighthouse's
+    // door and stairs (tasks/LighthouseTask _loc's names) ----
+    'tasks/CrabTask.ts:NpcType.getId(n)': ['npc', 'exact', () => stringsIn('tasks/CrabTask.ts', n => insideVariable('ACTIVE')(n) || insideVariable('ROCKS')(n))],
+    'tasks/LighthouseTask.ts:findLocByName(`horror_jumping_spot${spot}`)': ['loc', 'exact', () => Array.from({ length: 10 }, (_, i) => `horror_jumping_spot${i + 1}`)],
+    'tasks/LighthouseTask.ts:findLocByName(name)': ['loc', 'exact', () => stringsIn('tasks/LighthouseTask.ts', callArg('_loc', 2))]
+    // ---- end of G buzz's names ----
 };
 /** (variety round 2, Track D2) the plans' files, and the engine's steps that take loc names (callee, argument index) */
 const D2_FILES = ['port/BotChains.ts', 'port/BotErrands.ts', 'port/BotMagicRuns.ts', 'port/BotHerbRuns.ts', 'port/BotWildTrips.ts'];

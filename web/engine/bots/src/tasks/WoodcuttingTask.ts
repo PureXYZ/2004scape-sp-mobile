@@ -41,6 +41,7 @@ import { botConsole as console } from '#/engine/bot/port/BotLog.js';
 import { isChoppableTree } from '#/engine/bot/port/BotContent.js';
 import { moveItems, bankedId } from '#/engine/bot/port/BotInventoryCompat.js';
 import { isEventHazard } from '#/engine/bot/port/BotRandomEvents.js';
+import { fearedAt } from '#/engine/bot/port/BotDanger.js';
 // (the realism work's phase 5a, Track F: misclicks, port/BotFumble)
 import World from '#/engine/World.js';
 import { fumbleDue, fumbled } from '#/engine/bot/port/BotFumble.js';
@@ -490,9 +491,11 @@ export class WoodcuttingTask extends BotTask {
         // port: and only a tree that can be chopped (274's 'tree' prefix also matches walls, doors and rope swings)
         // (phase 5a: and not a random event's hazard the bot noticed, an ent: port/BotRandomEvents)
         // (the fixes: and not one it found out of its reach, or in a members' area on a free world: outOfReachFor)
-        const unclaimed = findLocByPrefixWhere(player.x, player.z, player.level, this._treePrefix(), 15, loc => !isLocClaimed(loc) && isChoppableTree(loc) && !isEventHazard(player, loc) && !outOfReachFor(player, loc), 'stump');
+        // (bots ideas, round 1's left-overs: and not one where monsters stronger than it hunt it, port/BotDanger fearedAt:
+        // a level-3 took the trees on the east side of Varrock's dark wizards' circle one by one, and died there)
+        const unclaimed = findLocByPrefixWhere(player.x, player.z, player.level, this._treePrefix(), 15, loc => !isLocClaimed(loc) && isChoppableTree(loc) && !isEventHazard(player, loc) && !outOfReachFor(player, loc) && !fearedAt(player, loc.x, loc.z, loc.level), 'stump');
         if (unclaimed) return unclaimed;
-        return findLocByPrefixWhere(player.x, player.z, player.level, this._treePrefix(), 15, loc => isChoppableTree(loc) && !isEventHazard(player, loc) && !outOfReachFor(player, loc), 'stump');
+        return findLocByPrefixWhere(player.x, player.z, player.level, this._treePrefix(), 15, loc => isChoppableTree(loc) && !isEventHazard(player, loc) && !outOfReachFor(player, loc) && !fearedAt(player, loc.x, loc.z, loc.level), 'stump');
     }
 
     /**

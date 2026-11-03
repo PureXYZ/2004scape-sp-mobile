@@ -39,7 +39,7 @@ import {
     Items, Locations, randInt,
     bankInvId, teleportNear, advanceBankWalk,
     INTERACT_TIMEOUT, StuckDetector, ProgressWatchdog, botJitter, hasStrayItems, ResourceWait, noteGatherTick, stumpToWaitBy, awayFromSpot,
-    approachVerdict, APPROACH_TICKS, treeApproachTile,
+    approachVerdict, APPROACH_TICKS, treeApproachTile, humanDelay,
 } from '#/engine/bot/tasks/BotTaskBase.js';
 import World from '#/engine/World.js';
 import { noteEvent } from '#/engine/bot/port/BotChatter.js';
@@ -50,6 +50,7 @@ import { getCombatLevel, interactHeldOpU, interactIfButtonByName, _wornContains,
 import { noteOutOfReach, outOfReachFor } from '#/engine/bot/tasks/BotTaskBase.js';
 import { botConsole as console } from '#/engine/bot/port/BotLog.js';
 import { isChoppableTree } from '#/engine/bot/port/BotContent.js';
+import { fearedAt } from '#/engine/bot/port/BotDanger.js';
 import { moveItems, bankedId } from '#/engine/bot/port/BotInventoryCompat.js';
 
 const FAIL_LIMIT = 6;
@@ -307,10 +308,13 @@ export class FletchingTask extends BotTask {
                     this._resetWcState();
                     return;
                 }
+                // (the bots ideas work, round 4 fixes) a moment later, as a person notices the stump (WoodcuttingTask's
+                // rule, BotTiming 'retarget'; the next tree was clicked in the same tick)
                 if (this.currentTree && !this._isTreeValid(this.currentTree)) {
                     this.state        = 'woodcut_approach';
                     this._releaseTree();
                     this.woodcutTicks = 0;
+                    this.cooldown     = humanDelay(player, 'retarget');
                     return;
                 }
                 this.woodcutTicks++;
@@ -336,6 +340,7 @@ export class FletchingTask extends BotTask {
                     this.state        = 'woodcut_approach';
                     this._releaseTree();
                     this.woodcutTicks = 0;
+                    this.cooldown     = humanDelay(player, 'retarget');
                 }
                 return;
             }
@@ -469,9 +474,11 @@ export class FletchingTask extends BotTask {
         // than to sit scanning forever finding nothing.
         // port: and only a tree that can be chopped (274's 'tree' prefix also matches walls, doors and rope swings)
         // (the fixes: and not one it found out of its reach, or in a members' area on a free world: outOfReachFor)
-        const unclaimed = findLocByPrefixWhere(player.x, player.z, player.level, this._treePrefix(), 15, loc => !isLocClaimed(loc) && isChoppableTree(loc) && !outOfReachFor(player, loc), 'stump');
+        // (bots ideas, round 1's left-overs: and not one where monsters stronger than it hunt it, port/BotDanger fearedAt,
+        // as tasks/WoodcuttingTask: a level-3 fletcher cut its logs tree by tree across Varrock's dark wizards' circle)
+        const unclaimed = findLocByPrefixWhere(player.x, player.z, player.level, this._treePrefix(), 15, loc => !isLocClaimed(loc) && isChoppableTree(loc) && !outOfReachFor(player, loc) && !fearedAt(player, loc.x, loc.z, loc.level), 'stump');
         if (unclaimed) return unclaimed;
-        return findLocByPrefixWhere(player.x, player.z, player.level, this._treePrefix(), 15, loc => isChoppableTree(loc) && !outOfReachFor(player, loc), 'stump');
+        return findLocByPrefixWhere(player.x, player.z, player.level, this._treePrefix(), 15, loc => isChoppableTree(loc) && !outOfReachFor(player, loc) && !fearedAt(player, loc.x, loc.z, loc.level), 'stump');
     }
 
     /** Release the currently claimed tree (if any) so other bots can target it. */

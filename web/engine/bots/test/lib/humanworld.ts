@@ -198,3 +198,152 @@ export async function fashionModules(): Promise<{ fashion: typeof import('#/engi
     return { fashion, showOff, ageTierFor: age ? (name: string, planner: string) => age.ageTierFor(name, planner as never) : null, baldKit, vendorAsk };
 }
 // ---- end of Track W2's exports ----
+// ---- (bots ideas) Track A (the period endgame) exports ----
+// the endgame's modules (the trips' registry and log, the drop moments, the sales, the teams, the dusty key, the offer):
+// loaded on demand, so a library without them (the round's "before", LC_BOTS_SRC) loads and the EG metrics are n/a
+export async function endgameModules(): Promise<{
+    core: typeof import('#/engine/bot/port/BotEndgameCore.js') | null;
+    fight: typeof import('#/engine/bot/port/BotEndgameFight.js') | null;
+    endgame: typeof import('#/engine/bot/port/BotEndgame.js') | null;
+    teams: typeof import('#/engine/bot/port/BotEndgameTeams.js') | null;
+    sale: typeof import('#/engine/bot/port/BotDropSale.js') | null;
+    velrak: typeof import('#/engine/bot/port/BotVelrak.js') | null;
+    kq: typeof import('#/engine/bot/port/BotKqTeams.js') | null;
+}> {
+    const [core, fight, endgame, teams, sale, velrak, kq] = await Promise.all([
+        import('#/engine/bot/port/BotEndgameCore.js').catch(() => null),
+        import('#/engine/bot/port/BotEndgameFight.js').catch(() => null),
+        import('#/engine/bot/port/BotEndgame.js').catch(() => null),
+        import('#/engine/bot/port/BotEndgameTeams.js').catch(() => null),
+        import('#/engine/bot/port/BotDropSale.js').catch(() => null),
+        import('#/engine/bot/port/BotVelrak.js').catch(() => null),
+        // (the KQ track: its attempts' stats and log; null for an older library)
+        import('#/engine/bot/port/BotKqTeams.js').catch(() => null)
+    ]);
+    return { core, fight, endgame, teams, sale, velrak, kq };
+}
+// ---- end of Track A's exports ----
+// ---- (bots ideas) Track B (PKers loot and vultures; the wine crowd, safespots and lever camps; the model guard) exports ----
+/** Track B's modules, by namespace (an older library has none: the runner's loot record is then missing) */
+export async function lootModules(): Promise<{ loot: typeof import('#/engine/bot/port/BotLoot.js') | null; magic: typeof import('#/engine/bot/port/BotMagicRuns.js') | null; safespots: typeof import('#/engine/bot/port/BotSafespots.js') | null }> {
+    const loot = await import('#/engine/bot/port/BotLoot.js').catch(() => null);
+    const magic = await import('#/engine/bot/port/BotMagicRuns.js').catch(() => null);
+    const safespots = await import('#/engine/bot/port/BotSafespots.js').catch(() => null);
+    return { loot, magic, safespots };
+}
+export { default as ScriptProviderB } from '#/engine/script/ScriptProvider.js';
+export { PlayerQueueType as PlayerQueueTypeB } from '#/engine/entity/PlayerQueueRequest.js';
+// ---- end of Track B's exports ----
+// ---- (bots ideas, round 2: arcs foundation) the arcs' modules: the saved arcs (port/BotArcsStore), the bus
+// (port/BotArcsEvents), the line helper (port/BotArcsSay), loaded on demand: null for an older library (an A/B run against
+// the round's "before", LC_BOTS_SRC), and the runner's record.arcs is then null (the AR and WT metrics n/a) ----
+export async function arcsModules(): Promise<{
+    store: typeof import('#/engine/bot/port/BotArcsStore.js');
+    events: typeof import('#/engine/bot/port/BotArcsEvents.js');
+    say: typeof import('#/engine/bot/port/BotArcsSay.js');
+} | null> {
+    try {
+        const [store, events, say] = await Promise.all([import('#/engine/bot/port/BotArcsStore.js'), import('#/engine/bot/port/BotArcsEvents.js'), import('#/engine/bot/port/BotArcsSay.js')]);
+        return typeof store.exportArcs === 'function' && typeof events.onArcs === 'function' ? { store, events, say } : null;
+    } catch {
+        return null;
+    }
+}
+// ---- end of the arcs foundation's exports ----
+// ---- (bots ideas, round 2) C arcs: theme C's modules for the runner (goals, moods, leaving, 99 parties, whims, weddings),
+// loaded on demand as above ----
+export async function arcsCModules(): Promise<{
+    goals: typeof import('#/engine/bot/port/BotGoals.js');
+    moods: typeof import('#/engine/bot/port/BotMoods.js');
+    leaving: typeof import('#/engine/bot/port/BotLeaving.js');
+    lives: typeof import('#/engine/bot/port/BotLives.js');
+    whims: { whimLog?: unknown[] } | null;
+    ninety: { ninetyLog?: unknown[] } | null;
+    weddings: { weddingLog?: unknown[] } | null;
+} | null> {
+    try {
+        const [goals, moods, leaving, lives] = await Promise.all([import('#/engine/bot/port/BotGoals.js'), import('#/engine/bot/port/BotMoods.js'), import('#/engine/bot/port/BotLeaving.js'), import('#/engine/bot/port/BotLives.js')]);
+        // (the later modules of theme C by path, n/a until they exist)
+        const optional = async (p: string): Promise<Record<string, unknown> | null> => {
+            try {
+                return (await import(/* @vite-ignore */ p)) as Record<string, unknown>;
+            } catch {
+                return null;
+            }
+        };
+        const whims = await import('#/engine/bot/port/BotWhims.js');
+        const ninety = await import('#/engine/bot/port/BotNinetyNine.js');
+        const weddings = await optional('#/engine/bot/port/BotWeddings.js');
+        return typeof goals.goalOf === 'function' ? { goals, moods, leaving, lives, whims, ninety, weddings } : null;
+    } catch {
+        return null;
+    }
+}
+// ---- end of C's exports ----
+// ---- (bots ideas, round 2) D word: theme D's modules for the runner (rumours, ties, slang, clique timing), loaded on
+// demand as above ----
+export async function wordModules(): Promise<{
+    rumours: typeof import('#/engine/bot/port/BotRumours.js');
+    ties: typeof import('#/engine/bot/port/BotTies.js');
+    slang: typeof import('#/engine/bot/port/BotSlang.js');
+    cliques: typeof import('#/engine/bot/port/BotCliques.js');
+    rude: typeof import('#/engine/bot/port/BotRude.js');
+} | null> {
+    try {
+        const [rumours, ties, slang, cliques, rude] = await Promise.all([import('#/engine/bot/port/BotRumours.js'), import('#/engine/bot/port/BotTies.js'), import('#/engine/bot/port/BotSlang.js'), import('#/engine/bot/port/BotCliques.js'), import('#/engine/bot/port/BotRude.js')]);
+        return Array.isArray(rumours.rumourLog) && Array.isArray(ties.tieLog) && Array.isArray(slang.slangLog) ? { rumours, ties, slang, cliques, rude } : null;
+    } catch {
+        return null;
+    }
+}
+// ---- end of D's exports ----
+// ---- (bots ideas, round 3: the period foundation) theme G's modules for the runner: port/BotPeriod (who is out on a
+// period visit, periodStats: PC1's "by kind", PC10) and port/BotPeriodPlan, loaded on demand: null for an older library
+// (an A/B run against the round's "before", LC_BOTS_SRC), and the PC metrics that read the library are then n/a (PC1,
+// PC8 and PC9 read the runner's own samples and lines: they have a "before") ----
+export async function periodModules(): Promise<{
+    period: typeof import('#/engine/bot/port/BotPeriod.js');
+    plan: typeof import('#/engine/bot/port/BotPeriodPlan.js');
+} | null> {
+    try {
+        const [period, plan] = await Promise.all([import('#/engine/bot/port/BotPeriod.js'), import('#/engine/bot/port/BotPeriodPlan.js')]);
+        return typeof period.periodOf === 'function' && typeof period.periodStatsCopy === 'function' ? { period, plan } : null;
+    } catch {
+        return null;
+    }
+}
+// ---- end of the period foundation's exports ----
+// ---- (bots ideas, round 3) G period: the G builder's modules for the runner (kittens, Runelink, Gnomeball, their talk),
+// loaded on demand as above: { pets (port/BotPets: petOf, petStatsCopy), runelink (port/BotRunelink: runelinkStatsCopy;
+// null before it), outings (port/BotOutings: minigameStats) }, null for an older library (PC3-PC6 n/a) ----
+export async function periodContentModules(): Promise<{
+    pets: typeof import('#/engine/bot/port/BotPets.js');
+    runelink: Record<string, unknown> | null;
+    outings: typeof import('#/engine/bot/port/BotOutings.js');
+} | null> {
+    try {
+        const [pets, outings] = await Promise.all([import('#/engine/bot/port/BotPets.js'), import('#/engine/bot/port/BotOutings.js')]);
+        const runelink = await import('#/engine/bot/port/BotRunelink.js' as string).catch(() => null);
+        return typeof pets.petOf === 'function' && typeof pets.petStatsCopy === 'function' ? { pets, runelink, outings } : null;
+    } catch {
+        return null;
+    }
+}
+// ---- end of G period's exports ----
+// ---- (bots ideas, round 3) G buzz: the H builder's theme G modules for the runner (the Rellekka buzz, the crabs, the
+// lighthouse, chompies), loaded on demand as above ----
+// ---- end of G buzz's exports ----
+// ---- (bots ideas, round 3) H move: theme H's modules for the runner (port/BotMinimap: the switch, minimapStats;
+// port/BotTalkMoves), loaded on demand as above: null for an older library (the MV metrics that read them n/a) ----
+export async function moveModules(): Promise<{
+    minimap: typeof import('#/engine/bot/port/BotMinimap.js');
+    talk: typeof import('#/engine/bot/port/BotTalkMoves.js');
+} | null> {
+    try {
+        const [minimap, talk] = await Promise.all([import('#/engine/bot/port/BotMinimap.js'), import('#/engine/bot/port/BotTalkMoves.js')]);
+        return typeof minimap.movementOn === 'function' && minimap.minimapStats ? { minimap, talk } : null;
+    } catch {
+        return null;
+    }
+}
+// ---- end of H move's exports ----

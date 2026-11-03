@@ -30,7 +30,7 @@ export { setHabitRatesForTest } from '#/engine/bot/port/BotHabits.js';
 export { setHangoutRateForTest } from '#/engine/bot/port/BotHangout.js';
 export { setArenaRatesForTest } from '#/engine/bot/port/BotArena.js';
 export { personaOf } from '#/engine/bot/port/BotPersona.js';
-export { setDirectorForTest } from '#/engine/bot/port/BotDirector.js';
+export { setDirectorForTest, resetDirectorForTest } from '#/engine/bot/port/BotDirector.js';
 export { setCliqueBehaviourForTest } from '#/engine/bot/port/BotCliques.js';
 export { setEventRatesForTest } from '#/engine/bot/port/BotRandomEvents.js';
 export { setTrainRatesForTest } from '#/engine/bot/port/BotTrains.js';

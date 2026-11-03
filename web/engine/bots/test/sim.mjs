@@ -398,10 +398,14 @@ at(Math.max(spawnDone + 40, 120), 'chat', async () => {
     const t0 = World.currentTick;
     BotChat.onPublicMessage(human, `hey ${bot.displayName}`);
     let answeredIn = -1;
+    // (bots ideas, round 1's left-overs) where the bot is when it reads the line, the tick after (BotChat's HEAR_TICKS:
+    // the second tick here)
+    let heardFrom = 0;
     // port (the realism work): typed: the bot reads the line (a tick), thinks and types its answer at its persona's speed
     // (port/BotTiming: 2-20 ticks), so the answer comes 3-26 ticks on and no faster than 7.5 characters a second (the
     // quickest typist's 6.5, and its spread); it used to come within 8 ticks whatever its length
     await runTicks(REPLY_TICKS, () => {
+        if (World.currentTick - t0 <= 2) heardFrom = Math.max(heardFrom, chebyshev(bot, human));
         if (answeredIn === -1 && BotChat.repliesBy(bot) > before2) answeredIn = World.currentTick - t0;
         return answeredIn !== -1;
     });
@@ -410,7 +414,12 @@ at(Math.max(spawnDone + 40, 120), 'chat', async () => {
     // (a bot that went on a short break meanwhile answers nobody: port/BotHabits, about one an hour, so now and then)
     const brk = lastBreakOf(bot);
     const wentAway = answeredIn === -1 && (isAway(bot) || (brk !== null && brk.kind !== 'linger' && brk.end >= t0));
-    check(`chat: "hey ${bot.displayName}" gets a reply, typed: within ${REPLY_TICKS} ticks, no sooner than 3, at most 7.5 characters a second`, wentAway || (answeredIn !== -1 && answeredIn >= 3 && answeredIn <= REPLY_TICKS && cps <= 7.5), wentAway ? `no reply: ${bot.displayName} went on a short break (${brk?.kind ?? 'away'})` : answeredIn === -1 ? 'no reply' : `${bot.displayName} said "${reply}" after ${answeredIn} ticks (${cps.toFixed(1)} characters a second; distance ${chebyshev(bot, human)})`);
+    // (bots ideas, round 1's left-overs: and one a script took out of earshot, more than 14 tiles, before it read the line
+    // does not answer, as upstream (BotChat's HEARING_DISTANCE): its public answer would not reach the human. The 100-bot
+    // world's seed 1: Lucky Lola, on its way to the Gnome Stronghold's course, was in Al Kharid's glider flight
+    // ([label,gnomeglider_fly]) when the human said its name and at Ta Quir Priw, 820 tiles off, when it read it)
+    const wentOff = answeredIn === -1 && heardFrom > 14;
+    check(`chat: "hey ${bot.displayName}" gets a reply, typed: within ${REPLY_TICKS} ticks, no sooner than 3, at most 7.5 characters a second`, wentAway || wentOff || (answeredIn !== -1 && answeredIn >= 3 && answeredIn <= REPLY_TICKS && cps <= 7.5), wentAway ? `no reply: ${bot.displayName} went on a short break (${brk?.kind ?? 'away'})` : wentOff ? `no reply: ${bot.displayName} was ${heardFrom} tiles off when it read the line (${bot.x},${bot.z},${bot.level}: a glider, a teleport)` : answeredIn === -1 ? 'no reply' : `${bot.displayName} said "${reply}" after ${answeredIn} ticks (${cps.toFixed(1)} characters a second; distance ${chebyshev(bot, human)})`);
     heard.delete(bot);
 });
 
@@ -418,10 +427,13 @@ at(Math.max(spawnDone + 40, 120), 'chat', async () => {
 at(Math.max(spawnDone + 70, 150), 'come here', async () => {
     // a skilling bot with a tile 8-12 tiles away that it can walk to in at most 20 tiles (not behind a closed door or
     // a long fence; a bot inside a building may have none)
+    // (bots ideas, round 1's left-overs: and not one in a gateway's crossing, BotAction.isCrossing: with the dark wizards'
+    // fixes the members world's seed 1 called Rune Miner as it talked to the Al Kharid border guard; it went through the
+    // toll gate, and the human stood 10 tiles back on the Lumbridge side)
     const OFFSETS = [[10, 0], [-10, 0], [0, 10], [0, -10], [8, 8], [-8, -8], [12, 0], [0, 12], [-12, 0], [0, -12], [8, -8], [-8, 8]];
     const candidates = sim.bots().filter(p => {
         const kind = taskKind(taskOf(p)?.name);
-        return p.level === 0 && SKILLING.has(kind) && !['PKer', 'EdgevillePKer'].includes(kind);
+        return p.level === 0 && SKILLING.has(kind) && !['PKer', 'EdgevillePKer'].includes(kind) && !lib.isCrossing(p);
     });
     let bot = null;
     let spot = null;

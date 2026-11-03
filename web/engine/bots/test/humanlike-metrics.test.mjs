@@ -800,6 +800,48 @@ eq('inBand', [M.inBand(5, { min: 4, max: 10 }), M.inBand(11, { max: 10 }), M.inB
     eq('MD: the model group prints apart', M.formatMetrics(M.computeModelMetrics(rec)).join('\n').includes('The language model'), true);
 }
 
+// ---- (bots ideas, round 4: I model) LM1-LM8 from record.model.stats.ambient and the log's entries marked ambient; with
+// the model's metrics, not in the fingerprint, none without --ambient ----
+{
+    const mm = (rec, id) => M.computeModelMetrics(rec).find(m => m.id === id);
+    const replies = { eligible: 4, requests: 4, used: 4, fallbacks: {}, errors: {}, guard: {}, late: 0, latency: [2, 2, 2, 5], candidates: { eligible: 0, requests: 0, used: 0, byVia: {} } };
+    const plainModel = record({ ticks: 3000 }, { model: { kind: 'stub', latencyTicks: 2, failRate: 0, stats: replies, log: [] } });
+    eq('LM: none without --ambient (MD1-MD6 only)', [M.computeModelMetrics(plainModel).some(m => m.group === 'ambient'), M.computeModelMetrics(plainModel).length], [false, 6]);
+    const ambient = { eligible: 10, requests: 10, used: 7, fallbacks: { guard: 2, deadline: 1 }, errors: { hot: 1 }, guard: { counter: 1, numbers: 1 }, latency: [2, 2, 3], skipped: { far: 30, pacing: 4, inflight: 1 } };
+    const log = [
+        // the replies to the human: asked at 100, 301 (while the ambient request of 300 was in flight, to 303), 500, 700
+        { id: 1, t: 100, bot: 'a', via: 'named', outcome: 'used', replyAt: 102, saidAt: 108 },
+        { id: 3, t: 301, bot: 'b', via: 'named', outcome: 'used', replyAt: 306, saidAt: 310 },
+        { id: 5, t: 500, bot: 'a', via: 'named', outcome: 'used', replyAt: 502, saidAt: 507 },
+        { id: 7, t: 700, bot: 'b', via: 'private', outcome: 'used', replyAt: 702, saidAt: 709 },
+        // the bots' own talk: a counter turn in the model's words with it kept, one refused for dropping it, a bot's answer late
+        { id: 2, t: 300, bot: 'c', via: 'thread', ambient: true, counter: true, rulesDue: 308, outcome: 'used', raw: 'ya 41 u?', said: 'ya 41 u?', saidAt: 309, replyAt: 303, settledAt: 303 },
+        { id: 4, t: 400, bot: 'd', via: 'thread', ambient: true, counter: true, rulesDue: 410, outcome: 'guard', reason: 'counter', raw: '41 lol', ruleText: '41 u?', said: '41 u?', saidAt: 410, settledAt: 403 },
+        { id: 6, t: 600, bot: 'e', via: 'botanswer', ambient: true, counter: false, rulesDue: 606, outcome: 'deadline', said: 'idk', saidAt: 610, settledAt: 610 }
+    ];
+    const rec = record({ ticks: 3000 }, { botTicks: 6000, lines: Array.from({ length: 9 }, (_, i) => line({ t: 50 + i, kind: 'idle', text: `line ${i}` })), model: { kind: 'stub', latencyTicks: 2, failRate: 0, ambient: true, stats: { ...replies, ambient }, log, h7Base: 9.2 } });
+    eq('LM1: ambient requests an hour (10 in half an hour), ✓ under 180; the skipped by why', [mm(rec, 'LM1').value, mm(rec, 'LM1').ok, mm(rec, 'LM1').detail.includes('far 30, pacing 4, inflight 1')], [20, true, true]);
+    eq("LM2: in the model's words (7 of 10), ✓ from 60 % with the stub failing none", [mm(rec, 'LM2').value, mm(rec, 'LM2').ok], [70, true]);
+    eq('LM3: the guard refused 2 of the 9 answers with words; judged only with the real model', [mm(rec, 'LM3').value, mm(rec, 'LM3').ok, mm(rec, 'LM3').detail.includes('counter 1, numbers 1')], [22.2, null, true]);
+    const http = record({ ticks: 3000 }, { model: { ...rec.model, kind: 'http', url: 'http://x' } });
+    eq('LM3 with the real model: ✗ over 10 %', mm(http, 'LM3').ok, false);
+    eq('LM4: 1 of 4 replies asked while an ambient request was in flight (25 %), +3 ticks over the others\' median: ✗', [mm(rec, 'LM4').value, mm(rec, 'LM4').ok, mm(rec, 'LM4').shown], [25, false, '25 %, +3 ticks p90']);
+    eq('LM5: the counter turns kept it as said (the model\'s kept, the refused one said the rules\' line)', [mm(rec, 'LM5').value, mm(rec, 'LM5').ok], [100, true]);
+    const dropped = record({ ticks: 3000 }, { model: { ...rec.model, log: [{ ...log[4], raw: '41 lol' }] } });
+    eq('LM5: a counter dropped in the model\'s words said is a ✗', [mm(dropped, 'LM5').value, mm(dropped, 'LM5').ok], [0, false]);
+    eq('LM6: the fallbacks by reason (3: guard 2, deadline 1; native\'s hot 1)', [mm(rec, 'LM6').value, mm(rec, 'LM6').detail.includes('guard 2, deadline 1') && mm(rec, 'LM6').detail.includes('hot 1')], [3, true]);
+    eq('LM7: H7 with the model (9) against without (9.2): -0.2, ✓ within 0.3', [mm(rec, 'LM7').value, mm(rec, 'LM7').ok], [-0.2, true]);
+    const noBase = record({ ticks: 3000 }, { botTicks: 6000, model: { ...rec.model, h7Base: undefined } });
+    eq('LM7: n/a with no run without the model', [mm(noBase, 'LM7').value, mm(noBase, 'LM7').detail.includes('--lm7-base')], [null, true]);
+    eq("LM8: after the rules' time (1, 0, 4 ticks): p95 4, ✓ at most 4", [mm(rec, 'LM8').value, mm(rec, 'LM8').ok], [4, true]);
+    // (a rules' reply to the human by the bot whose ambient line was said a tick before: no model reply for MD4)
+    const overlap = record({ ticks: 3000 }, { probes: [{ t: 305, kind: 'public', bot: 'c', line: 'C hi' }], lines: [line({ t: 310, name: 'c', kind: 'reply', text: 'hey', humanDist: 1 })], model: rec.model });
+    const answers = M.modelAnswers(overlap);
+    eq("LM: the replies' MD metrics leave the ambient entries out (MD4: a rules' reply next to an ambient line is the rules')", [answers.model.length, answers.rules.length], [0, 1]);
+    eq('LM: printed apart in their own group, and the fingerprint the same', [M.formatMetrics(M.computeModelMetrics(rec)).join('\n').includes("The model for the bots' own talk"), M.fingerprint(M.computeMetrics(rec)) === M.fingerprint(M.computeMetrics({ ...rec, model: undefined }))], [true, true]);
+    eq("LM: the counter rule is port/BotModelGuard's (BotThreads' COUNTER_RX)", ['41 u?', 'cutting willows, wbu', 'what about you?', 'and u?', '41 lol', 'u there'].map(t => M.COUNTER_END.test(t)), [true, true, true, true, false, false]);
+}
+
 // ---- (variety round 1: each track's synthetic checks in a block of its own) ----
 // ---- Track F (fixes and movement) ----
 {
@@ -1100,6 +1142,305 @@ eq('inBand', [M.inBand(5, { min: 4, max: 10 }), M.inBand(11, { max: 10 }), M.inB
     eq('W2: n/a without the census', none.every(m => m.value === null), true);
 }
 // ---- end of Track W2's (variety) checks ----
+// ---- (bots ideas, Track A: the period endgame) checks ----
+{
+    const id = k => M.METRICS.find(m => m.id === k);
+    const rec = {
+        tracks: {
+            endgame: {
+                samples: 10, online: 1000, eligible: 40, eligibleOnTrip: 10, onTrip: 12, bySpot: { 'taverley-blue': 8, kbd: 4 }, byKind: { solo: 8, kbd: 4 },
+                lib: {
+                    trips: [{ spot: 'taverley-blue', kind: 'solo', died: false }, { spot: 'kbd', kind: 'kbd', died: true }, { spot: 'ruins', kind: 'wild', died: true }, { spot: 'dusty-key', kind: 'velrak', died: false }],
+                    jumps: { 'Endgame/stuck': 1 },
+                    drops: [{ item: 'rune_med_helm', said: true, near: 2, gz: 1 }, { item: 'rune_chainbody', said: true, near: 1, gz: 0 }, { item: 'rune_full_helm', said: false, near: 0, gz: 0 }],
+                    saleStats: { offered: 2, adverts: 5, sold: { rune_med_helm: 1 }, noted: { rune_med_helm: 1 } },
+                    teams: { calls: 3, formed: 2, nobody: 1, aborted: 0, kills: 1, members: [3, 2], travelSamples: 20, travelNear: 15 },
+                    offers: { asked: 100, offered: { 'taverley-blue': 2 }, shields: 1 },
+                    velrak: { begun: 1, keys: 1 },
+                    lines: { said: 4 },
+                    events: { rareDrop: 1 }
+                },
+                capes: { mages: 5, owners: 4, wearing: 3 }
+            }
+        }
+    };
+    eq('EG1: the eligible bossers\' share on trips', id('EG1').fn(rec).value, 25);
+    eq('EG2: per 100 online', id('EG2').fn(rec).value, 1.2);
+    eq('EG3: deaths per 10 solo and team trips (the Wilderness spots apart, a prep errand not a trip)', id('EG3').fn(rec).value, 5);
+    eq('EG4: jumps per 10 trips and errands (the Wilderness spots apart)', id('EG4').fn(rec).value, 3.33);
+    eq('EG5: drops said near another bot with a gz', id('EG5').fn(rec).value, 50);
+    eq('EG6: sale stints', id('EG6').fn(rec).value, 2);
+    eq('EG9: god-cape owners wearing it', id('EG9').fn(rec).value, 75);
+    eq('EG11: members near the leader', id('EG11').fn(rec).value, 75);
+    eq('EG12: offers', id('EG12').fn(rec).value, 2);
+    eq('EG1: n/a with under one eligible bosser online on average', id('EG1').fn({ tracks: { endgame: { ...rec.tracks.endgame, eligible: 5 } } }).value, null);
+    const none = ['EG1', 'EG2', 'EG3', 'EG4', 'EG5', 'EG6', 'EG9', 'EG11', 'EG12', 'EG13'].map(k => id(k).fn({ tracks: {} }));
+    eq('EG: n/a without the record', none.every(m => m.value === null), true);
+    // ---- (the KQ track) EG13: the attempts; the KQ's trips out of EG3 (its deaths expected: they are EG13's) ----
+    const kqLib = {
+        ...rec.tracks.endgame.lib,
+        trips: [...rec.tracks.endgame.lib.trips, { spot: 'kq', kind: 'kq', died: true }, { spot: 'kq-member', kind: 'kq', died: true }, { spot: 'kq-member', kind: 'kq', died: false }],
+        jumps: { 'Endgame/stuck': 1, 'KqTeam/stuck': 1 },
+        kq: { calls: 2, formed: 1, nobody: 1, aborted: 0, members: [5], phase2: 1, kills: 0, deaths: 2, fled: 3, wipes: 0, travelSamples: 20, travelNear: 18 },
+        kqLog: [
+            { reached: 'meet', outcome: 'nobody', phase2: false, form1Low: 255 },
+            // (the KQ fixes, KQ-2: form1Low 0 only as port/BotKqTeams logs it, with phase 2: form 1 fell)
+            { reached: 'chamber', outcome: 'done', phase2: true, form1Low: 0 }
+        ]
+    };
+    const kqRec = { tracks: { endgame: { ...rec.tracks.endgame, lib: kqLib } } };
+    eq('EG13: the attempts formed', id('EG13').fn(kqRec).value, 1);
+    eq('EG13: its detail (how far, form 1 dealt, phase 2, the near share)', /chamber 1/.test(id('EG13').fn(kqRec).detail) && /form 1 dealt 255 of 255/.test(id('EG13').fn(kqRec).detail) && /phase 2 1/.test(id('EG13').fn(kqRec).detail) && /near the leader 90 %/.test(id('EG13').fn(kqRec).detail), true);
+    eq('EG3: the KQ\'s deaths not in it (5 per 10 as before), named in its detail', [id('EG3').fn(kqRec).value, /the KQ's: 2 of 3/.test(id('EG3').fn(kqRec).detail)], [5, true]);
+    eq('EG4: a KqTeam jump counted (2 jumps, 6 trips and errands)', id('EG4').fn(kqRec).value, 3.33);
+    eq('EG13: n/a with no call', id('EG13').fn({ tracks: { endgame: { ...rec.tracks.endgame, lib: { ...kqLib, kq: { ...kqLib.kq, calls: 0 } } } } }).value, null);
+}
+// ---- end of Track A's (ideas) checks ----
+// ---- (bots ideas, Track B: PKers loot and vultures; the wine crowd, safespots and lever camps; the model guard) checks ----
+{
+    // a PvP pile (the hero K: 3 items, 2 taken early by K, 1 by the vulture V 4 ticks after the reveal; V enrolled), an NPC
+    // pile (2 items: one taken by the vulture W, one gone), lines, K's bank and ledger, the wine and the samples
+    const log = [
+        { t: 100, pile: 1, kind: 'death', who: 'human', wild: 3, pvp: true },
+        { t: 101, pile: 1, kind: 'enrol', who: 'v', role: 'looter', pk: false, wild: 3, botWild: 3 },
+        { t: 107, pile: 1, kind: 'drop', who: 'human', item: 10, count: 1, value: 30000, hero: 'k', revealAt: 207, goneAt: 307 },
+        { t: 107, pile: 1, kind: 'drop', who: 'human', item: 11, count: 500, value: 500, hero: 'k', revealAt: 207, goneAt: 307 },
+        { t: 107, pile: 1, kind: 'drop', who: 'human', item: 12, count: 1, value: 2000, hero: 'k', revealAt: 207, goneAt: 307 },
+        { t: 112, pile: 1, kind: 'take', who: 'k', role: 'killer', item: 10, count: 1, value: 30000, early: true },
+        { t: 115, pile: 1, kind: 'take', who: 'k', role: 'killer', item: 12, count: 1, value: 2000, early: true },
+        { t: 211, pile: 1, kind: 'take', who: 'v', role: 'vulture', item: 11, count: 500, value: 500, early: false },
+        { t: 120, pile: 1, kind: 'line', who: 'k', role: 'pk-loot' },
+        { t: 212, pile: 1, kind: 'line', who: 'v', role: 'vulture-take' },
+        { t: 230, pile: 1, kind: 'line', who: 'v', role: 'vulture-back', to: 'human' },
+        { t: 400, pile: 2, kind: 'death', who: 'human', wild: 0, pvp: false },
+        { t: 401, pile: 2, kind: 'enrol', who: 'w', role: 'looter', pk: false, wild: 0, botWild: 0 },
+        { t: 407, pile: 2, kind: 'drop', who: 'human', item: 13, count: 1, value: 100, hero: 'public', revealAt: 407, goneAt: 607 },
+        { t: 407, pile: 2, kind: 'drop', who: 'human', item: 14, count: 1, value: 50, hero: 'public', revealAt: 407, goneAt: 607 },
+        { t: 415, pile: 2, kind: 'take', who: 'w', role: 'vulture', item: 13, count: 1, value: 100, early: false },
+        { t: 606, pile: 2, kind: 'gone', who: '?', item: 14, count: 1, value: 50 },
+        { t: 300, pile: 0, kind: 'bank', who: 'k', role: 'item', item: 10, count: 1, value: 30000 }
+    ];
+    const wine = [...Array(10)].map((_, i) => ({ t: i * 30, who: i % 2 ? 'a' : 'b', outcome: i < 3 ? 'won' : 'lost', grabbers: 2 }));
+    const samples = [
+        { t: 100, online: 500, grabbers: 3, target: 4, giants: 4, onSafe: 3, deep: 40, camp: 4, temple: 1 },
+        { t: 125, online: 500, grabbers: 5, target: 4, giants: 6, onSafe: 1, deep: 40, camp: 6, temple: 3 }
+    ];
+    // (k's ledger at the end: item 12, 1: the rest of its take)
+    const loot = { log, wine, samples, episodes: [], ledgers: { k: [[12, 1]] }, safespotTiles: [] };
+    const rec = record({ ticks: 6100, warmup: 100, members: true }, { tracks: { loot } });
+    eq('LV1: the hero took before the reveal at 1 of 1 PvP piles', metric(rec, 'LV1').value, 100);
+    eq('LV2: its first take 5 ticks after the drop', metric(rec, 'LV2').value, 5);
+    eq('LV3: nobody else before the reveal', metric(rec, 'LV3').value, 0);
+    eq('LV4: 1 vulture at the PvP pile', metric(rec, 'LV4').value, 1);
+    eq("LV5: the vulture's first take 4 ticks after the reveal", metric(rec, 'LV5').value, 4);
+    eq('LV6: every item one take or one end', metric(rec, 'LV6').value, 0);
+    eq("LV7: the PKer's take all banked or held", metric(rec, 'LV7').value, 0);
+    eq('LV8: 3 lines at one death, 0 at the other: 1.5', metric(rec, 'LV8').value, 1.5);
+    eq('LV9: the NPC pile had a taker', metric(rec, 'LV9').value, 100);
+    eq('LV10: no bot sent deeper', metric(rec, 'LV10').value, 0);
+    eq('LV11: 1 line to the human in a minute', metric(rec, 'LV11').value, 1);
+    eq('LV12: 4 grabbers on average, the number 4 (in band)', [metric(rec, 'LV12').value, metric(rec, 'LV12').ok], [4, true]);
+    eq('LV13: 7 of 10 grabs lost', metric(rec, 'LV13').value, 70);
+    eq('LV14: 4 on a tile of the 6 the 3 tiles hold (min(4, 3) + min(6, 3))', metric(rec, 'LV14').value, 66.7);
+    eq('LV15: 10 of 80 deep-PKer samples by a camp', metric(rec, 'LV15').value, 12.5);
+    eq('LV16: 2 by the temple on average', metric(rec, 'LV16').value, 2);
+    // a deleted item, a duplicate
+    const bad = { ...loot, ledgers: null, log: [...log.filter(e => !(e.kind === 'gone')), { t: 606, pile: 2, kind: 'take', who: 'x', role: 'other', item: 14, count: 2, value: 100 }] };
+    const rb = record({ ticks: 6100, warmup: 100 }, { tracks: { loot: bad } });
+    eq('LV6: an item taken twice the dropped count is off', metric(rb, 'LV6').value, 1);
+    eq("LV7: the PKer's item 12 neither banked nor held: 1", metric(rb, 'LV7').value, 1);
+    const none = M.computeMetrics(record()).filter(m => m.group === 'loot');
+    eq('LV: n/a without the loot record', none.every(m => m.value === null), true);
+    // (round 1's left-overs) LV14 at work: of 4 there 2 at work (both on a tile), of 6 there 4 (1 on a tile): 3 of
+    // min(2, 3) + min(4, 3) = 5; all there 4 of 6 as before; the H18 cadence of the grabs in LV12's detail
+    const atWork = { ...loot, samples: samples.map((x, i) => ({ ...x, work: [2, 4][i], onSafe: [2, 1][i] })) };
+    const rw = record({ ticks: 6100, warmup: 100, members: true }, { tracks: { loot: atWork }, cadence: { Telegrab: { pairs: 40, identical: 2 } } });
+    eq('LV14: at work, 3 on a tile of the 5 the tiles hold for those at work', metric(rw, 'LV14').value, 60);
+    eq('LV14: all there in the detail (3 of 6)', /all there: 50 %/.test(metric(rw, 'LV14').detail), true);
+    eq("LV12: H18's Telegrab in the detail (2 of 40 pairs)", /H18's Telegrab 5 % of 40 pairs/.test(metric(rw, 'LV12').detail), true);
+}
+// ---- end of Track B's (ideas) checks ----
+// ---- (bots ideas, round 2) C arcs: theme C's checks (AR*) ----
+{
+    const arcs = (more = {}) => ({ ...M.emptyRecord().arcs, goals: [], goalSamples: [], cLines: [], moods: [], leaves: [], whims: [], parties: [], moodStats: {}, leaveStats: {}, ...more });
+    // AR1, AR5: 3 samples of 10 levelling bots, 9, 9, 8 with a goal (26 of 30); 4 level-goal holders a sample, 1 of them at its skill
+    const samples = [9, 9, 8].map((w, i) => ({ t: 100 * (i + 1), n: 10, with: w, lHolders: 4, lMatch: 1, byStat: { 8: [4, 1] } }));
+    // AR3, AR4: in 6000 levelling ticks (1 hour) 3 goals done, 2 with company of which 1 celebrated within 2 minutes
+    const goals = [
+        { t: 1000, name: 'a', ev: 'done', kind: 'L', words: '60 wc', company: 2, said: 1100 },
+        { t: 2000, name: 'b', ev: 'done', kind: 'C', words: 'cb 70', company: 1, said: 2400 },
+        { t: 3000, name: 'c', ev: 'done', kind: 'M', words: '100k', company: 0 },
+        { t: 3500, name: 'd', ev: 'asked', kind: 'L', words: '30 mining', answer: 'going for 30 mining' },
+        { t: 3600, name: 'e', ev: 'asked', kind: 'L', words: '', target: 0 }
+    ];
+    const rec = record({ ticks: 6000, xpRate: 10 }, { levellingTicks: 6000, botTicks: 60000, arcs: arcs({ goals, goalSamples: samples }) });
+    rec.sessions.push({ s: 1, name: 'd', planner: 'skiller', first: 0, last: 5999 }, { s: 2, name: 'e', planner: 'fighter', first: 0, last: 5999 }, { s: 3, name: 'f', planner: 'balanced', first: 0, last: 5999 });
+    // AR2: the probes: d answered with its goal, e a newbie (left out), f never answered
+    rec.probes.push({ t: 3490, kind: 'public', bot: 'd', line: 'D whats ur goal' }, { t: 3590, kind: 'public', bot: 'e', line: 'E whats ur goal' }, { t: 3700, kind: 'pm', bot: 'f', line: 'whats ur goal' });
+    eq('AR1: 26 of 30 levelling bot-samples with a goal', metric(rec, 'AR1').value, 86.7);
+    eq('AR2: of 2 goal questions to levelling bots that keep a goal (the newbie left out), 1 answered with its goal', metric(rec, 'AR2').value, 50);
+    eq('AR3: 3 goals done in 1 levelling bot-hour: 300 per 100 (banded at 10x)', [metric(rec, 'AR3').value, metric(rec, 'AR3').band?.max], [300, 40]);
+    eq('AR4: of 2 done with company, 1 celebrated within 200 ticks', metric(rec, 'AR4').value, 50);
+    eq('AR5: 3 of 12 level-goal holder samples at the goal\'s skill', metric(rec, 'AR5').value, 25);
+    // AR6, AR6b, AR7: in 10 bot-hours a rage-quit (its line, out 30 ticks on) and a hop (its line, out 150 ticks on)
+    const leaves = [
+        { t: 1000, name: 'g', reason: 'rage', line: 'im done', asked: 1020, logout: 1030 },
+        { t: 2000, name: 'h', reason: 'hop', line: 'w8 hopping', asked: 2100, logout: 2150 },
+        { t: 3000, name: 'i', reason: 'bank-drop', line: 'gtg bank this lol', asked: 3200, logout: 3300 }
+    ];
+    const rl = record({ ticks: 6000 }, { botTicks: 60000, levellingTicks: 6000, arcs: arcs({ leaves, goalSamples: samples }) });
+    eq('AR6: 1 rage-quit in 10 bot-hours: 10 per 100', metric(rl, 'AR6').value, 10);
+    eq('AR6b: 1 hop: 10 per 100', metric(rl, 'AR6b').value, 10);
+    eq('AR7: of the rage and hop lines, 1 of 2 followed by the logout within 60 s', metric(rl, 'AR7').value, 50);
+    // AR8: 2 sessions begun in the run (after the fill), 1 with a whim begun
+    const rw = record({ ticks: 6000, fillTick: 0 }, { arcs: arcs({ goalSamples: samples, whims: [{ t: 500, name: 'j', what: 'gather', started: true }, { t: 600, name: 'k', what: 'skill', started: false, lost: 'no candidate' }] }) });
+    rw.sessions.push({ s: 1, name: 'j', planner: 'fighter', first: 400, last: 5000 }, { s: 2, name: 'k', planner: 'balanced', first: 450, last: 5000 }, { s: 3, name: 'l', planner: 'skiller', first: 0, last: 5000 });
+    eq('AR8: 1 of 2 sessions begun in the run with a whim', metric(rw, 'AR8').value, 50);
+    // AR9 (report), AR10: 2 mood lines of 40 non-trade
+    const rm = record({ ticks: 6000 }, { arcs: arcs({ goalSamples: samples, parties: [{ kind: 'ninety_nine', guestsAt: 3, gz: 2, party: 7 }], cLines: [{ event: 'arcs-mood', kind: 'tilt' }, { event: 'arcs-mood', kind: 'elated' }, { event: 'arcs-goal', kind: 'done' }] }) });
+    for (let i = 0; i < 40; i++) rm.lines.push({ t: 100 + i, name: 'm', kind: 'idle', text: 'hi' });
+    eq('AR9 (report): one 99', [metric(rm, 'AR9').value, metric(rm, 'AR9').ok], [1, null]);
+    eq('AR10: 2 mood lines of 40 non-trade', metric(rm, 'AR10').value, 5);
+    // AR11: two lines to a bot tilted at the time, one answered
+    const rt = record({ ticks: 6000 }, { arcs: arcs({ goalSamples: samples, moods: [{ name: 'n', from: 1000, to: 2000, peak: 0.6, why: ['death'] }] }) });
+    rt.probes.push({ t: 1100, kind: 'public', bot: 'n', line: 'N hi' }, { t: 1500, kind: 'public', bot: 'n', line: 'N wyd' }, { t: 2500, kind: 'public', bot: 'n', line: 'N lol' });
+    rt.lines.push({ t: 1130, name: 'n', kind: 'reply', to: 'human', text: 'hey' });
+    eq('AR11: of 2 lines to a tilted bot, 1 answered (the one after its tilt left out)', metric(rt, 'AR11').value, 50);
+    const none = M.computeMetrics(record()).filter(m => m.group === 'arcs');
+    eq('AR: n/a without the arcs record (an older library)', none.length >= 12 && none.every(m => m.value === null || m.id === 'AR9'), true);
+}
+// ---- end of C's checks ----
+// ---- (bots ideas, round 2) D word: theme D's checks (WT2 on) ----
+{
+    // (no theme D in the record: every WT metric n/a; an older library's record has arcs null)
+    for (const id of ['WT2', 'WT3', 'WT4', 'WT5', 'WT6', 'WT7', 'WT8', 'WT9', 'WT10']) {
+        eq(`${id}: n/a without theme D's record`, metric(record(), id).value, null);
+        eq(`${id}: n/a with arcs null (an older library)`, metric(record({}, { arcs: null }), id).value, null);
+    }
+    const party = (over = {}) => ({ id: 1, kind: 'party', sub: 'drop_party', place: 'fally park', x: 0, z: 0, born: 0, until: 1000, source: 'director', online: 500, knowers: 20, via: { seed: 5, heard: 10, pm: 4, friend: 1 }, tellings: 6, distorted: 1, versions: 2, eligible: 10, acted: 3, wordGuests: [{ name: 'a', from: 120, at: 10, came: true }, { name: 'b', from: 90, at: 12, came: true }, { name: 'c', from: 150, at: 20, came: false }], wrong: [{ name: 'd', place: 'fally west bank', at: 30, arrived: true, line: true, end: 90 }], fake: 1, missed: 1, guestsCame: 8, avoided: 0, turned: 0, moved: 0, names: ['a', 'b', 'c', 'd'], ...over });
+    const word = { rumourStats: { seeded: 2, tellings: 4, directorTellings: 4, nearHuman: 1, learnt: 20, heard: 10, pm: 4, friend: 1, answers: 0 }, tieStats: { formed: 5, rolled: 9, waves: 1, grudges: 3, warRolls: 2, rivalPicks: 1, rivalLines: 0 }, slangStats: { heard: 30, again: 2, faded: 0 }, staggerStats: { asked: 10, ok: 4, soon: 3, own: 3 }, catchLines: { own: 40, borrowed: 10, ownLate: 20, borrowedLate: 5, byHub: { varrock_west: { own: 8, borrowed: 2 } } }, acquainted: [{ t: 6000, online: 50, any: 20, known: 5 }, { t: 12000, online: 50, any: 30, known: 10 }], incidents: { botBot: 10, war: 2, rocks: 3, rocksWar: 0 }, names: ['a', 'b', 'c'], human: 'casey' };
+    const ties = [{ t: 100, kind: 'greet', a: 'a', b: 'b' }, { t: 103, kind: 'greet-back', a: 'b', b: 'a' }, { t: 500, kind: 'grudge', a: 'c', b: 'd', why: 'ks' }];
+    const logins = [
+        { t: 100, name: 'm1', clique: 'm1,m2,m3', afterFill: false },
+        { t: 1000, name: 'm2', clique: 'm1,m2,m3', afterFill: true },
+        { t: 1150, name: 'm3', clique: 'm1,m2,m3', afterFill: true },
+        { t: 3000, name: 'n1', clique: 'n1,n2', afterFill: true },
+        { t: 5000, name: 'n2', clique: 'n1,n2', afterFill: true },
+        { t: 7000, name: 'o1', clique: 'o1,o2', afterFill: true }
+    ];
+    const arcs = { goals: [], moods: [], leaves: [], parties: [], whims: [], weddings: [], rumours: [party(), party({ id: 2, sub: 'party_room', guestsCame: 2, wordGuests: [], wrong: [], eligible: 2, acted: 0 })], ties, slang: [{ t: 9000, name: 'a', phrase: 3, from: 'b', x: 0, z: 0 }], logins, word };
+    const lines = [{ t: 100, kind: 'rumour', humanDist: 10, text: 'dp at fally park' }, { t: 200, kind: 'rumour', humanDist: 40, text: 'dp at fally park' }];
+    const r5 = record({ bots: 500, ticks: 12000, warmup: 0 }, { arcs, lines, botTicks: 500 * 12000 });
+    eq('WT2: word guests who came of all who came (2 of 10)', metric(r5, 'WT2').value, 20);
+    eq('WT2: judged at 500 bots (20-60 %)', metric(r5, 'WT2').ok, true);
+    eq('WT2: a report at 100 bots', metric(record({ bots: 100, ticks: 12000 }, { arcs, lines, botTicks: 100 * 12000 }), 'WT2').ok, null);
+    eq('WT3: acted of eligible (3 of 12)', metric(r5, 'WT3').value, 25);
+    eq('WT4: the most wrong-place trips at a party (1)', metric(r5, 'WT4').value, 1);
+    eq('WT5: online with an acquaintance at the last sample after 1 h (30 of 50)', metric(r5, 'WT5').value, 60);
+    eq('WT6: grudge lines an hour (1 in 2 h)', metric(r5, 'WT6').value, 0.5);
+    eq('WT7: borrowed of catchphrase lines after the first hour (5 of 25)', metric(r5, 'WT7').value, 20);
+    eq('WT8: logins after the fill with a mate within 2 minutes (m2, m3 of 5)', metric(r5, 'WT8').value, 40);
+    eq('WT8: over its band (25 %)', metric(r5, 'WT8').ok, false);
+    eq('WT9: rumour lines the human heard an hour (1 in 2 h)', metric(r5, 'WT9').value, 0.5);
+    eq("WT10: no name in the arcs is the human's", metric(r5, 'WT10').value, 0);
+    eq("WT10: the human's name found", metric(record({ bots: 500, ticks: 12000 }, { arcs: { ...arcs, word: { ...word, names: ['a', 'Casey'] } }, lines }), 'WT10').ok, false);
+}
+// ---- end of D's checks ----
+// ---- (bots ideas, round 3: the period foundation) the PC and MV slots: n/a until a builder fills them; PC1, PC8, PC9 and
+// PC10 (the foundation's) on hand-made records ----
+{
+    const empty = M.computeMetrics(M.emptyRecord({ bots: 100, ticks: 6000 }));
+    const ids = M.METRICS.map(m => m.id);
+    const pcs = Array.from({ length: 10 }, (_, i) => `PC${i + 1}`);
+    const mvs = Array.from({ length: 9 }, (_, i) => `MV${i + 1}`);
+    eq('PC1-PC10 in id order, then MV1-MV9', ids.slice(ids.indexOf('PC1'), ids.indexOf('PC1') + 19), [...pcs, ...mvs]);
+    eq('every PC and MV slot n/a on an empty record', [...pcs, ...mvs].map(id => empty.find(m => m.id === id).value), Array(19).fill(null));
+    eq('the period and movement groups print apart', [M.GROUPS.period, M.GROUPS.move], ['Period content (bots ideas, round 3)', 'Movement (bots ideas, round 3)']);
+    // ---- G period: the G builder's checks (PC3-PC6) ----
+    {
+        // PC3: 20 pet-samples of 1,000 online over 10 samples: 2 per 100 (in band); n/a on a free world or with no sample
+        const pets = { lost: { neglect: 1, death: 1 }, pagesOpen: 0, pagesContinued: 9, warnings: 2, skipped: 1, grown: 0, bought: 3, trips: 4, foodTrips: 1, fed: 12, stroked: 15 };
+        const pc = { sample: 10, samples: 10, online: 1000, pets: 20, byKind: { kitten: 15, cat: 5 }, owners: ['a', 'b'], pitch: 0, room: 0, lib: { pets, runelink: null, minigames: {} } };
+        const mk = (meta, over = {}) => record(meta, { period: { lib: null, log: [], budget: null, pc: { ...pc, ...over } } });
+        eq('PC3: 2 pets out per 100 online (in band), by kind in the detail', [metric(mk({ members: true }), 'PC3').value, metric(mk({ members: true }), 'PC3').ok, /kitten 1\.5, cat 0\.5/.test(metric(mk({ members: true }), 'PC3').detail)], [2, true, true]);
+        eq('PC3: n/a on a free world, and with no sample', [metric(mk({ members: false }), 'PC3').value, metric(record({ members: true }), 'PC3').value], [null, null]);
+        // PC4: 1 ran away in 20 × 10 / 6000 = 0.03 pet-hours: n/a (under 1); 1 in 20 pet-hours (12,000 pet-samples of 10 ticks): 0.5 per 10
+        eq('PC4: n/a under 1 pet-hour', metric(mk({ members: true }), 'PC4').value, null);
+        const many = mk({ members: true }, { samples: 6000, online: 600000, pets: 12000 });
+        eq('PC4: 1 run-away in 20 pet-hours: 0.5 per 10 (in band)', [metric(many, 'PC4').value, metric(many, 'PC4').ok], [0.5, true]);
+        const paged = mk({ members: true }, { samples: 6000, online: 600000, pets: 12000, lib: { pets: { ...pets, pagesOpen: 1 }, runelink: null, minigames: {} } });
+        eq('PC4: n/a under 5 pet-hours (one run-away in 2 pet-hours is a sample, not a rate)', metric(mk({ members: true }, { samples: 600, online: 60000, pets: 1200 }), 'PC4').value, null);
+        eq('PC4: a page left open 10 s fails it, whatever the run-aways', metric(paged, 'PC4').ok, false);
+        // PC6: 6 games over in an hour (warm-up apart), 1 turn of 50 forced (2 %): in band at 500 bots; report at 100
+        const runelink = { visits: 8, challenges: 5, accepted: 5, humanChallenges: 1, humanGames: 1, games: 11, finished: 11, gamesFinished: 6, wins: 5, losses: 5, draws: 1, moves: 49, forced: 1, resigned: 0, ended: { finished: 11 } };
+        const rl = (meta, over = {}) => record({ members: true, ticks: 6100, warmup: 100, ...meta }, { period: { lib: null, log: [], budget: null, pc: { ...pc, lib: { pets, runelink: { ...runelink, ...over }, minigames: {} } } } });
+        eq('PC6: 6 games an hour, 2 % forced: in band at 500 bots', [metric(rl({ bots: 500 }), 'PC6').value, metric(rl({ bots: 500 }), 'PC6').ok], [6, true]);
+        eq('PC6: 6 forced of 55 turns (11 %) fails it at 500 bots', metric(rl({ bots: 500 }, { forced: 6 }), 'PC6').ok, false);
+        eq('PC6: report at 100 bots', [metric(rl({ bots: 100 }), 'PC6').value, metric(rl({ bots: 100 }), 'PC6').band], [6, null]);
+        // PC5: 3 bot-samples on the pitch over 10 samples: 0.3 on average; 2 wins in the hour in the detail
+        const gb = record({ members: true, ticks: 6100, warmup: 100 }, { period: { lib: null, log: [], budget: null, pc: { ...pc, pitch: 3, lib: { pets, runelink: null, minigames: { Gnomeball: { visits: 2, wins: 2, goals: 11, tackles: 1 } } } } } });
+        eq('PC5: 0.3 bots on the pitch on average, 2 wins an hour (report)', [metric(gb, 'PC5').value, metric(gb, 'PC5').band, /2 games won \(2 an hour\)/.test(metric(gb, 'PC5').detail)], [0.3, null, true]);
+        // H19: a Games Room visit's seated stands are left out
+        const st = (kind, len) => ({ kind, len, planner: 'skiller' });
+        const h19 = record({ members: true }, { levellingTicks: 60000, idleStands: [st('Woodcut', 300), st('GamesRoom', 600), st('GamesRoom', 900)] });
+        eq("H19: the Games Room's seated stands left out (1 of 3 counted)", [metric(h19, 'H19').value, /2 in the Games Room left out/.test(metric(h19, 'H19').detail)], [10, true]);
+    }
+    // ---- end of G period's checks ----
+    // ---- G buzz: the H builder's theme G checks (PC2, PC7) ----
+    // ---- end of G buzz's checks ----
+    // ---- H move: the H builder's checks (MV1-MV9) ----
+    {
+        const move = (o = {}) => ({ lib: null, near: { trips: 10, tiles: 1000, stops: 25, ticks: 600 }, near40: { trips: 10, withStop: 6 }, repeat: { pairs: 20, over: 2 }, cross: { pairs: 40, over: 8 }, turns: { n: 50, walking: 4 }, openings: { n: 20, apart: 6 }, base: null, ...o });
+        const hops = Array(41).fill(0);
+        for (let len = 8; len <= 18; len++) hops[len] = 10;
+        hops[18] = 5;
+        const lib = { rates: {}, stats: { walks: 50, hops, pauses: 30, pauseTicks: 90, overshoots: 4, lanes: 40, typingStands: 3, released: 1, variants: { v0: 10, v1: 8, v2: 7, same: 1, long: 2, wild: 0, hunt: 1, none: 0 } }, talk: { holds: 12, ended: { done: 10, hit: 1 }, holdTicks: 300, walkUps: 5, walkUpsReady: 4, walkUpsFailed: 1, walking: 2 } };
+        const r = record({}, { move: move({ lib }) });
+        eq('MV1: 25 stops in 1000 near-human tiles: 2.5 per 100 (in band)', [metric(r, 'MV1').value, metric(r, 'MV1').ok], [2.5, true]);
+        eq('MV2: 6 of 10 near-human trips of 40+ with a stop (60 %)', [metric(r, 'MV2').value, metric(r, 'MV2').ok], [60, true]);
+        eq('MV3: the hops\' p90 from the count by length (8-18 tiles: 17)', [metric(r, 'MV3').value, metric(r, 'MV3').ok], [17, true]);
+        eq("MV4: 2 of 20 pairs of one bot's trips overlap 90 %+ (10 %)", [metric(r, 'MV4').value, metric(r, 'MV4').ok], [10, true]);
+        eq("MV5: 8 of 40 different bots' pairs (20 %, over its band); the variants in the detail", [metric(r, 'MV5').value, metric(r, 'MV5').ok, /variants taken 0\/1\/2: 10\/8\/7/.test(metric(r, 'MV5').detail)], [20, false, true]);
+        eq('MV6: 4 of 50 thread turns by a walking speaker (8 %); the holds in the detail', [metric(r, 'MV6').value, metric(r, 'MV6').ok, /holds 12/.test(metric(r, 'MV6').detail)], [8, true, true]);
+        eq('MV7: 6 of 20 openings 5+ apart (30 %); the walk-ups in the detail', [metric(r, 'MV7').value, metric(r, 'MV7').ok, /walk-ups 5/.test(metric(r, 'MV7').detail)], [30, true, true]);
+        eq('MV8: 4 overshoots in 50 hopped walks (8 per 100)', [metric(r, 'MV8').value, metric(r, 'MV8').ok], [8, true]);
+        eq('MV9: n/a with no --move-base, its ticks a tile in the detail', [metric(r, 'MV9').value, /ticks a tile 0\.600/.test(metric(r, 'MV9').detail)], [null, true]);
+        eq('MV9: against a hops-off run of 0.5 ticks a tile: +20 % (report)', [metric(record({}, { move: move({ base: { ticksPerTile: 0.5 } }) }), 'MV9').value, metric(record({}, { move: move({ base: { ticksPerTile: 0.5 } }) }), 'MV9').ok], [20, null]);
+        const old = record({}, { move: move() });
+        eq("an older library (no lib): MV3 and MV8 n/a, the runner's own MV1, MV2, MV4-MV7 judged", ['MV3', 'MV8', 'MV1', 'MV6'].map(id => metric(old, id).value), [null, null, 2.5, 8]);
+        eq('MV1: n/a under 5 near-human trips', metric(record({}, { move: move({ near: { trips: 3, tiles: 100, stops: 1, ticks: 60 } }) }), 'MV1').value, null);
+    }
+    // ---- end of H move's checks ----
+    // PC8: of 8 lines of talk (trade and the Edgeville banter apart) 2 speak of the period, one a set piece's
+    const talk = [
+        line({ kind: 'trade', task: 'Vendor', text: 'selling rock crab meat' }),
+        line({ kind: 'pk', task: 'EdgevillePKer', text: 'cw lol' }),
+        line({ kind: 'practice', text: 'u done hftd yet?', humanDist: 4 }),
+        line({ kind: 'setpiece', text: 'crabs r good xp' }),
+        ...['hi', 'lol', 'nice', 'gz', 'cutting willows', 'anyone selling lobs'].map(text => line({ text }))
+    ];
+    const pc8 = record({ members: true }, { lines: talk });
+    eq('PC8: 2 of 8 lines of talk speak of the period (25 %, over its band)', [metric(pc8, 'PC8').value, metric(pc8, 'PC8').ok], [25, false]);
+    eq('PC8: the detail splits the chatter from the set pieces, and the human heard 1', /the chatter 1 of 7, set pieces 1; the human heard 1/.test(metric(pc8, 'PC8').detail), true);
+    eq('PC8: report on a free world', metric(record({ members: false }, { lines: talk }), 'PC8').band, null);
+    // PC9: "playing cw" is Castle Wars open; "next month" is not
+    const pc9 = record({}, { lines: [line({ text: 'castle wars next month!!' }), line({ text: 'anyone playing cw?' }), line({ text: 'hi' })] });
+    eq('PC9: one line speaks of Castle Wars as open', [metric(pc9, 'PC9').value, metric(pc9, 'PC9').ok], [1, false]);
+    eq('PC9: none of the future-tense lines', [metric(record({}, { lines: [line({ text: 'cant wait for castle wars' })] }), 'PC9').value, metric(record({}, { lines: [line({ text: 'cant wait for castle wars' })] }), 'PC9').ok], [0, true]);
+    // PC1: 25 bot-samples there of 1,000 online over 10 samples: 2.5 per 100 (in the 100-bot band), n/a on a free world
+    const buzz = { ...M.emptyRecord().buzz, samples: 10, online: 1000, there: 25, byPlace: { rellekka: 20, lighthouse: 5 }, byKind: { 'Fish': 15, 'buzz:crabs': 10 } };
+    const pc1 = record({ members: true }, { buzz });
+    eq('PC1: 2.5 bots at Rellekka and the lighthouse per 100 online (in band at 100 bots)', [metric(pc1, 'PC1').value, metric(pc1, 'PC1').ok], [2.5, true]);
+    eq('PC1: by place and what they do in the detail', /Rellekka 2, the lighthouse 0.5; doing Fish 1.5, buzz:crabs 1/.test(metric(pc1, 'PC1').detail), true);
+    eq('PC1: the 500-bot band; none between', [metric(record({ members: true, bots: 500 }, { buzz }), 'PC1').band, metric(record({ members: true, bots: 250 }, { buzz }), 'PC1').band], [{ min: 1.5, max: 4 }, null]);
+    eq('PC1: n/a on a free world', metric(record({ members: false }, { buzz }), 'PC1').value, null);
+    // PC10: 1 rescue jump (a random event's apart) in 10 visits: 10 per 100, over its band; n/a under 5 visits
+    const lib = { visits: { buzz: 8, pet: 2 }, moves: { buzz: { watchdog: 1, event: 2 } }, refused: { buzz: 1 } };
+    const pc10 = record({ members: true }, { period: { lib, log: [], budget: 2 } });
+    eq("PC10: 1 jump in 10 visits (a random event's apart): 10 per 100", [metric(pc10, 'PC10').value, metric(pc10, 'PC10').ok], [10, false]);
+    eq('PC10: n/a under 5 visits', metric(record({ members: true }, { period: { lib: { ...lib, visits: { buzz: 4 } }, log: [], budget: 2 } }), 'PC10').value, null);
+}
+// ---- end of the period foundation's checks ----
 
 // ---- the whole report ----
 {

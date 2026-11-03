@@ -199,9 +199,10 @@ export const STATES = {
         await settingsSection(page, 'savedata');
     },
     // Settings › Bot chat (host.js botChat) as the app shows it: a model in the app trained both ways (Think first shows), a
-    // Claude key that works, a Test's line (STATE_INIT below gives the page a stub native and its status)
+    // Claude key that works, a Test's line (STATE_INIT below gives the page a stub native and its status); (bots ideas,
+    // round 4 fixes) without scrolling down to Display Zoom's 320 px (Bots' own talk's row made it scroll there)
     botchat: async page => {
-        await settingsSection(page, 'botchat');
+        await settingsSection(page, 'botchat', 320);
         await page.evaluate(`document.getElementById('botchat-test-result').textContent = 'Claude: yo nm just chillin at varrock west'`);
         if (await page.evaluate(`document.getElementById('botchat-think').hidden`)) {
             throw new Error('Think first is hidden although the status offers it');

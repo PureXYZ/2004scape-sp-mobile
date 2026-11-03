@@ -44,6 +44,9 @@
     const BOTS_KEY = 'lctest.bots'; // the Bots setting this run restarted the page for
     const BOTS_BEFORE_KEY = 'lctest.botsBefore'; // {bots, jmod}: the settings the app had before this run changed them
     const SOAK_KEY = 'lctest.soak'; // the soak's phase while it runs (a page that comes back with it set was reloaded)
+    // (bots ideas, round 4 fixes) Settings › Bot chat before the soak's first change, beside SOAK_KEY: a page that comes
+    // back mid-phase sets it back too (the app keeps the phase's values natively; a reload does not undo them)
+    const SOAK_CHAT_KEY = 'lctest.soakChat';
     // (the app's handler as host.js picks it: WKWebView's on iOS, the Android app's bridge there: docs/ANDROID.md §3.1)
     const native = (window.webkit?.messageHandlers ?? window.LostCityNativeBridge)?.native ?? null;
 
@@ -851,7 +854,12 @@
     // teleport (`tele`: "level,mx,mz,lx,lz"), wait for the bots to fill the world (`waitFill`: seconds at most), set game
     // options (`vars`: {varp: value} with ::setvar, e.g. option_music 4 = Music off, 2 = the default), suspend the
     // AudioContext (`audioOff`), walk to and fro (`walk`, a minimap tap every `walkEveryMs`, 3500), ask the chat model
-    // (`lm`: {everySec, think}, the build's lmPrompts) or go to the background for its seconds (`background`).
+    // (`lm`: {everySec, think}, the build's lmPrompts) or go to the background for its seconds (`background`). (bots ideas,
+    // round 4: I model) `settings` ({botChat, botThink, botAmbient}): Settings › Bot chat set for this phase and on, as the
+    // player sets it (the sheet's own buttons: saved, the engine told at once: the engine's own requests then go to the
+    // model, the bots' own talk with Bots' own talk on Model), the values before the first change set back at the end
+    // (soakEnd); the phase's summary has the chat model's native counters before and after (lm-status: the ambient
+    // requests and refusals among them).
     let settingsRestart = false; // (applyBots: this page is the run's restart for the settings)
     const boot = { client100: null, client100Exact: false, loaderFade: null };
 
@@ -1117,6 +1125,94 @@
         }
     }
 
+    // ---- (bots ideas, round 4: I model) a soak phase's Settings › Bot chat ----
+    const CHAT_SETTINGS = ['botChat', 'botThink', 'botAmbient'];
+    let chatBefore = null; // (the values before the soak's first change: soakEnd sets them back)
+    const chatNow = () => Object.fromEntries(CHAT_SETTINGS.map(k => [k, window.LostCityHost?.settings?.[k]]));
+
+    // one of Bot chat's settings as the player sets it: its button on the sheet (a greyed-out one cannot be pressed)
+    async function setChatSetting(key, value) {
+        const button = document.querySelector(`.seg[data-setting="${key}"] button[data-value="${String(value)}"]`);
+        if (!button || button.disabled) {
+            out(`INFO soak: Settings › Bot chat ${key} ${value}: ${button ? 'greyed out' : 'no such choice'}`);
+            return window.LostCityHost?.settings?.[key] === value;
+        }
+        button.click();
+        await sleep(300);
+        return window.LostCityHost?.settings?.[key] === value;
+    }
+
+    // the phase's `settings`: the chat model first (Think first and Bots' own talk are greyed out without it)
+    async function soakSettings(spec) {
+        if (!spec.settings) {
+            return;
+        }
+        if (!chatBefore) {
+            chatBefore = chatNow();
+            // (round 4 fixes: kept for a reload mid-phase, start())
+            try {
+                sessionStorage.setItem(SOAK_CHAT_KEY, JSON.stringify(chatBefore));
+            } catch {
+                // (no sessionStorage: soakEnd still sets it back, a reload cannot)
+            }
+        }
+        let ok = true;
+        for (const key of CHAT_SETTINGS) {
+            if (key in spec.settings) {
+                ok = (await setChatSetting(key, spec.settings[key])) && ok;
+            }
+        }
+        check(`soak ${spec.name}: Settings › Bot chat ${JSON.stringify(spec.settings)}`, ok, JSON.stringify(chatNow()));
+    }
+
+    // the soak's end: Bot chat as it was before (Think first and Bots' own talk first, while the chat model still allows them).
+    // (Round 4 fixes) Also after a reload mid-phase: the values kept in sessionStorage. True when all are back (or there
+    // was nothing to set back)
+    async function restoreChatSettings() {
+        try {
+            chatBefore ??= JSON.parse(sessionStorage.getItem(SOAK_CHAT_KEY) ?? 'null');
+            sessionStorage.removeItem(SOAK_CHAT_KEY);
+        } catch {
+            // (no sessionStorage, or nothing in it)
+        }
+        if (!chatBefore) {
+            return true;
+        }
+        for (const key of ['botAmbient', 'botThink', 'botChat']) {
+            if (chatBefore[key] !== undefined && window.LostCityHost?.settings?.[key] !== chatBefore[key]) {
+                await setChatSetting(key, chatBefore[key]);
+            }
+        }
+        const now = chatNow();
+        const back = CHAT_SETTINGS.every(key => chatBefore[key] === undefined || now[key] === chatBefore[key]);
+        out(`INFO soak: Settings › Bot chat back to ${JSON.stringify(chatBefore)}: now ${JSON.stringify(now)}`);
+        chatBefore = null;
+        return back;
+    }
+
+    // (round 4 fixes) a page reloaded mid-phase: Bot chat set back once host.js has wired the sheet's buttons (its boot,
+    // on DOMContentLoaded after this script's start: tried again for a while if a click did not take yet), then the run
+    // ends
+    async function restoreChatAfterReload() {
+        let kept = null;
+        try {
+            kept = JSON.parse(sessionStorage.getItem(SOAK_CHAT_KEY) ?? 'null');
+        } catch {
+            // (nothing kept)
+        }
+        if (!kept) {
+            return;
+        }
+        let back = false;
+        for (let i = 0; i < 20 && !back; i++) {
+            await sleep(500);
+            chatBefore = kept;
+            back = !!window.LostCityHost?.settings && (await restoreChatSettings());
+        }
+        check('soak: Settings › Bot chat set back after the reload', back, JSON.stringify(chatNow()));
+    }
+    // ---- end of I model's block ----
+
     async function soakBackground(spec) {
         recordLifecycle();
         const before = lifecycleEvents.length;
@@ -1158,6 +1254,7 @@
         if (spec.background) {
             return soakBackground(spec);
         }
+        await soakSettings(spec); // (bots ideas, round 4: I model)
         await soakPrepare(spec);
         // the chat model: loaded (one reply, cold) before the window, then a reply every lm.everySec in it
         const lm = spec.lm ?? null;
@@ -1205,6 +1302,7 @@
             return r;
         };
         const nat = [await lmBench('stats')];
+        const lmCounters = [(await debug('lm-status'))?.counters ?? null]; // (bots ideas, round 4: I model)
         const startEpoch = Date.now();
         out(`INFO soak-phase-start ${name} ${startEpoch}`);
         sendTraces(0);
@@ -1256,6 +1354,7 @@
         const endEpoch = Date.now();
         const last = await pollTicks();
         nat.push(await lmBench('stats'));
+        lmCounters.push((await debug('lm-status'))?.counters ?? null); // (bots ideas, round 4: I model)
         if (lmRunning) {
             await lmRunning;
         }
@@ -1320,6 +1419,9 @@
             audio,
             music: { song: c()?.midiSong ?? null, active: c()?.midiActive ?? null, volume: c()?.midiVolume ?? null, wave: c()?.waveEnabled ?? null },
             lm: lm ? { gens: gens.length, ms: dist(gens.map(g => g.ms)), errors: gens.filter(g => g.error).length, list: gens } : null,
+            // (bots ideas, round 4: I model) Bot chat in the window, and native's counters at its start and end (its
+            // requests, the bots' own talk's and its refusals: ambient, ambientRefused)
+            chat: { settings: chatNow(), counters: lmCounters },
             engineErrors: engine.errors.length
         });
         // the samples themselves (rounded to 0.1 ms; the ticks' starts in ms from the window's start)
@@ -1385,6 +1487,7 @@
         } catch {
             // ignore
         }
+        await restoreChatSettings(); // (bots ideas, round 4: I model)
         if (window.LostCityNative?.platform !== 'android') {
             await debug('keep-awake', { on: false });
         }
@@ -2193,7 +2296,10 @@
                 // the page was loaded again during a soak's phase (its WebContent process was terminated)
                 sessionStorage.removeItem(SOAK_KEY);
                 check('soak: the page is not reloaded during a phase', false, `reloaded during ${soakPhaseRunning}`);
-                finish();
+                // (bots ideas, round 4 fixes: Bot chat as it was before the soak, then the end)
+                restoreChatAfterReload()
+                    .catch(error => out(`INFO soak: setting Bot chat back after the reload failed: ${error}`))
+                    .then(finish);
                 return;
             }
         } catch {

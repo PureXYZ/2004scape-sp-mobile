@@ -49,11 +49,36 @@ Contents: [what they do](#1-what-the-bots-do) and [the design rules](#design-rul
 - **Getting about.** They walk, using a walking graph of the overworld, and cross the toll gate, the boats and the
   stairs the game's way. A bot with the Magic level and the runes casts a real teleport spell on a long trip; members
   bots also ride the spirit trees and the gnome glider. A truly stuck bot may be moved by a rescue jump, but only where
-  no player can see either end.
+  no player can see either end. Near you (within 64 tiles) a long walk goes in minimap-sized clicks of 8-18 tiles, the
+  next one clicked just before the flag, now and then a pause of a few ticks at one, a stop at the flag while the bot
+  types a line, a few tiles past a corner and back, and each bot keeps a little to its own side of the road; anywhere,
+  bots take one of a few sensible routes (a usual one most of the time), so not every bot walks the same tiles. Never in
+  the Wilderness, a PK fight, a flee, a follow or a trade. A bot that starts a chat with another a few tiles off walks
+  over first, and both stop walking while they talk (a bot at its tree or its fight keeps working); a line you say to a
+  held bot is answered as ever.
 - **More activities.** Quest look-alikes of the free quests (the walking and talking, without changing quest state),
   low-level economy chains (cowhides, feathers, pottery, flour, shrimps), alching stints at the banks, law-rune runs to
   the Wizards' Guild, bone runs, Wilderness trips for bold bots, and on members worlds the far towns and the minigames
   (the Fishing Trawler, the Brimhaven Agility Arena, the Ranging Guild, Treasure Trails), scaled with N.
+- **The endgame** (members worlds). The few veterans with the bosser trait (combat 85+) take trips to 274's endgame
+  spots now and then, about a quarter of their time: Taverley's blue dragons, hellhounds, black demons and black dragons
+  (behind the dusty-key door: the key comes from Velrak in the jail, after the jailer's key opens his cell), the Heroes'
+  Guild's blue dragon, the Edgeville dungeon's black demons, and in the deep Wilderness the Demonic Ruins' greater demons,
+  the fire giants and the red dragons. A trip needs 12 pieces of good food (lobsters, swordfish, sharks), the Duke's
+  anti-dragon shield for dragons, and prayer recharged at an altar for demons (Protect from Melee while they fight).
+  Bots of combat 100+ call "kbd team?" at Edgeville bank, follow their leader north to the west Lava Maze ladder and
+  the lever, and fight the King Black Dragon together. Rarely (at most once per 4 hours of play world-wide, and only
+  when 4 of combat 100+ with Prayer 43+ are free online) a team of 4-6 tries the Kalphite Queen: the leader buys 2 ropes
+  from Ned in Draynor and calls at Al Kharid bank till 3 answer (3 calls at most, then "nvm no1 wants kq lol"), they
+  meet there ("kq team need 4", "who has rope"), each buys 2 waterskins and a pass
+  from Shantay and goes through the Shantay Pass's gate the game's way, the leader's rope goes on the burrow and the
+  others climb down while it holds (200 ticks), then through the tunnels to the second rope and the chamber. They pray
+  Protect from Magic and fight; a bot under 40 % of its Hitpoints with 2 or fewer pieces of food left leaves by the
+  chamber's rope and the burrow's, and the team runs once half of it is gone ("nvm run"). It mostly fails, as it did for
+  the research's probe teams: form 1 sometimes falls ("phase 2!!"), then they run or die ("we wiped lol", "kq is
+  impossible"). A real kill rolls 274's own table. A rune or dragon drop is said out loud ("rune chain!!"), bots
+  near say gz, and the finder later sells its drops at a trade bank ("selling rune med 17k"). Every drop is the game's:
+  a dragon med helm is about one KBD kill in 120.
 - **Trade.** Vendors and bank-standers sell at the 2004 trade banks, about half of them at Varrock West, with adverts
   in the period's forms ("selling lobs 150 ea", "wts rune scim 33k"); about half run an auto typer. Prices follow
   December 2004 street prices for about 45 items and the item's value for the rest, never below high alch and never
@@ -67,14 +92,83 @@ Contents: [what they do](#1-what-the-bots-do) and [the design rules](#design-rul
   weapon for the KO, PJ fights, and run or teleport out when losing. Bots keep their items when they die, and a player
   who kills one in the Wilderness gets 1 to 50,000 coins. A bot's arrows in PvP are used up, never dropped (its kit is
   given at every restock, so they would be free rune arrows on the ground).
+- **Your death pile.** Bots loot as 2004's players did, by 274's own rules: your tradeables drop 7 ticks after you die,
+  seen only by your killer for a minute, then by everyone, gone after two. A bot that killed you takes the most
+  valuable stacks first with the real Take (eating its own food for room, never dropping anything; hurt, it eats a bite
+  and loots all the same, and only a player's attack on it ends its loot), says "ty for the rune scim" or "no loot?
+  lol", and banks your items at the Edgeville booth: they never vanish at its restock (a loot ledger, kept with the
+  saved world until banked; it is held from logging out meanwhile). Bots that were already near
+  your death and have the habit (a seeded share of PKers and rude players; a few polite ones) wait out the minute on a
+  tile of their own ("w8 for it") and rush what is left the moment their client shows it; a death to a monster's pile is
+  public at once (the polite ones wait a minute, and not with you standing by it). Nobody is called over for it, and a
+  bot that is not a PKer never goes into or deeper into the Wilderness for a pile. Deep PKers also patrol the Chaos
+  Temple's yard and camp the KBD's Lava Maze ladder and the Demonic Ruins, where they go for 1 in 3 of the bots passing
+  on an endgame trip. Bots' own deaths still drop nothing.
+- **Period crowds.** Telegrabbers gather in Asgarnia's Chaos Temple for the wine of Zamorak (1 at 100 online, 4 at 500,
+  5 at 1000), each on its own tile in sight of the table, racing for each wine as 274 decides ("stop stealing my wine",
+  "gotta be quick"): each grab a person's moment after the wine is back, now and then a hesitation or a slip, never a
+  metronome. They open the temple's door to leave (it shuts behind them). One with an air staff and no air runes wields
+  the staff for its stint and its own weapon again after.
+  Rangers and mages at the Edgeville dungeon's hill giants shoot from its safespots (3 verified tiles, one each), ask
+  the one standing there when all are taken ("u using this spot?"), wait their turn or go elsewhere. One whose giant
+  others keep killing moves to a free safespot whose giant it can shoot, and takes one again after a fight off them.
 - **Social life.** Social bots are regulars of one hub each. Levelling bots hang out at Falador park, Varrock square or a
   bank now and then. Friend cliques log in, train, travel and leave together, and walk the map in matching capes. About
   once an hour of play a notable event happens where the bots are: a drop party (with cheap real items you can pick
   up), a Party Room party, a clan walk, a PK team raid, a big stake at the Duel Arena, a scam spree; bots nearby talk
   about it. Newbies ask to follow players, scam callers work the trade banks, lurers try to lead you into the
   Wilderness, and one bot per world (two from 500) is a player moderator with a silver crown who tells off spammers.
+- **Word that travels** (bots only, never about you). News of a real event (a drop party, a 99 to come, a PK raid, a
+  bot killed by PKers in the Wilderness, a rune drop, a full or empty mine) is something a few bots know: the bots near
+  it, and their clique friends by "PM". It spreads by being said (a knower's idle line now and then: "dp at fally park",
+  "pkers at greens", "iron all taken at barb mine") to the bots that hear it, changes a little as it goes ("huge dp",
+  "dp at fally west bank"), and fades. Some act on it: knowers from up to 200 tiles come to a party (a few find the
+  wrong place and say "wheres the dp??"), Wilderness trips skip a place with pkers, miners avoid a full mine. Ask a bot
+  "where?" after it told you something and it answers. Bots that stand together for ten minutes in two sessions (at
+  the same rocks, regulars at a hub, vendors side by side, PKers at the edge) get to know each other and greet each
+  other next time ("hey again", "sup kev"); a meant kill-steal, a stolen rock or a PK kill leaves a grudge ("u again",
+  "stay off my rocks"), a rude bot steals more from its enemy (within the usual limits), and Edgeville PKers have
+  rivals. Bots pick up each other's catchphrases, so a hub's regulars come to share a few (never yours). These ties and
+  phrases are saved with the world. Clique friends now log in staggered (minutes apart, and not every friend every
+  time) and leave a few minutes after one another.
 - **The Duel Arena** (members worlds): bots visit to stake and duel each other through the real duel screens, watch
   and throw rotten tomatoes, and now and then challenge you to a small stake.
+- **The update buzz** (members worlds; the bots ideas work, round 3). The world is always 23 Nov 2004, three weeks after
+  the Fremennik Trials and a week after Horror from the Deep, so Rellekka is where people go to look: about 2 bots at
+  100 online and 15 at 500 are out on a visit at once. Fighters of combat 15-60 rock-hop among Rellekka's rock crabs,
+  which wake and fight them when you are there to see it (274 wakes a crab only for a player's client, so unseen nothing
+  is fought or gained); sightseers stand about the square, the market, the longhall and the piers, now and then buying
+  a beer at the longhall; bots of Agility 35+ jump the basalt causeway to the lighthouse (slipping into the tide now and
+  then, giving up after three), climb to its top and come back (never talking to Jossik). Bots talk of it: "done hftd
+  yet?", "did ur fremennik trials?", "rock crabs r the best xp now" (more of it near Rellekka), and a bot that hears
+  another speak of the crabs is likelier to go. What a bot says of the two quests, in its talk and in a thread, matches
+  its answer when you ask whether it did them (done from combat 45, still to do below it). Castle Wars stays talk, in
+  the future tense. About 3 lines in 100 of the bots' talk on a members world are of the period (the update, the crabs,
+  the Games Room, Gnomeball, kittens, Castle Wars to come): its topics come up between bots, and now and then a bot's
+  idle remark is one ("crabs r so good", "love the new games room") in the place of another, so there is no more talk
+  than before.
+- **Lives with arcs** (the bots ideas work, round 2). Each levelling bot keeps a goal from its real state, saved with the
+  world: a level 5-25 up in a skill it trains ("60 wc for yews"; 99 from 95), the piece its gear upgrades would buy
+  ("rune legs"), a sum ("100k"), a combat or total level. Its plans lean to it (a third of its picks; more for a 99), it
+  answers "whats ur goal" with it and its progress ("3 lvls to go for 60 wc"), celebrates it in place of its level-up
+  line ("finally 60 wc!!"), and now and then gives up on one it makes no headway with. Moods last a session: deaths,
+  kill-steals and lost duels tilt a bot ("this game", "so annoying"; a rude one gets ruder, now and then a rage-quit:
+  "im done"), level milestones, drops and wins elate it ("best day ever"; a mini drop party now and then), and a long
+  stint at one thing bores it (its next plan is something else). A bot also hops off a crowded mine ("w8 hopping") and
+  banks a big drop, then logs out. In about one session in seven a bot does something off its role for a while: a skiller
+  fights, a fighter fishes, a PKer takes a break from pking to fish at Draynor. A bot nearing 99 says so; its friends
+  come, it waits at its last log for them, the game's fireworks go off, they say gz, and a rich, friendly one throws a 99
+  drop party at the nearest bank. None of it is about you, and you are never the cause or the subject.
+- **The late-2004 world** (members worlds; the bots ideas work, round 3, theme G). About 5 bots in 100 are cat people:
+  they buy a kitten from Gertrude west of Varrock (her door, her dialogue, 100 coins, with pet food first: their own
+  fish from the bank or sardines from Port Sarim), stroke and feed it at their own pace (a careless one now and then lets
+  it run away, as 274 decides) and buy another a while after losing one; it follows them everywhere, says "Meow!" and
+  grows into a cat over hours of play. Bots go down to the Games Room under Burthorpe (the newest update in a world that
+  is always 23 Nov 2004) and play Runelink with each other through the game's own challenge screens and board, at a
+  person's pace; challenge one waiting there and it plays you within a few seconds (they never challenge you first). A
+  few play Gnomeball at the Gnome Stronghold, where the tacklers chase them while you watch. Castle Wars is only talk,
+  always "next month": its lobby is sealed in 274. They talk of it all now and then ("u tried the games room?", "is that
+  ur kitten?") and answer questions about it ("gertrude west of varrock 100gp", "under burthorpe").
 - **Being human.** Reaction times, typing time, short breaks ("brb"), lingering, stopping to watch a fight, misclicks,
   forgotten food, wrong turns, kill-stealing and rock-stealing by the rude ones, random events answered through the
   game's own scripts, and leaving the game the way a player does (banking first, saying goodbye).
@@ -196,7 +290,7 @@ The structure is upstream's; the port added modules beside it rather than rewrit
 | PvP | `BotPkGear`, `BotPkTactics`, `BotPkFight`, `BotPkPj`, `BotPkTeam` |
 | Set pieces | `BotSetPieces` (the interface), `BotSetPieceIndex`, `BotDirector` (about one event an hour), `BotClanWalk`, `BotTrains`, `BotParty`, `BotScams`, `BotDuel`, `BotArena`, `BotModBot`, `BotScreens`, `BotPieceLines` |
 | Chat | `BotChat` (addressing, replies, the marketplace, "come here"), `BotAnswers`, `BotChatter` (unprompted lines), `BotLines` (what fits where; the repetition registry), `BotStyle`, `BotSlots`, `BotThreads`, `BotStage`, `BotWitness`, `BotReactions`, `BotVoice` (one voice's share of a place), `BotSay` (everything said goes through the word filter), `BotFilter` (the filter, remembered), `BotSpoke`, `BotEmote`, `BotActivity`, `BotPlaces`, `BotFollow`, `ComeHereTask` |
-| The chat model | `BotModel` (which replies a model words, the pending reply and its fallbacks), `BotModelPrompt`, `BotModelGuard`, `BotModelHistory`, `BotModelTypes` |
+| The chat model | `BotModel` (which replies a model words, the pending reply and its fallbacks), `BotModelPrompt`, `BotModelGuard`, `BotModelHistory`, `BotModelTypes`, `BotModelAmbient` (the bots' own talk near the human: bots ideas, round 4) |
 
 ## 4. Contracts
 
@@ -224,13 +318,17 @@ The structure is upstream's; the port added modules beside it rather than rewrit
   `port/BotModelTypes.ts`; the page ↔ native half is [ARCHITECTURE.md](ARCHITECTURE.md) §7.1):
   - `{type:'bots-lm', id, mode, local, online, maxChars, timeoutMs}` (engine → page): a reply for a model to write, with
     both prompts (`local` {system, user} for the on-device model, `online` {system, context, user} for Claude). Ids
-    count from 1 per page load; native gives up after `timeoutMs` (9,000).
+    count from 1 per page load; native gives up after `timeoutMs` (9,000). (Bots ideas, round 4) With `ambient: true`:
+    a line of the bots' own talk (§4.9), always `mode: 'local'`, Claude's prompt empty, `timeoutMs` a tick short of its
+    deadline; the page sends it with `think: false`.
   - `{type:'bots-lm-reply', id, text, source, error?, ms}` (page → engine): the model's line as it came (the engine
     guards and styles it), or null and why: `timeout`, `busy`, `unavailable`, `refused`, `failed: …`. The page answers
     null `unavailable` at once with no native side or with Rules chosen.
-  - `{type:'bots-lm-mode', mode, local, online}` (page → engine), after `booted` and before `start`, and on every change:
-    the player's choice and what is there. Until it comes, and with `rules`, the engine asks nothing. (`local` is false
-    while the model in the app rests for memory.)
+  - `{type:'bots-lm-mode', mode, local, online, ambient}` (page → engine), after `booted` and before `start`, and on
+    every change: the player's choice and what is there. Until it comes, and with `rules`, the engine asks nothing.
+    (`local` is false while the model in the app rests for memory.) (Bots ideas, round 4) `ambient`: Settings › Bot
+    chat › Bots' own talk is Model and can be used (a model in the app, a chat model other than Rules); absent or false,
+    the bots' own talk is the rules' alone and draws no random number of the model's.
   - `{type:'bots-lm-notice', lines}` (page → engine): game messages for every human in the world, cut at 80 characters
     (`runtime/bots/page.ts`): the page's word that the model in the app rests for memory, and that it is back.
 
@@ -332,6 +430,30 @@ saves still go to the store, and every hook passes through. Repeated engine erro
 - **Continue after a restart**: every write of the store carries the living world (`BotManager.exportWorld()` →
   `_meta.world`: who is online with the rest of their sessions, the absences, the newcomer clock, each bot's last
   place, the newbies, the director's schedule), and `BotManager.start` reads it back.
+- **The bots' arcs** (the bots ideas work, round 2; `port/BotArcsStore`): each levelling bot's goal, its ties to other
+  bots (at most 6 acquaintances and 2 grudges) and up to 2 catchphrases it borrowed from other bots ride in the same
+  living world as `_meta.world.arcs` (`{"v": 1, "t": <play tick>, "b": {"<names.json index, base 36>": "<goal>|<ties>|<phrases>"}}`,
+  times as ages before `t`), at most 160 KB (the weakest ties go first). Bots only: a tie names a bot of `names.json`,
+  and a name that leaves the pool (a quit, a human taking it) is forgotten with every tie to it. No arcs, no field (the
+  state as before); an older store, another `v` or a corrupt section restores none. A session can end at once
+  (`leaveSoon(name, ticks, { abrupt, away })`: a rage-quit or a hop skips the wrap-up and the goodbye, never the engine's
+  combat lock; `mayLeaveAbruptly(p)` refuses a bot in a trade, "come here", a set piece or a random event). What happens
+  to bots goes on one bus (`port/BotArcsEvents`: level-ups, events, deaths, kills, steals, duels, every line said,
+  logins, the director's runs), and every line the themes add is said through `port/BotArcsSay.sayArcLine` with its
+  place in the speaker's talk budget.
+- **Period visits** (the bots ideas work, round 3; `port/BotPeriod`, `port/BotPeriodPlan`): theme G's update buzz
+  (Rellekka, its rock crabs, the lighthouse) has a budget of its own beside the far towns' and minigames' one:
+  2 × (N / 100)^1.25 bots out at once (2 at 100 online, 15 at 500, 36 at 1000). A free members-world levelling bot of
+  combat 15+ (no newbie; vendors, socials and PKers keep their roles) asked for its next plan is offered a visit
+  0.25 × (0.5 + curiosity) of the time while the budget has room, at most once in 9,000 play ticks; the builders' entries
+  (`registerPeriodEntry`) pick which. It is steady: the world is always 23 Nov 2004, so nothing decays and no clock is
+  read. Nothing new is saved: the gaps are in-process, and the game's own perm varps keep a bot's pet, Runelink rank and
+  chompy kills. Theme G's switch is `periodOn()` and theme H's `movementOn(kind)` (`port/BotMinimap`): on in the game,
+  off in a staged test world unless asked for (§7), and asked before any roll. The other period visits draw on other
+  budgets: a cat person's kitten or food trip is a sub-task of its pet habit (`port/BotPets`), the Games Room
+  (`tasks/GamesRoomTask`) and Gnomeball (`tasks/GnomeballTask`) are entries of the members catalogue on the far budget
+  (a lone waiter's partner joins past it). A bot in a Runelink game holds the end of its session (its role `runelink`,
+  as a set piece's), so it never logs out mid-game, and never lets the game's sand timer run out.
 - **A new bot without a save**: Tutorial Island done, a walkable tile by the Lumbridge spawn (an aged bot: by a bank of
   its tier), every quest complete as upstream had it plus the ones 274 added, a body from its name. Appearance is
   rebuilt only when worn items or the combat level change (upstream rebuilt it every tick, which overflowed the player
@@ -351,7 +473,9 @@ saves still go to the store, and every hook passes through. Repeated engine erro
 
   One record is not a bot: **`_meta`** (no username starts with `_`) holds the store's own state as JSON:
   `{"v": 1, "ageing": true, "quit": [names], "friends": {"<human>": {"friends": [...], "ignores": [...]}},
-  "world": {…}}`. One that cannot be read is kept as `_meta_bad` and a new one started.
+  "world": {…}}`. One that cannot be read is kept as `_meta_bad` and a new one started. `world` (§4.4) carries the
+  bots' arcs too (`world.arcs`, bots only, at most 160 KB of a store of about 2 MB at 1,000 bots: each write a few per
+  cent bigger, no new writes); Saved data's Reset world deletes them with the store, Delete character touches none.
 - Read once when the bots start: 404 → no records; a read that fails (retried once) → **bots off for the session**, and
   nothing is ever written; corrupt → `bots.sav.bak`; both corrupt → bots off. A record that fails the engine's save
   check keeps that bot out for the session (its record is written back unchanged).
@@ -383,8 +507,9 @@ saves still go to the store, and every hook passes through. Repeated engine erro
 `bots` (number, default 500): Settings › World › **Bots** `Off | 25 | 50 | 100 | 250 | 500 | 750 | 1000`, applied by
 the World category's Restart, sent as `init.config.bots.count`. A stored value the sheet does not offer snaps to the
 nearest one (a count that was on never snaps to Off). Bot chat: `botChat` (`rules`, `local`, `online`; default `local`
-when the app has a model) and `botThink` (Think first, default on), applied at once ([ARCHITECTURE.md](ARCHITECTURE.md)
-§7.1).
+when the app has a model), `botThink` (Think first, default on) and (bots ideas, round 4) `botAmbient` (Bots' own talk,
+`rules` or `model`, default `rules`: Model is not the default; greyed out unless the app has a model and a chat model other than Rules is chosen), applied at once
+([ARCHITECTURE.md](ARCHITECTURE.md) §7.1).
 
 ### 4.8 Friends (`runtime/bots/friends.ts`)
 
@@ -439,10 +564,55 @@ within 80, passes the word filter, has no assistant talk, nothing after 2004 (sl
 bot, makes no promise the rules did not make, states only facts true to the bot (levels, places, prices), echoes
 neither the human nor the bot's own recent lines, uses the human's name at the persona's rate, names no player it
 cannot know, says no "brb"/"afk"/"gtg", and has no markup. Every reason has a unit check in `test/model.test.mjs`.
-The accepted line then gets the persona's style (`port/BotStyle`).
+The accepted line then gets the persona's style (`port/BotStyle`). "Nothing after 2004" covers about 45 later terms
+as players wrote them (the whip, the d scim, Barrows, the Abyss, Pest Control, the fire cape, godswords, defenders,
+clan chat, ...; each item checked absent from 274's objects), and Castle Wars as played (as coming, "castle wars next
+month", it passes: its portals stood closed in 274). Players' names are taken out first ("ask Whip Lad" names a
+player), and 2004's own terms pass (kq, kbd, d chain, d med, mage arena, god cape, dusty key, telegrab, rock crabs, ...).
 
 With no model chosen nothing in the model's path draws a random number (the never-ignored replies and the crowd's
 shrug are the rules' own).
+
+**The bots' own talk** (bots ideas, round 4, theme I stage 1: `port/BotModelAmbient`; Settings › Bot chat › **Bots' own
+talk**, Rules by default). With Model the on-device model also words some of the bots' talk between themselves that the
+human can see, as it words their replies; the rules still decide who talks, when, about what and what the line says
+(their line is the hint and the fallback):
+- **What**: a topic thread's turns after its opener (`port/BotThreads.turn`, via `'thread'`: the speaker's situation
+  with its partner in the human's place, the partner's last line as heard, the rules' turn as the hint) and a bot's
+  answer to another bot's question or named line (`port/BotChat.botAnswer`, via `'botanswer'`). The openers, the
+  closer, the "ty" acks, the question back and the counter turn that answers it stay the rules'; so do the player-mod
+  bot's lines and everything else (PK talk, trades and adverts, set pieces, rude lines, clique banter's own lines).
+  Stage 2 (reactions to the human, after a retrain of the model) is not built.
+- **When** (every check before anything is drawn: with Rules, or near no human, nothing of it draws a die): the
+  speaker within 15 tiles of a human on its floor; the on-device model there (`ambientAvailable`: never Claude, even
+  with Claude online, and never Think first); no request in flight (a reply to the human never waits behind one; (round
+  4 fixes) nor is it 'busy' for one: the replies' `MAX_IN_FLIGHT` does not count it, and native stops one running at
+  its next token when a reply comes); 34 ticks (20 s) since the last ambient request, world-wide (at most 180 an hour).
+- **Timing**: the rules' own (`port/BotChat.ambientKeyboard`: their line's typing time, the same dice as before), the
+  bot at its keyboard to a deadline 4 ticks past it. The model's line, through the guard and the persona's style, is
+  said at its own typing time after the answer, never past the deadline; any fallback (the deadline, an error, the
+  guard, the human's line to that bot superseding it; (round 4 fixes) any line of that bot's to a human through
+  `sayTyped`, the vendor's answer or "sry was afk", supersedes it too, `supersedeAmbient`, so that line is typed from the
+  rules' time, not the deadline) says the rules' line at its rules time, or at once when that has passed. No retry. So a
+  thread is 4 ticks late at most, and only when the model is slow.
+- **The guard** adds two checks for these lines (`opts.ambient`): the rules' counter-question kept ("41 u?": the next
+  turn answers it; `AMBIENT_COUNTER_RX`, the threads' `COUNTER_RX`) and every number of the rules' line kept (the next
+  turn compares it); else `'counter'` or `'numbers'`. (Round 4 fixes) A counter-question the rules did not ask ("ps2 i
+  think, u?") is refused too (`'counter'`): the partner's next turn is drawn already and would leave it hanging.
+- **Numbers apart**: `modelStats.ambient` (and the log's entries marked `ambient`, with the rules' due tick): the
+  humanlike runner's LM1-LM8 (`--model=... --ambient`); the replies' MD1-MD6 are as before. The app's log marks each
+  settled one `(ambient)`, with no words; native refuses them when the phone is warm (thermal fair), while the model
+  rests, and behind a reply to the human ([ARCHITECTURE.md](ARCHITECTURE.md) §7.1).
+- **Measured** (2026-11-01, the stub and the shipped r2 model on llama-server on the Mac,
+  measured with a stub and the shipped model): few lines qualify. With the human standing at Varrock West bank among 500 bots
+  (10×) about 10 ambient requests an hour (12 lines near the human; the rest of the bots' talk there is openers, acks,
+  stage practices and the like, or far away), 1-20 an hour on the runner's tours; the 20 s pace held back 0-4 an hour.
+  With every request failing (the rules' lines at their own time) the world is the same, fingerprint for fingerprint,
+  as without the setting; with the model's words H7 moved 0 to -0.1 in three runs (-0.4 in one with a single line:
+  its later timing moves the world). The real model: 2 of 27 answers refused (both dropped the counter-question),
+  lines said at most 4 ticks after the rules' time (the deadline caps them), and 16 of the 25 said read right in 2004
+  style (most of those the hint with a word or two added; the rest off-meaning, "no i think so" to "is rs down?"). The phone heat test (`web/test/perf/lm-ambient-500.json`,
+  `lm-ambient-1000.json`) on an iPhone 13 mini: thermal state nominal throughout at 500 and 1000 bots, 51 fps, replies about 1 s.
 
 ## 5. Changes from upstream (2004sp-progressive)
 
@@ -468,10 +638,20 @@ What changed, in short (every change, with its reason, is in the library's READM
   loops, train where their levels belong, are never left on Tutorial Island, never sell their gear for 1 coin, and
   trade correctly with a player who takes more than 3 seconds; PKers follow the real Wilderness rules.
 - **A living world**: sessions, a pool, newcomers, quitting, mixed ages and persistence, where upstream's bots were all
-  online from start to shutdown and redrawn at every launch.
+  online from start to shutdown and redrawn at every launch; (the bots ideas work) rumours that move some bots, saved
+  ties and grudges between bots, catchphrases that spread between bots, staggered clique logins.
 - **Earned gear**: no starting bank of every armour set and 999,999,999 sharks.
 - **2004 realism**: human timing and habits, chat that fits the moment, a 2004 economy and adverts, looks, social life,
   set pieces, random events, fallibility and rudeness, the Duel Arena, the player-mod bot, the chat model.
+- **Period content and movement** (the bots ideas work, round 3): the 23 Nov 2004 update's buzz at Rellekka (the rock
+  crabs, sightseeing, the lighthouse: `tasks/BuzzTask`, `CrabTask`, `LighthouseTask`) on a budget of its own, kittens
+  (cat people, Gertrude's dialogue, the care), the Games Room's Runelink (real games, the human's challenge answered)
+  and Gnomeball (theme G; chompies were cut, the first of the round's cuts), and walking in minimap-sized clicks with
+  pauses, route variants and talk that stops a walk (theme H: `port/BotMinimap`, `port/BotTalkMoves`). Castle Wars
+  stays talk, in the future tense: its lobby is sealed in 274. Upstream's bots touched none of it.
+- **The human's death pile looted** (the bots ideas work): upstream's PKers walked away from a kill and restocked by
+  emptying their pack; the port's killer and vultures take the pile by 274's visibility rules, and a loot ledger keeps
+  the human's items through the restock to the bank.
 
 Kept as upstream, on purpose: bots keep their items when they die and their killer gets coins; Edgeville PKers fight
 other bots at the edge; upstream's chat lines, with their names, jokes and swearing (the filter stars the swearing as
@@ -503,6 +683,12 @@ and 16 % shorter at 500, 750 and 1000 bots, the bots' share 34, 29 and 31 % shor
 instructions in JavaScriptCore (the same seeded world before and after, which ended the same), a tick takes 18 % fewer
 at 500 and 21 % fewer at 1000.
 
+Theme H's walking (hops, pauses, lanes and route variants: no extra route search; a walk-up's one short search) and
+the update buzz cost little: back to back on 2026-11-01 (`measure.mjs --bots --real --runtimes=jsc --counts=500,1000
+--ticks=300`, the round 3 H library against round 2's, a busy machine), the whole tick 36.3-37.5 against 36.2 ms at 500
+bots and 50.2-50.4 against 50.3 ms at 1000, the bots' share 16.2-16.8 against 15.3 ms and 25.2-25.4 against 25.1 ms,
+the route searches 21.7-23.6 against 22.4 a tick (budget 60) and 41.4-41.8 against 41.0 (120).
+
 750 and 1000 have been measured on the Mac and in the iPhone simulator only (1000 in the simulator: 50 fps at Varrock
 West, ticks late 38-70 ms at the p95), not on a phone; their memory (about 90 MB more heap than no bots) and heat over
 a long session on a phone are unknown. A fresh world of 1000 takes about 200 ticks (2 minutes) to fill.
@@ -526,6 +712,8 @@ node web/engine/bots/test/all.mjs            # the library: type-check, worker s
                                              # economy, PK, habits, social life, looks, set pieces, the living world, …
 node web/engine/bots/test/all.mjs --full     # + task coverage on both world types, long simulations, the living world
                                              # at 25 to 1000 online, a crowd of 250, the humanlike report
+node --expose-gc web/engine/bots/test/endgame.test.mjs [--only=kbd]   # the endgame staged in the real world (seeds.mjs at many seeds;
+                                             # --only=kq: the KQ attempts' scenes)
 node --expose-gc web/engine/bots/test/identity.mjs --base=main   # a change that must not change what the bots do: four
                                              # seeded worlds end the same as with the library before it
 node web/engine/test/all.mjs                 # the engine worker, incl. bots.test.mjs: the glue against the real library and the stub
@@ -538,6 +726,87 @@ The tests read the upstream sources (see [BUILDING.md](BUILDING.md)) and never w
 the engine works in a scratch copy under `build/tmp/bots/`, with the library linked in. Every test file's header says
 what it checks; `web/engine/bots/README.md` has the full table. `LC_BOTS_SRC=<dir>/src` runs any test against another
 copy of the library (with its `data` beside it).
+
+`test/loot.test.mjs` (the bots ideas work, round 1) stages the human's death pile (a real Edgeville PKer's kill and
+its loot before the reveal, a vulture after it, a full pack, an NPC's death, a multi-combat kill, a looted PKer's own
+death and the saved ledger, the Duel Arena), the Chaos Temple's zone, the lever camps, the wine crowd and the
+safespots, and the round's review findings (a hurt killer, a PJer's jump the tick after a Take, a bot's own drop by the
+death, a wine stint cut short, a ledger restored newer than its bot's save, a bot that quits with a ledger), and its
+left-overs (the grab's human moment, the way out by the temple's door, a grab's tile in sight of the table, a ranger
+moving to a free safespot). `humanlike.mjs --die=pk:3000` (or `npc:3000`) lets the touring human die every 3,000 ticks for the loot
+metrics (LV1-LV11); LV12-LV16 (the wine crowd, safespots, camps, the temple) need no flag.
+
+`test/arcs-store.test.mjs` (the bots ideas work, round 2: the arcs foundation) checks the saved arcs (the encoding,
+every goal kind, the caps, 2,000 bots at the caps within 160 KB, an old, corrupt or foreign section, quits, ties to no
+pool bot), the bus and its sites, `sayArcLine`'s four budget modes, and an abrupt leave; `test/arcs.test.mjs` (theme C)
+and `test/word.test.mjs` (theme D) stage the themes. The humanlike runner fills `record.arcs` for their AR and WT
+metrics (WT1 is the levelling bots in the Wilderness, older). `word.test` (theme D: word that travels) stages a
+rumour's telling heard by the bots near and passed to a clique mate by PM (never the human a knower), the "where?"
+answer, a word guest at a drop party from 130 tiles, the director's telling from a knower, a wrong place's walk and
+its "wheres the dp??", a pk rumour (a trip skipped, a knower turned back), a full mine avoided and a free one
+preferred, a tie over two sessions and its greeting at the next, the store and decay, a meant KS's grudge and "u
+again", the KS war within the steal caps, Edgeville rivals, a catchphrase adopted, saved and faded (never the
+human's), and the clique stagger. Its WT metrics: WT2 word guests' share of a party (500 bots), WT3 knowers who acted,
+WT4 wrong-place trips, WT5 acquaintances and greetings, WT6 grudge lines and KS between a grudge pair, WT7 borrowed
+catchphrases, WT8 clique logins within 2 minutes of a mate's (at most 25 %), WT9 rumours the human heard, WT10 the
+human's name in no tie, rumour or phrase.
+
+`test/arcs.test.mjs` (theme C, lives with arcs; `--only=goals,done,lean,answers,moods,rage,hop,whims,ninety,drop,endgame`)
+stages goals drawn from the real state and their save, a level goal's celebration in the level-up line's place (the gz
+only as the level-up's own line), a money goal's line, the lean (200 picks), "whats ur goal" against a statement, the
+moods from a death, a kill-steal and a duel (the tilt lines, the rude-reply and gz weights, boredom's next pick and a plan
+left whole), a rage-quit with a line from you answered first, a hop off a crowded mine, a big drop banked, a whim's timed
+task and a PKer's fishing break banked before its restock, a 99's gathering (its clique's PM, the hold, the gz, its drop
+party at the nearest bank), a mini party and round 1's endgame hook. The runner's `--probe` asks "whats ur goal" too
+(AR2); AR1-AR11 read the goals, the moods' tilt episodes, the leaves, the whims, the 99s and theme C's lines. A staged
+world of `test/lib/simworld` has theme C off unless the test asks for it (`Sim.create({ lives: true })`, as the far-town
+outings are): another theme's scenes run as before it; the humanlike runner and `arcs.test` turn it on. Theme D is
+the same (`Sim.create({ word: true })`: its rumours, ties and slang off by their rates, the clique timing as before
+it); the humanlike runner and `word.test` turn it on. Round 3's themes are too: theme G, period content
+(`Sim.create({ period: true })`, `port/BotPeriod` setPeriodForTest: the buzz's hook and budget, the pet habit, the
+Games Room, Gnomeball, the Rellekka buzz, chompies), and theme H, movement (`Sim.create({ movement: true })`,
+`port/BotMinimap` setMovementRatesForTest: hops, pauses, overshoots, lanes, route variants, walk-ups, talk holds). Every
+G and H hook asks its switch (`periodOn()`, `movementOn(kind)`) before any roll, so a theme that is off draws no dice;
+the humanlike runner turns both on from the first login (`--period=off`, `--movement=off` for an A/B run of the same
+seed), and `identity.mjs --on=period,movement` checks a foundation with them on.
+
+`test/period.test.mjs` (the bots ideas work, round 3, theme G: `--only=kitten,runelink,gnomeball,talk,cw,lines`)
+stages a cat person's kitten (the trip from the habit, Gertrude's door and dialogue, 100 coins, the follow, a feed, a
+stroke and its page, a jump, 40 minutes with no pet page left open, a food trip taking its own fish from the bank, a
+logout and a login that keep it, a death that loses it), two bots' whole Runelink game (no move forced by the sand
+timer, out by the stairs, no rescue jump, no engine error), the human's challenge answered and its resign, bots that
+never challenge the human, a Gnomeball visit (the gate, the referee, a win's XP, the weapon wielded again, the free
+ball dropped, tackles only with the human in view), the topics pet and gamesroom and the answers (none while theme G is
+off), the period's idle talk in the place of a due idle line (none and no dice while theme G is off; about its share,
+spread over its kinds, when on), Castle Wars as talk only (no task's spot near its sealed lobby, no line that says it is
+open), and every period moment's lines said as set pieces. Its PC metrics: PC3 pets out per 100 online (members 1-4), PC4 pets lost to
+neglect per 10 pet-hours (at most 0.5) and pages left open (0), PC5 Gnomeball (report), PC6 Runelink games an hour (3+
+at 500, at most 10 % of moves forced); H19 leaves the Games Room's seated waits out.
+
+`test/period-budget.test.mjs` (the bots ideas work, round 3: the period foundation) checks theme G's switch and the
+buzz's budget, registry and planner hook (no dice while theme G is off or nothing is registered: the builders' entries
+taken out for it; offers, caps, the gap, the keep; visits and their rescue jumps by kind; a rumour's boost);
+`test/period.test.mjs` (the G builder: kittens, Runelink, Gnomeball) and `test/buzz.test.mjs` (the H builder's theme G
+parts: the buzz's offer, the crabs unobserved and in the human's view, the lighthouse both ways and a give-up,
+sightseeing, the lines and a heard line's boost) stage theme G; `test/movement.test.mjs` (route variants, hops near the
+human and legs as before far from it, lanes, overshoots, the exemptions, the typing stand) and `test/talkmoves.test.mjs`
+(a walk-up, a held walking partner, the never-held cases, a hit and the human's line ending a hold) stage theme H;
+`test/model-ambient.test.mjs` (the bots ideas work, round 4: the model for the bots' own talk with the stub: the
+guard's ambient checks, a thread far from the human asks nothing, near it one request per turn after the opener, a
+bot's answer, the 20 s pace and a request in flight, a reply to the human going first, (round 4 fixes) the replies'
+cap without the ambient request and a line to the human giving it up, a dropped counter, a silent model, Claude online
+(still local), and no dice when off) stages theme I's stage 1, whose LM metrics (LM1-LM8: requests
+an hour, the share in the model's words, guard refusals, replies to the human asked while one was in flight, counters
+kept, fallbacks, H7 against the same run without the model: `--lm7-base`, lateness against the rules' time) the
+runner prints apart with MD1-MD6 under `--model=... --ambient`. The
+runner's MV metrics (MV1-MV9: short stops, trips with a stop, hop lengths, repeated and shared routes, turns typed
+walking, openings far apart, overshoots, travel time against `--movement=off`: pass its `--json` as `--move-base`) read
+its own trips and lines (an older library gives MV1, MV2, MV4-MV7 a "before") and `port/BotMinimap`'s stats; PC2 needs
+`--tour=still --at=rellekka_crabs`. The humanlike runner fills
+`record.period`, `record.buzz` and `record.move` for their PC and MV metrics; PC1 (bots at Rellekka and the
+lighthouse per 100 online), PC8 (period talk's share), PC9 (Castle Wars said to be open: 0) and PC10 (rescue jumps per
+100 period visits) need no flag, and PC1, PC8 and PC9 read the runner's own samples, so an older library gives them a
+"before".
 
 The staged tests (fixes, scams, parties, groups, the Duel Arena, …) take bots of a seeded world, so a check that held
 only on some dice failed when anything else moved them (a new draw in a planner, a bot that walked a tick longer).

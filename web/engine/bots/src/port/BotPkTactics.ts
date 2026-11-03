@@ -25,6 +25,7 @@ import { botSay } from '#/engine/bot/port/BotSay.js';
 import { pkLine, type PkLineKind } from '#/engine/bot/port/BotLines.js';
 import { nameSeed, seededRandom } from '#/engine/bot/port/BotSeed.js';
 import World from '#/engine/World.js';
+import { playerDying } from '#/engine/bot/port/BotWitness.js'; // (bots ideas, round 1's left-overs: a death in the regen's tick)
 
 
 /** port: a PK line, when one of its own is fresh (port/BotLines pkLine); else nothing */
@@ -165,7 +166,9 @@ export function pkSayPjed(player: Player): void {
  * 'killed' (the target's Hitpoints are gone: a kill line, once; the fight is over), else null (fight on: the prayers).
  */
 export function pkEngageTactics(player: Player, target: Player, tactics: PkTactics, code: PkCode = {}): 'killed' | null {
-    if ((target.levels[PlayerStat.HITPOINTS] ?? 1) <= 0) {
+    // (round 1's left-overs: or at 1 in its death, a kill in its Hitpoints' regen tick: port/BotWitness playerDying; the
+    // kill went unseen, the fight on at a dying target, no kill line, its loot left to the drop's look for a hero)
+    if ((target.levels[PlayerStat.HITPOINTS] ?? 1) <= 0 || playerDying(target)) {
         if (tactics.killLineFor !== target) {
             tactics.killLineFor = target;
             // port (the realism work, phase 2): its own few lines of this pool and the 2004 ones (port/BotLines pkLine)

@@ -63,6 +63,7 @@ import ScriptProvider from '#/engine/script/ScriptProvider.js';
 import CategoryType from '#/cache/config/CategoryType.js';
 import { Inventory } from '#/engine/Inventory.js';
 import { Items, dungeonRoute, type DungeonRoute } from '#/engine/bot/BotKnowledge.js';
+import { KEY_DOORS } from '#/engine/bot/BotKnowledge.js'; // (bots ideas, Track A: the endgame's key doors)
 import UnsetMapFlag from '#/network/game/server/model/UnsetMapFlag.js';
 import Environment from '#/util/Environment.js';
 import Component from '#/cache/config/Component.js';
@@ -86,7 +87,7 @@ import { exitLeg, exiting } from '#/engine/bot/port/BotExits.js'; // (variety ro
 // is crossed at a run, a wrong turn's 'lost' line; wrong turns read the walking graph's neighbours and the danger map)
 import { leadsAFriend, noteWrongTurn, runsAcross, travelPaused } from '#/engine/bot/port/BotTeleport.js';
 import { neighbours as graphNeighbours } from '#/engine/bot/port/BotWalkGraph.js';
-import { dangerOfNode, huntsMe } from '#/engine/bot/port/BotDanger.js';
+import { dangerOfNode, fearCost, huntsMe, lineFeared } from '#/engine/bot/port/BotDanger.js';
 import { personaOf } from '#/engine/bot/port/BotPersona.js';
 import { wildernessLevelAt } from '#/engine/bot/port/BotContent.js';
 import type { PlannerKey } from '#/engine/bot/port/BotRoster.js';
@@ -94,6 +95,10 @@ import { canTravel, CollisionType, LocShape } from '#/engine/routefinder/index.j
 import { nearestLocIn, nearestNpcIn, nearestObjIn, inSomeZone, zoneHasNpc, type Nearest } from '#/engine/bot/port/BotZoneScan.js';
 import { aggressorIndexReady, findTargeting } from '#/engine/bot/port/BotAggressors.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+// ---- (bots ideas, round 3: H move) minimap hops, pauses, overshoots, lanes and route variants (port/BotMinimap: it
+// imports only modules this one does) ----
+import { cutHop, dropHop, hopAtFlag, hopChain, hopStanding, hopsHere, laneTarget, movementOn, routeVariant } from '#/engine/bot/port/BotMinimap.js';
+// ---- end of H move's imports ----
 
 /** Debug-only: resolves the BotPlayer wrapper's name off a Player, or null for real (non-bot) players. */
 function _debugBotName(player: Player): string | null {
@@ -167,6 +172,12 @@ export const teleportStats = {
     marks: [] as { name: string; cls: MoveClass; tick: number }[]
 };
 
+// ---- (bots ideas, round 3: G period) every counted jump (done or refused) told to these, after teleportStats has it:
+// port/BotPeriodIndex adds port/BotPeriod's (the period visits' rescue jumps by kind, PC10). Counting only: a listener
+// changes nothing ----
+export const teleportListeners: ((player: Player, reason: TeleportReason, done: boolean) => void)[] = [];
+// ---- end of G period's block ----
+
 const MAX_MOVE_MARKS = 5000;
 
 /** port (phase 5a): mark the bot's move now, or one a few ticks from now (a cast lands about 3 ticks later), as real. */
@@ -198,6 +209,9 @@ function _countTeleport(player: Player, reason: TeleportReason, done: boolean, d
     let entry = teleportStats.byCause.get(key);
     if (!entry) teleportStats.byCause.set(key, (entry = [0, 0]));
     entry[done ? 0 : 1]++;
+    // ---- (bots ideas, round 3: G period) the jump's listeners (teleportListeners) ----
+    for (const fn of teleportListeners) fn(player, reason, done);
+    // ---- end of G period's block ----
 }
 
 /**
@@ -615,6 +629,8 @@ const GATEWAY_REGIONS: GatewayRegion[] = [
         // ── Al Kharid ↔ Desert (gate) ─────────────────────────────────────────
         // Access to the Kharidian desert via Shantay Pass. Requires a toll/pass
         // so bots teleport through the gate.
+        // (bots ideas, the KQ track: a KQ attempt's team buys its passes and goes through the gate by its own script,
+        // port/BotKqTeams shantayGate; its walks never ask this gateway)
         name: 'ShantayPass',
         destInRegion: (x, z, l) => checkRegion(x, z, l, [
             'DesertSouth']),
@@ -2390,6 +2406,9 @@ const GRAPH_LAST_LEGS = 2048;
 /** port: a graph route longer than this times the straight distance (plus GRAPH_DETOUR_TILES) is a detour round a gateway */
 const GRAPH_DETOUR = 2;
 const GRAPH_DETOUR_TILES = 60;
+/** (bots ideas, round 1's left-overs) a route round where stronger monsters hunt the bot is walked when at most this much longer than the plain one */
+const FEAR_DETOUR = 2;
+const FEAR_DETOUR_TILES = 60;
 
 /**
  * port: the walking graph's route from the bot to (destX, destZ), when the walk can follow it: both on the overworld,
@@ -2400,7 +2419,7 @@ const GRAPH_DETOUR_TILES = 60;
  * fence, the sheep pen's, or a gateway's approach with the nearest node across the river, is not). Null when not;
  * 'wait' when the tick's searches are spent.
  */
-function _graphPlan(player: Player, destX: number, destZ: number, edge = false): { nodes: number[]; goal: number } | null | 'wait' {
+function _graphPlan(player: Player, destX: number, destZ: number, edge = false, variants = false): { nodes: number[]; goal: number } | null | 'wait' {
     if (player.level !== 0) return null;
     const { allowed, key } = _graphAllowed();
     const goals = _graphGoals(destX, destZ, allowed);
@@ -2420,12 +2439,16 @@ function _graphPlan(player: Player, destX: number, destZ: number, edge = false):
     // rescue-jumped 225 tiles). Not for other walks: tried on every walk, a stroll by Lumbridge and a Party Room's guests
     // went otherwise (groups and party tests)
     const elsewhere = componentOf(goals[0]) !== componentOf(start);
+    // (bots ideas, round 1's left-overs) round the places where monsters stronger than the bot hunt it (port/BotDanger
+    // fearCost: the dark wizards' circle south of Varrock), its route as before when the way round is too long a detour
+    const fear = fearCost(player);
+    const routeOf = (a: number, b: number): number[] | null => graphRoute(a, b, allowed, fear ? `${key}|${fear.key}` : key, fear?.cost);
     let nearestClosed = false;
     for (let g = 0; g < goals.length; g++) {
         const goal = goals[g];
         if (g > 0 && (elsewhere ? componentOf(goal) !== componentOf(start) : !(edge && nearestClosed))) continue;
         let from = start;
-        let nodes = graphRoute(start, goal, allowed, key);
+        let nodes = routeOf(start, goal);
         // port: the nearest reachable node may be across a gate the bot just came through: another reachable one, of the
         // goal's region
         if (!nodes) {
@@ -2434,7 +2457,7 @@ function _graphPlan(player: Player, destX: number, destZ: number, edge = false):
                 const ok = _nodeReachable(player, alt, key);
                 if (ok === 'wait') return 'wait';
                 if (!ok) continue;
-                nodes = graphRoute(alt, goal, allowed, key);
+                nodes = routeOf(alt, goal);
                 if (nodes) {
                     from = alt;
                     break;
@@ -2443,9 +2466,23 @@ function _graphPlan(player: Player, destX: number, destZ: number, edge = false):
         }
         if (!nodes) continue;
         const [sx, sz] = nodePos(from);
-        if (graphRouteCost(nodes) > GRAPH_DETOUR * Math.max(Math.abs(destX - sx), Math.abs(destZ - sz)) + GRAPH_DETOUR_TILES) continue;
+        // (round 1's left-overs: the plain route's detour decides the walk, as before; the way round is taken unless it is
+        // more than FEAR_DETOUR times that route and FEAR_DETOUR_TILES. A level-3 from the trees east of the dark wizards'
+        // circle to Varrock East bank had a way round over the GRAPH_DETOUR limit, and walked the plain route through it)
+        const plain = fear ? (graphRoute(from, goal, allowed, key) ?? nodes) : nodes;
+        if (graphRouteCost(plain) > GRAPH_DETOUR * Math.max(Math.abs(destX - sx), Math.abs(destZ - sz)) + GRAPH_DETOUR_TILES) continue;
+        if (graphRouteCost(nodes) > FEAR_DETOUR * graphRouteCost(plain) + FEAR_DETOUR_TILES) nodes = plain;
         const open = _graphLegOpen(goal, destX, destZ);
         if (open === 'wait') return 'wait';
+        // ---- (bots ideas, round 3: H move) a route variant for the walk (`variants`: _graphWalk's plan; port/BotMinimap
+        // routeVariant: the bot's habit or a roll, kept only when sane, the same for a re-plan of the walk; no dice when
+        // off). The same start, goal, limits and fear costs; only the edges' noise differs ----
+        if (open && variants) {
+            const base = nodes;
+            const viaFrom = from;
+            return { nodes: routeVariant(player, goal, base, v => graphRoute(viaFrom, goal, allowed, fear ? `${key}|${fear.key}` : key, fear?.cost, v)), goal };
+        }
+        // ---- end of H move's variant ----
         if (open) return { nodes, goal };
         if (g === 0) nearestClosed = true;
     }
@@ -2509,7 +2546,7 @@ function _graphWalk(player: Player, destX: number, destZ: number, edge = false):
     }
     const no = graphNo.get(player);
     if (no && no.goal === goal && no.edge === edge && World.currentTick < no.until && Math.max(Math.abs(no.x - player.x), Math.abs(no.z - player.z)) <= GRAPH_START_MOVE) return null;
-    const plan = _graphPlan(player, destX, destZ, edge);
+    const plan = _graphPlan(player, destX, destZ, edge, true); // (bots ideas, round 3: H move: the walk's plan takes a variant)
     if (plan === 'wait') return 'wait';
     if (!plan || plan.nodes.length < 2) {
         graphWalks.delete(player);
@@ -2560,7 +2597,17 @@ function _graphTarget(player: Player, destX: number, destZ: number, edge = false
     const shortLegs = (routeSteps.get(player)?.shortUntil ?? 0) > World.currentTick;
     for (let ahead = shortLegs ? 1 : GRAPH_AHEAD; ahead >= 1; ahead--) {
         const [x, z] = nodePos(walk.nodes[Math.min(last, walk.at + ahead)]);
-        if (ahead === 1 || Math.max(Math.abs(x - player.x), Math.abs(z - player.z)) <= GRAPH_REACH) return [x, z];
+        // (bots ideas, round 1's left-overs: not across where monsters stronger than the bot hunt it, port/BotDanger
+        // lineFeared: its route round them is walked node by node there)
+        if (ahead === 1 || (Math.max(Math.abs(x - player.x), Math.abs(z - player.z)) <= GRAPH_REACH && !lineFeared(player, x, z))) {
+            // ---- (bots ideas, round 3: H move) a near-human leg to an intermediate node aims at the bot's lane beside it
+            // (port/BotMinimap laneTarget: free, a free straight run to the node; not the walk's last node, not a gateway's
+            // approach, not a wrong turn's) ----
+            const at = Math.min(last, walk.at + ahead);
+            if (at < last && !edge && movementOn('lanes')) return laneTarget(player, walk.nodes[at], x, z, hopsHere(player, () => _mayHop(player), destX, destZ));
+            // ---- end of H move's lane ----
+            return [x, z];
+        }
     }
     return null;
 }
@@ -2627,6 +2674,48 @@ function _mayGoWrong(player: Player): boolean {
     if (kind === 'Social' || kind === 'ComeHere') return false;
     return wildernessLevelAt(player.x, player.z) === 0 && !travelPaused(player) && !leadsAFriend(player);
 }
+
+// ---- (bots ideas, round 3: H move) who walks in minimap hops (port/BotMinimap hopsHere adds the human's 64 tiles, the
+// destination out of the Wilderness and the other themes' minimapExempt hooks) ----
+/**
+ * BotAction's part of the hop exemptions (the spec's overrides): a walk that may go wrong
+ * (no errand or sub-task: a follow, a boss team's, a random event; no trade, "come here", social lead or friend led; out
+ * of the Wilderness), and not a PK task, a flee (HP under half) or with an aggressor within 8. Draws no dice.
+ */
+function _mayHop(player: Player): boolean {
+    if (!_mayGoWrong(player)) return false;
+    const kind = ((player as unknown as { _bot?: { currentTask?: { name?: string } | null } })._bot?.currentTask?.name ?? '').split(':')[0];
+    if (kind.includes('PKer')) return false;
+    if (player.levels[PlayerStat.HITPOINTS] < player.baseLevels[PlayerStat.HITPOINTS] / 2) return false;
+    return findAggressorNpc(player, 8) === null;
+}
+
+/**
+ * Is the leg _pathTowards queues a long walk's (cut into hops)? Its target a graph node (`viaNode`), or any overworld leg
+ * of a walk (walkTo's destination) that began GRAPH_MIN+ tiles off: its last straight stretch, a leg the graph does not
+ * join (out of Lumbridge castle's courtyard, round a fence). Draws no dice.
+ */
+function _hopLeg(player: Player, viaNode: boolean): boolean {
+    if (player.level !== 0 || !walkFinals.has(player)) return false;
+    return viaNode || (longWalks.get(player)?.long ?? false);
+}
+/**
+ * (walkTo, before its walkFinals) a walk begins: a new destination, or the same one after LONG_WALK_GAP ticks without a
+ * call; it is long when GRAPH_MIN+ tiles off then (its legs hop: _hopLeg)
+ */
+const longWalks = new WeakMap<Player, { x: number; z: number; long: boolean }>();
+const LONG_WALK_GAP = 20;
+function _noteWalkStart(player: Player, destX: number, destZ: number, level: number): void {
+    const prev = walkFinals.get(player);
+    const w = longWalks.get(player);
+    if (w && w.x === destX && w.z === destZ && prev && prev.x === destX && prev.z === destZ && World.currentTick - prev.tick <= LONG_WALK_GAP) return;
+    longWalks.set(player, { x: destX, z: destZ, long: level === 0 && player.level === 0 && Math.max(Math.abs(destX - player.x), Math.abs(destZ - player.z)) >= GRAPH_MIN });
+}
+/** (tests) the graph route of the bot's walk under way (its nodes), or null */
+export function graphRouteOfForTest(player: Player): readonly number[] | null {
+    return graphWalks.get(player)?.nodes ?? null;
+}
+// ---- end of H move's exemptions ----
 
 /**
  * A junction of the route for a wrong turn (not the start, not within 2 nodes of the end; in its first WRONG_TURN_SPAN
@@ -2759,7 +2848,7 @@ function _detouring(player: Player): boolean {
 const walkFinals = new WeakMap<Player, { x: number; z: number; tick: number }>();
 const walkLegs = new WeakMap<Player, { key: string; x: number; z: number; level: number; left: number; tick: number }>();
 const LEG_FRESH_TICKS = 200;
-export function walkLeft(player: Player, destX: number, destZ: number, near = 3): { key: string; left: number } | null {
+export function walkLeft(player: Player, destX: number, destZ: number, near = 3): { key: string; left: number; route: number } | null {
     const f = walkFinals.get(player);
     const leg = walkLegs.get(player);
     if (!f || !leg || World.currentTick - leg.tick > LEG_FRESH_TICKS || Math.max(Math.abs(f.x - destX), Math.abs(f.z - destZ)) > near) return null;
@@ -2782,11 +2871,32 @@ export function walkLeft(player: Player, destX: number, destZ: number, near = 3)
         }
         left = graphRouteCost(walk.nodes.slice(at)) + best;
     }
-    return { key: leg.key, left };
+    // (bots ideas, round 4 fixes) and beside it the tiles along its queued route when that route ends at the leg's point
+    // (-1: none; a route that stops short, a segment, a graph node, a minimap hop, is none): a walk round a building to its
+    // door leads away from it for a while (Yanille's bank from the east: its only doorway is in the west wall), and by
+    // `left` (a straight line, or the graph walk that brought the bot near, its nodes behind it now) the walk round made no
+    // progress: the bank walk's detour sent the bot back east, and the freeze rule jumped it (minigames.test seed 9).
+    // StuckDetector counts it beside `left`, only where both ends of its window have it (a measure that switched kinds mid
+    // window, a straight line to a route round a wall, read as no progress: walks failed and were jumped at the endgame)
+    const route = leg.level === player.level && queuedRouteEndsNear(player, leg.x, leg.z, ROUTE_END_TILES) ? _queuedRouteLeft(player) : -1;
+    return { key: leg.key, left, route };
 }
 
 /** port (variety round 1, F): the leg (walkLegs key) whose progress is its queued route's length (a dungeon's door leg) */
 const routeLegs = new WeakMap<Player, string>();
+
+/** (bots ideas, round 4 fixes) a queued route this near its leg's point ends there (the search got to it, or beside it) */
+const ROUTE_END_TILES = 1;
+
+/**
+ * (bots ideas, round 4 fixes) the bot has a route queued and it ends within `near` tiles of (x, z) on its floor (its last
+ * waypoint): the stuck checks' measure along a route (walkLeft) and advanceBankWalk's keep of a route to the bank
+ */
+export function queuedRouteEndsNear(player: Player, x: number, z: number, near: number): boolean {
+    if (!player.hasWaypoints()) return false;
+    const last = player.waypoints[0];
+    return Math.max(Math.abs(((last >> 14) & 0x3fff) - x), Math.abs((last & 0x3fff) - z)) <= near;
+}
 
 /** port (variety round 1, F): the tiles (Chebyshev, segment by segment) of the route the bot has queued, from where it stands */
 function _queuedRouteLeft(player: Player): number {
@@ -2877,6 +2987,15 @@ function _pathTowards(player: Player, destX: number, destZ: number, edge = false
                 }
             }
             pathProgress.delete(player);
+            // ---- (bots ideas, round 3: H move) a graph walk's leg near a human: its first minimap hop (port/BotMinimap
+            // cutHop: the found path cut at 8-18 tiles, the rest kept for the next hop; no search) ----
+            if (movementOn('hops') && _hopLeg(player, via !== null)) {
+                const final = walkFinals.get(player)!;
+                player.queueWaypoints(cutHop(player, path, final.x, final.z, hopsHere(player, () => _mayHop(player), final.x, final.z)));
+                return;
+            }
+            dropHop(player);
+            // ---- end of H move's cut ----
             player.queueWaypoints(path);
             return;
         }
@@ -2948,7 +3067,9 @@ interface ScriptedCrossing {
  * region, `out` back. The toll gate's guard lets every bot through free (they have Prince Ali Rescue done: a friend
  * of Al-Kharid); the Karamja boat costs 30 coins each way (a Port Sarim sailor; back, the customs officer's search),
  * and so does the Brimhaven-Ardougne boat (Brimhaven's customs officer; back, Captain Barnaby). Upstream teleported
- * across all of them: 30-40 casts in 10 minutes at the toll gate. (Shantay Pass and Entrana are still jumps, unseen.)
+ * across all of them: 30-40 casts in 10 minutes at the toll gate. (Shantay Pass and Entrana are still jumps, unseen;
+ * (bots ideas, the KQ track) a KQ team goes through the Shantay Pass's gate by its own script, port/BotKqTeams, and never
+ * walks to a tile across it)
  */
 const SCRIPTED_CROSSINGS: Record<string, { in: ScriptedCrossing; out: ScriptedCrossing; fare?: number }> = {
     AlKharid: { in: { npcs: ['borderguard1'], op: 1, choices: [] }, out: { npcs: ['borderguard2'], op: 1, choices: [] } },
@@ -3133,6 +3254,7 @@ export function botScript(player: Player): ScriptState | null {
 export function isCrossing(player: Player): boolean {
     // (the variety work, round 2, the fixes: and a way out of Shilo or a building's upper floor, port/BotExits)
     if (travelPaused(player) || _detouring(player) || exiting(player)) return true;
+    if (hopStanding(player)) return true; // (bots ideas, round 3: H move: a pause or a typing stand at a hop's flag)
     const st = crossings.get(player);
     if (st && World.currentTick - st.lastTry <= 20) return true;
     return player.level === 1 && SHIP_PLANKS.some(([px, pz]) => Math.max(Math.abs(player.x - px), Math.abs(player.z - pz)) <= 6);
@@ -3199,6 +3321,7 @@ function _continueCrossing(player: Player): boolean {
 }
 
 export function walkTo(player: Player, destX: number, destZ: number, level = 0): void {
+    if (movementOn('hops')) _noteWalkStart(player, destX, destZ, level); // (bots ideas, round 3: H move: a long walk hops)
     walkFinals.set(player, { x: destX, z: destZ, tick: World.currentTick });
     try {
         const botName = _debugBotName(player);
@@ -3290,6 +3413,10 @@ export function walkTo(player: Player, destX: number, destZ: number, level = 0):
                 else interactNearbyLocByOps(player, 'climb-up', 6);
                 return;
             }
+            // ---- (bots ideas, Track A: the endgame) a lair whose way out is no ladder by its floor but its own loc (the King
+            // Black Dragon's lever out, BotKnowledge DUNGEON_ENTRIES' `exit`): walked to and clicked, the game's move marked ----
+            if (route.exit && _lairExit(player, route)) return;
+            // ---- end of Track A's lair exit ----
             botTeleport(player, ex, ez, el, 'dungeon');
             return;
         }
@@ -3311,12 +3438,42 @@ export function walkTo(player: Player, destX: number, destZ: number, level = 0):
     // port: but a route the bot has not taken a step of for BLOCKED_ROUTE_TICKS is dropped: a tile on it is one a
     // blocking NPC stands on (the path search does not see NPCs that block players; a player's step does: Draynor
     // Manor's nasty trees held a bot 800 ticks). The legs that follow are short ones (_graphTarget)
-    if (player.hasWaypoints() && _blockedOnRoute(player)) player.clearWaypoints();
+    if (player.hasWaypoints() && _blockedOnRoute(player)) {
+        player.clearWaypoints();
+        dropHop(player); // (bots ideas, round 3: H move: a blocked hop's rest dropped with it)
+    }
     if (player.hasWaypoints()) {
+        // ---- (bots ideas, round 3: H move) a hopped walk's next minimap hop clicked a few tiles before the flag
+        // (port/BotMinimap hopChain: unless a pause is due there, an overshoot's, or the bot is typing). Keyed on the bot's
+        // own floor: a walk to an upper floor (Lumbridge castle's bank) hops its overworld legs as well (_pathTowards cuts
+        // them), and its hops chain and pause like any other (the round's fixes: moveH-3) ----
+        if (player.level === 0) {
+            const chained = hopChain(player, destX, destZ, () => hopsHere(player, () => _mayHop(player), destX, destZ));
+            if (chained) player.queueWaypoints(chained);
+        }
+        // ---- end of H move's chain ----
         _setRun(player);
         player.moveSpeed = MoveSpeed.WALK;
         return;
     }
+    // ---- (bots ideas, round 3: H move) at a hop's flag: a pause or a line being typed holds the bot there (isCrossing),
+    // else the next hop from the rest of the leg (no search); off a hopped walk, the walk goes on as before. The bot's
+    // own floor, as the chain's ----
+    if (player.level === 0) {
+        const next = hopAtFlag(player, destX, destZ, () => hopsHere(player, () => _mayHop(player), destX, destZ));
+        if (next === 'stand') {
+            _setRun(player);
+            return;
+        }
+        if (next) {
+            player.clearPendingAction();
+            _setRun(player);
+            player.moveSpeed = MoveSpeed.WALK;
+            player.queueWaypoints(next);
+            return;
+        }
+    }
+    // ---- end of H move's flag ----
 
     // Cancel any active engine interaction (setInteraction target) before setting
     // new waypoints.  Without this, processInteraction() re-routes the player back
@@ -3782,8 +3939,14 @@ function _tileRoom(route: DungeonRoute, x: number, z: number): number {
  * through it (the walk opens it, _openDoorToward). True when it moved the bot.
  */
 function _dungeonDoorsWalk(player: Player, route: DungeonRoute, destX: number, destZ: number): boolean {
-    const from = _botRoom(player, route);
-    const to = _tileRoom(route, destX, destZ);
+    let from = _botRoom(player, route);
+    let to = _tileRoom(route, destX, destZ);
+    // ---- (bots ideas, Track A: Taverley's deep part) a route whose unknown rooms are outward: the floor's side ----
+    if (route.outward) {
+        if (from < 0) from = 0;
+        if (to < 0) to = 0;
+    }
+    // ---- end of Track A's block ----
     if (from < 0 && to >= 0) {
         // port (the variety work, round 1, the fixes): the bot in a room of another route of this dungeon (the giants' room
         // for a walk to the druids, or the druids' for one to the giants: a branch each off the east passage): back by its
@@ -4463,15 +4626,17 @@ function _routeToLoc(player: Player, loc: Loc): boolean {
 
 /**
  * Interact with a Loc using a specific option number (1-5).
+ * (bots ideas, the door-walk fix) True when the click is set; false when a door came first (a walk on to one under way,
+ * one on the way opened: the click to come again), for a caller that counts its clicks (ErrandTask's clickLoc).
  */
-export function interactLocOp(player: Player, loc: Loc, op: 1 | 2 | 3 | 4 | 5): void {
-    if (_continueDoorWalk(player)) return;
+export function interactLocOp(player: Player, loc: Loc, op: 1 | 2 | 3 | 4 | 5): boolean {
+    if (_continueDoorWalk(player)) return false;
     const trigger = (ServerTriggerType.APLOC1 + (op - 1)) as ServerTriggerType;
     _debugStartInteraction(player, 'interactLocOp', 'loc', loc.type, locDebugName(loc.type), loc.x, loc.z, op);
     player.clearPendingAction();
     player.clearWaypoints(); // port: a click replaces the walk (the engine routes bots to NPCs and players, _routeToLoc to locs)
-    if (!_routeToLoc(player, loc)) return;
-    player.setInteraction(Interaction.ENGINE, loc, trigger);
+    if (!_routeToLoc(player, loc)) return false;
+    return player.setInteraction(Interaction.ENGINE, loc, trigger);
 }
 
 // ── World search ──────────────────────────────────────────────────────────────
@@ -5273,12 +5438,15 @@ const doorWalks = new WeakMap<Player, { door: Loc; until: number }>();
  * port: a bot on its way to a door goes on to it and opens it there, before any other walk or click: upstream's next
  * walk (its route as near to the target as it got) took it straight back, and a bot circled Lumbridge castle for good.
  * True while the door keeps it busy this tick.
+ * (bots ideas, the door-walk fix) Over too when the door is gone: opened another way (ErrandTask's reachLoc, a sweep,
+ * another player), an open door is another loc and the shut one inactive (274's loc_del) till it comes back. Its script
+ * ran again and took the bot's next click (a KQ member at Lumbridge church never prayed: test/fixes.test.mjs).
  */
 function _continueDoorWalk(player: Player): boolean {
     const walk = doorWalks.get(player);
     if (!walk) return false;
     const { door } = walk;
-    if (World.currentTick > walk.until || !(_isWeb(door) || _isClosedGate(door)) || player.level !== door.level) {
+    if (World.currentTick > walk.until || !door.isActive || !(_isWeb(door) || _isClosedGate(door)) || player.level !== door.level) {
         doorWalks.delete(player);
         return false;
     }
@@ -5420,6 +5588,12 @@ function _openDoorToward(player: Player, tx: number, tz: number, except: Loc | n
                 continue;
             }
             lastDoorOpened.set(player, [key, now]);
+            // ---- (bots ideas, Track A: the endgame) a key door (BotKnowledge KEY_DOORS: Taverley's dusty-key door, the jail's
+            // door) with its key carried: the key used on it, as a player does (274's [oplocu,...]: it lets the bot through;
+            // op1 from outside says "This door is locked.", from inside it opens) ----
+            const keyed = _useKeyOnDoor(player, door);
+            if (keyed) return 'opened';
+            // ---- end of Track A's key doors ----
             if (_isWeb(door) ? _cutWeb(player, door) : _executeGateScript(player, door)) return 'opened';
             continue;
         }
@@ -5434,6 +5608,43 @@ function _openDoorToward(player: Player, tx: number, tz: number, except: Loc | n
     }
     return 'none';
 }
+
+// ---- (bots ideas, Track A: the period endgame) key doors and a lair's own way out ----
+/** a key door's key carried by the bot: used on the door (interactUseLocOp, the client's use-item-on-loc); true when used */
+function _useKeyOnDoor(player: Player, door: Loc): boolean {
+    const keyName = KEY_DOORS[LocType.get(door.type).debugname ?? ''];
+    if (!keyName) return false;
+    const keyId = ObjType.getId(keyName);
+    const inv = player.getInventory(InvType.INV);
+    if (keyId === -1 || !inv) return false;
+    for (let slot = 0; slot < inv.capacity; slot++) {
+        if (inv.get(slot)?.id === keyId) return interactUseLocOp(player, door, keyId, slot);
+    }
+    return false;
+}
+
+/**
+ * (walkTo's way out of a dungeon) a lair left by its own loc (the route's `exit`, near its floor: the King Black Dragon's
+ * lever out): walked to, then clicked; its script's p_teleport marked as the game's move (noteMove). False when there is
+ * none near the floor (the caller's rescue jump, as before).
+ */
+function _lairExit(player: Player, route: DungeonRoute): boolean {
+    if (!route.exit) return false;
+    if (player.delayed || botScript(player)) return true;
+    const [fx, fz] = route.floor;
+    const exit = findLocByName(fx, fz, 0, route.exit.loc, 6);
+    if (!exit) return false;
+    if (player.target === exit) return true;
+    const t = LocType.get(exit.type);
+    if (!botReachedLoc(0, player.x, player.z, exit.x, exit.z, exit.width, exit.length, exit.angle, exit.shape, t.forceapproach)) {
+        _pathTowards(player, exit.x, exit.z);
+        return true;
+    }
+    interactLocOp(player, exit, route.exit.op as 1 | 2 | 3 | 4 | 5);
+    noteMove(player, 'event');
+    return true;
+}
+// ---- end of Track A's key doors and lair exit ----
 
 /**
  * Scan within `radius` tiles for any closed door, gate, toll gate, or curtain.

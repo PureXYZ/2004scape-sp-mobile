@@ -1,0 +1,19 @@
+{
+    "about": "The bots ideas work's lines of Track B (the killer's loot lines, vultures, the polite pile line; and, handed over from Track A, the wine crowd's rivalry at the Chaos Temple, the safespot queue at the Edgeville dungeon's hill giants and the lever campers' taunts), in a late-2004 voice, the same shape and rules as lines2004.json. Each group is an event's (port/BotLines EVENT_WINDOW): said only at its moment by port/BotLoot (pk-*, vulture-*, pile-polite), port/BotMagicRuns (wine-*), port/BotSafespots (safespot-*) or the deep PKers' camps (camp-*), never as idle talk. A {item} is the item as players named it (port/BotSlots itemSay); a filled line the word filter would star is not said. Every line through the 274 filter and charset (test/chat-filter.test.mjs covers every group of GROUPS_2004).",
+    "groups": [
+        { "tag": { "c": "event", "event": "pk-loot" }, "lines": ["ty for the {item}", "{item} lol ty", "lol free {item}", "kerching", "thx 4 the stuff", "ty ty", "loot!!", "nice loot", "ill take that", "mine now", "worth it", "lol ty for the gear", "that pays for my food"] },
+        { "tag": { "c": "event", "event": "pk-junk" }, "lines": ["no loot? lol", "u brought nothing", "all that for lobbys", "lol bones", "waste of food", "u risk nothing lol", "wheres ur stuff", "cheap", "lol nothing", "bring something next time"] },
+        { "tag": { "c": "event", "event": "pk-full" }, "lines": ["ffs inv full", "no room lol", "eating for room lol"] },
+        { "tag": { "c": "event", "event": "vulture-wait" }, "lines": ["his stuff shows in a min", "w8 for it", "dibs", "loot soon", "dont touch it", "camping his stuff lol", "who gets it", "any1 else w8ing?", "60 secs", "lol vultures"] },
+        { "tag": { "c": "event", "event": "vulture-take" }, "lines": ["free loot!", "yoink", "mine!!", "lol free stuff", "got the {item}", "score", "sweet loot", "ty pker lol", "first!", "free {item}"] },
+        { "tag": { "c": "event", "event": "vulture-miss" }, "lines": ["2 slow again", "aw he took it all", "pker took everything", "only bones left lol", "lag ffs", "missed it", "aw man"] },
+        { "tag": { "c": "event", "event": "vulture-npc" }, "lines": ["his stuff is just lying there", "anyones stuff?", "free stuff here lol", "is this ur stuff?", "someone died here lol", "who died lol"] },
+        { "tag": { "c": "event", "event": "vulture-back" }, "lines": ["lol too slow", "finders keepers lol", "should of been faster", "its all gone", "sry it was on the floor", "nope mine now", "snooze u lose"] },
+        { "tag": { "c": "event", "event": "pile-polite" }, "lines": ["ur stuff is still here", "run back quick", "ur stuff is here", "hurry ur stuff"] },
+        { "tag": { "c": "event", "event": "wine-lost" }, "lines": ["stop stealing my wine", "wine sniped again", "my wine!!", "how many u got", "ffs again", "u got it again??", "lag ffs i had that"] },
+        { "tag": { "c": "event", "event": "wine-won" }, "lines": ["gotta be quick", "fast fingers lol", "mine lol", "been here all day", "wine is mine"] },
+        { "tag": { "c": "event", "event": "safespot-ask" }, "lines": ["u using this spot?", "how long u gonna be", "can i have ur spot after", "any free spots?", "this spot taken?"] },
+        { "tag": { "c": "event", "event": "safespot-answer" }, "lines": ["ya sry", "5 more mins", "find ur own lol", "almost done", "ya im using it", "go other side"] },
+        { "tag": { "c": "event", "event": "camp-call" }, "lines": ["lever camp", "kbd ppl incoming", "free loot at the ladder", "camping the ladder lol", "anyone going kbd?", "come out kbd ppl", "ruins camp lol", "camping for demon ppl"] }
+    ]
+}

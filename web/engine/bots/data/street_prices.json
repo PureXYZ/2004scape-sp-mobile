@@ -43,6 +43,7 @@
         "amulet_of_power": { "name": "Amulet of power", "price": 10000, "range": "10k", "source": "RuneHQ" },
         "amulet_of_glory": { "name": "Amulet of glory", "price": 100000, "range": "100k", "source": "RuneHQ" },
         "dragon_med_helm": { "name": "Dragon med helm", "price": 2200000, "range": "2.2m", "source": "RuneHQ" },
+        "dragon_chainbody": { "name": "Dragon chainbody", "price": 15000000, "range": "about 15m", "source": "estimate (bots ideas, Track A): the RuneScape Wiki gives 15-18m through 2006 and about 10m in late 2007; no 2004 figure found, and late 2004's (the KQ's 1/128, few kills) would be no lower" },
         "dragon_sq_shield": { "name": "Dragon sq shield", "price": 7000000, "range": "7m", "source": "RuneHQ" },
         "dragon_spear_p": { "name": "Dragon spear(p)", "price": 1000000, "range": "1 mill", "source": "Sal Q&A" },
         "strength4": { "name": "Strength potion(4)", "price": 1500, "range": "1.5k", "source": "estimate: the culture track's example line 'selling str pots 1.5k'" },

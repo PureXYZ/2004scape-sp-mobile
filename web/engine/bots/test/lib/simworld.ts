@@ -25,7 +25,7 @@ import { BOT_NAMES, groupCap, initialPool, isLevelling, onlineShare, plannerOf, 
 import { sayListeners } from '#/engine/bot/port/BotSay.js';
 import { advertsPerMinute, claimNearestStall, claimVendorStall, hubTilesForTest, releaseStall, stallOf, TRADE_BANKS, vendorHome } from '#/engine/bot/port/BotTradeSpots.js';
 import { ageTierFor } from '#/engine/bot/port/BotAge.js';
-import { teleportStats, walkTo, findNpcByName, interactNpcOp } from '#/engine/bot/BotAction.js';
+import { teleportStats, walkTo, findNpcByName, interactNpcOp, isCrossing } from '#/engine/bot/BotAction.js';
 import * as walkGraph from '#/engine/bot/port/BotWalkGraph.js';
 import { buyFromOpenShop, openShopStock } from '#/engine/bot/tasks/BotTaskBase.js';
 import LocType from '#/cache/config/LocType.js';
@@ -41,7 +41,7 @@ import * as Sessions from '#/engine/bot/port/BotSessions.js';
 import * as Newbie from '#/engine/bot/port/BotNewbie.js';
 import * as Age from '#/engine/bot/port/BotAge.js';
 
-export { World, BotManager, BotPlayer, BotChat, BotTrade, PlayerStat, BOT_NAMES, groupCap, initialPool, isLevelling, onlineShare, plannerOf, PLANNERS, poolShare, sayListeners, stallOf, advertsPerMinute, claimNearestStall, claimVendorStall, hubTilesForTest, releaseStall, TRADE_BANKS, vendorHome, wildernessLevelAt, InvType, ageTierFor, PlayerLoading, Packet, teleportStats, walkTo, findNpcByName, interactNpcOp, buyFromOpenShop, openShopStock, walkGraph, Player, LocType, NpcType, NpcMode, routefinder, NEWBIE_BEGS, NEWBIE_QUESTIONS, TUTORIAL_COINS, TUTORIAL_KIT, isAway, lastBreakOf, isNewbie, Sessions, Newbie, Age };
+export { World, BotManager, BotPlayer, BotChat, BotTrade, PlayerStat, BOT_NAMES, groupCap, initialPool, isLevelling, onlineShare, plannerOf, PLANNERS, poolShare, sayListeners, stallOf, advertsPerMinute, claimNearestStall, claimVendorStall, hubTilesForTest, releaseStall, TRADE_BANKS, vendorHome, wildernessLevelAt, InvType, ageTierFor, PlayerLoading, Packet, teleportStats, walkTo, findNpcByName, interactNpcOp, isCrossing, buyFromOpenShop, openShopStock, walkGraph, Player, LocType, NpcType, NpcMode, routefinder, NEWBIE_BEGS, NEWBIE_QUESTIONS, TUTORIAL_COINS, TUTORIAL_KIT, isAway, lastBreakOf, isNewbie, Sessions, Newbie, Age };
 export { coverageCases, giveItems, wearItems, casePlanner, snapshot } from './coverage.js';
 
 /**
@@ -98,6 +98,30 @@ export interface SimOptions {
      * humanlike report turns them on in its own block
      */
     outings?: boolean;
+    // ---- (bots ideas, round 2: C arcs) theme C (goals, moods, leaving, whims, 99s: port/BotLives setLivesForTest) off in a
+    // staged world unless asked for, as the outings are: another theme's scenes run as before it (no whim at a staged bot's
+    // login, no rage-quit or big-drop leave of a staged bot, no dice drawn); the humanlike runner and test/arcs.test.mjs
+    // turn it on ----
+    lives?: boolean;
+    // ---- end of C's block ----
+    // ---- (bots ideas, round 2: D word) theme D (rumours, ties, slang, the clique timing: their rates' `on`, the clique
+    // stagger) off in a staged world unless asked for, as theme C is: another theme's scenes run on round 1's dice (no
+    // rumour told in a due line's place, no greeting of an acquaintance, no catchphrase borrowed, the return bonus and the
+    // "me too" logout as before); the humanlike runner and test/word.test.mjs turn it on ----
+    word?: boolean;
+    // ---- end of D's block ----
+    // ---- (bots ideas, round 3: G period) theme G (period content: the buzz's planner hook and budget, the pet habit, the
+    // Games Room, Gnomeball, the Rellekka buzz, chompies: port/BotPeriod setPeriodForTest) off in a staged world unless
+    // asked for (true), as themes C and D are: every G hook asks periodOn() before any roll, so another theme's scenes run
+    // on round 2's dice; the humanlike runner and test/period.test.mjs, test/buzz.test.mjs turn it on ----
+    period?: boolean;
+    // ---- end of G's block ----
+    // ---- (bots ideas, round 3: H move) theme H (movement: minimap hops, pauses, overshoots, lanes, route variants, walk
+    // up to talk, stop to talk: port/BotMinimap setMovementRatesForTest) off in a staged world unless asked for (true):
+    // every H hook asks movementOn(kind) before any roll, so a scene not about movement walks as before H; the humanlike
+    // runner and test/movement.test.mjs, test/talkmoves.test.mjs turn it on ----
+    movement?: boolean;
+    // ---- end of H's block ----
 }
 
 export interface TickSample {
@@ -184,6 +208,26 @@ export class Sim {
         // ---- (variety round 2, Track M) the outings' hooks off unless asked for (a library without them: nothing) ----
         await import('#/engine/bot/port/BotOutings.js').then(m => m.setOutingRatesForTest(options.outings ? 1 : 0)).catch(() => {});
         // ---- end of Track M's block ----
+        // ---- (bots ideas, round 2: C arcs) theme C off unless asked for (a library without it: nothing) ----
+        await import('#/engine/bot/port/BotLives.js').then(m => m.setLivesForTest?.(options.lives === true)).catch(() => {});
+        // ---- end of C's block ----
+        // ---- (bots ideas, round 2: D word) theme D off unless asked for (a library without it: nothing) ----
+        {
+            const off = options.word === true ? null : { on: false };
+            await import('#/engine/bot/port/BotRumours.js').then(m => m.setRumoursForTest?.(off)).catch(() => {});
+            await import('#/engine/bot/port/BotTies.js').then(m => m.setTiesForTest?.(off)).catch(() => {});
+            await import('#/engine/bot/port/BotSlang.js').then(m => m.setSlangForTest?.(off)).catch(() => {});
+            await import('#/engine/bot/port/BotCliques.js').then(m => m.setCliqueStaggerForTest?.(options.word === true)).catch(() => {});
+            // (and D's dice seeded now, not from the world's dice at a first roll: a stray roll of D's moves none of them)
+            if (options.word !== true) await import('#/engine/bot/port/BotWordHooks.js').then(m => m.seedWordDiceForTest?.(1)).catch(() => {});
+        }
+        // ---- end of D's block ----
+        // ---- (bots ideas, round 3: G period) theme G off unless asked for (a library without it: nothing) ----
+        await import('#/engine/bot/port/BotPeriod.js').then(m => m.setPeriodForTest?.(options.period === true ? null : { on: false })).catch(() => {});
+        // ---- end of G's block ----
+        // ---- (bots ideas, round 3: H move) theme H off unless asked for (a library without it: nothing) ----
+        await import('#/engine/bot/port/BotMinimap.js').then(m => m.setMovementRatesForTest?.(options.movement === true ? null : (m.MOVEMENT_OFF ?? { hops: 0, pauses: 0, overshoot: 0, lanes: 0, variants: 0, walkUp: 0, holds: 0 }))).catch(() => {});
+        // ---- end of H's block ----
         BotManager.start(World, {
             ...options.extra,
             timing: options.extra?.timing ?? STEADY_TIMING,

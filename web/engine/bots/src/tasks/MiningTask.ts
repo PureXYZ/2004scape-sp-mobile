@@ -64,6 +64,9 @@ import { argue, noteEvent } from '#/engine/bot/port/BotChatter.js';
 import { dropOne, dropsHere, dropStats } from '#/engine/bot/port/BotPowerDrop.js';
 import { dungeonLeg } from '#/engine/bot/port/BotDungeons.js';
 import { worldPlayers } from '#/engine/bot/port/BotPlayers.js';
+// ---- (bots ideas, round 2: D word) theme D's hooks (port/BotWordHooks: rumours, ties) ----
+import { wordHooks } from '#/engine/bot/port/BotWordHooks.js';
+// ---- end of D's block ----
 
 /**
  * port: the rocks (274 debugnames, without the 1/2 variant) of each ore a mining step gains. Upstream chose rocks by
@@ -153,6 +156,11 @@ export class MiningTask extends BotTask {
      * the trip)
      */
     holdStep = false;
+    // ---- (bots ideas, round 2: D word) the rocks rumours it knows, looked at once at its walk's start; a full mine told of
+    // once (port/BotRumours) ----
+    private wordLooked = false;
+    private wordFull = false;
+    // ---- end of D's block ----
 
     constructor(step: SkillStep) {
         super('Mine');
@@ -299,6 +307,17 @@ export class MiningTask extends BotTask {
 
         // ── Walk to mining area ─────────────────────────────────────────────
         if (this.state === 'walk') {
+            // ---- (bots ideas, round 2: D word) a full mine it heard of is avoided, a free one gone to now and then: another
+            // step of its ore, at its walk's start (port/BotRumours; never a Wilderness trip's held step) ----
+            if (!this.wordLooked) {
+                this.wordLooked = true;
+                const alt = this.holdStep ? null : (wordHooks.rocksStep?.(player, this.step) ?? null);
+                if (alt) {
+                    this.step = alt;
+                    this.viaLocation = alt.via;
+                }
+            }
+            // ---- end of D's block ----
             const [lx, lz, ll] = this.step.location;
 
             if (!isNear(player, lx, lz, 15, ll)) {
@@ -330,6 +349,9 @@ export class MiningTask extends BotTask {
             // Reached mining area - clear via if not already cleared
             this.viaLocation = undefined;
             this.state = 'approach';
+            // ---- (bots ideas, round 2: D word) alone at the mine: now and then a word that it has rocks free (port/BotRumours) ----
+            if (!this.holdStep) wordHooks.rocksSeen?.(player, this.step, 'free');
+            // ---- end of D's block ----
             return;
         }
 
@@ -351,6 +373,12 @@ export class MiningTask extends BotTask {
                 }
                 this.scanFailTicks++;
                 this.wait.none(player, this._takenRock(player), () => noteEvent(player, 'rock-stolen'));
+                // ---- (bots ideas, round 2: D word) its wait given up: the mine is full, a rumour (port/BotRumours) ----
+                if (this.wait.done && !this.wordFull && !this.holdStep) {
+                    this.wordFull = true;
+                    wordHooks.rocksSeen?.(player, this.step, 'full');
+                }
+                // ---- end of D's block ----
                 this.watchdog.notifyActivity(); // (the wait decides when it moves on, with its word: not the watchdog)
                 return;
             }
@@ -647,7 +675,11 @@ export class MiningTask extends BotTask {
         const victim = this._minerOf(taken, humanRocks.includes(taken));
         if (!victim || victim === player || !maySteal(player, !victim.is_bot, 'rock')) return null;
         // (a full mine's roll once per ROCK_ROLL_TICKS whatever the rock; a lazy one's per rock, as a pick's)
-        if (!(free ? rollFor(player, taken, rudeRates.lazy) : rollFor(player, this.stealRoll, rudeRates.rock, ROCK_ROLL_TICKS))) return null;
+        // ---- (bots ideas, round 2: D word) the KS war: against a bot it holds a grudge against, the roll x3 (port/BotTies;
+        // the caps above unchanged) ----
+        const war = victim.is_bot ? (wordHooks.stealFactor?.(player, victim) ?? 1) : 1;
+        // ---- end of D's block ----
+        if (!(free ? rollFor(player, taken, Math.min(1, rudeRates.lazy * war)) : rollFor(player, this.stealRoll, Math.min(1, rudeRates.rock * war), ROCK_ROLL_TICKS))) return null;
         noteSteal('rock', player, victim, taken, false, free ? 'lazy' : 'none-free');
         if (!victim.is_bot) courtesy.stolen++;
         this.stolen = { rock: taken, victim };

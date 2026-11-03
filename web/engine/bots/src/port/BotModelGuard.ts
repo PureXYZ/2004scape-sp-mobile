@@ -17,6 +17,13 @@
 //   (e) other players' names: only the human's, a friend's near the bot, one in its history or in the human's line
 //       (opts.names: the players online; absent, not checked);
 //   (f) "brb", "gtg", "afk" and the like: each is an effect line in the rules (an AFK or a logout that would not follow).
+// (bots ideas, Track B) The late terms: about 45 things that came after 274 (the whip, the d scim, Barrows, the Abyss,
+// Pest Control, the fire cape, godswords, clan chat, defenders, ...) and Castle Wars as played (as coming it passes),
+// read with the players' names taken out ("ask Whip Lad" names a player).
+// (bots ideas, round 4: I model) The bots' own talk (opts.ambient: port/BotModelAmbient's thread turns and bots' answers
+// to bots, the partner in the human's place) keeps what the next turn relies on: the rules' counter-question ("41 u?":
+// the next turn answers it) and every number of the rules' line (the next turn compares it); else refused. (Round 4
+// fixes, M6) Nor does it ask one the rules did not: the next turn is drawn already and would leave it unanswered.
 // The persona's style (port/BotStyle) runs after it, as on the new 2004 lines. Pure: no dice and no game state beyond
 // what it is given (Track L's checker runs it over the writers' replies with the captured situations).
 import { MAX_LINE } from '#/engine/bot/port/BotSay.js';
@@ -37,10 +44,14 @@ export interface GuardOptions {
     keepName?: boolean;
     /** the display names of the players in the world, for (e); absent: names are not checked */
     names?: Iterable<string>;
+    // ---- (bots ideas, round 4: I model) ----
+    /** a line of the bots' own talk (port/BotModelAmbient): the rules' counter-question and numbers kept (and no counter-question of its own), too */
+    ambient?: boolean;
+    // ---- end of I model's block ----
 }
 
 /** every reason a line is refused (the stats and the tests) */
-export const GUARD_REASONS = ['empty', 'charset', 'long', 'assistant', 'anachronism', 'confession', 'filter', 'markup', 'effect', 'promise', 'level', 'place', 'price', 'echo', 'repeat', 'name'] as const;
+export const GUARD_REASONS = ['empty', 'charset', 'long', 'assistant', 'anachronism', 'confession', 'filter', 'markup', 'effect', 'promise', 'level', 'place', 'price', 'echo', 'repeat', 'name', 'counter', 'numbers'] as const;
 export type GuardReason = (typeof GUARD_REASONS)[number];
 
 /** the characters 274's chat codec carries (port/BotStyle's, lower-cased) */
@@ -64,6 +75,172 @@ const CONFESSION_BARE = /\b(just|only|really|actually) (a |an )?(bot|ai|robot|pr
 const OF_SOMEONE_ELSE = /\b(ur|you'?re|youre|u r|you are|u are|he'?s|hes|she'?s|shes|they'?re|theyre|that'?s|thats|its|it'?s|he|she|they|u|you)\s+(just|only|really|actually) (a |an )?(bot|ai|robot|program)\b/i;
 /** (the integration) the 2004 quests whose names hold a word of ANACHRONISM (Track L: a hint's "demon slayer, its easy" was refused) */
 const QUEST_NAMES = /\b(demon|dragon|vampire) slayer\b/gi;
+// ---- (bots ideas, Track B: the anachronism guard's late terms) ----
+/**
+ * What came after 274 (23 Nov 2004), as players named it: each term's release is in docs,
+ * each item checked absent from 274's obj.pack. Word boundaries both sides, any case, read after the QUEST_NAMES strip
+ * and with the players' names taken out; (bots ideas, round 1, the fixes: B7) never from a contraction's 'd or 's ("i'd
+ * pick the rune one", "i'd def go", "he'd pick it up": the 'd is no dragon), and the plain words only as players used the
+ * terms (a bond, an invention, vengeance, an abyss, a blitz, a barrage, archaeology: the Dig Site's). Left out on
+ * purpose (2004 meanings): "pc" (price check), "d axe" (the dragon
+ * battleaxe), "def"/"rune def" (Defence), "dh", "cc", "tb", "fury" alone, "sailing", "bring" (no bare "b ?ring"), "ggs"
+ * (no "g" in the godswords' letters); and the period's own: kq, kbd, d chain, d med, d sq, d long, dds, mage arena, god
+ * cape, dusty key, telegrab, runelink, gnomeball, chompy, fremmy/fremennik, rock crabs, the lighthouse.
+ */
+const ANACHRONISM_LATE = new RegExp(
+    "(?<!\\w)(?<!\\w['’])(" +
+        [
+            // Slayer and the abyssal demons (26 Jan 2005): the whip; the Abyss (13 Jun 2005)
+            '(abby |abyssal )?whips?',
+            'abyssal',
+            'the abyss',
+            'abyss (runs?|rc|runecraft(ing)?|crafting|pouch(es)?|demons?|whip)',
+            'abby (demons?|whip)',
+            // Monkey Madness (6 Dec 2004), the dragon scimitar (29 Mar 2005)
+            '(dragon|d) ?scim(itar|itars|my|mys|s)?',
+            'dscim(s|my)?',
+            'monkey madness',
+            'ape atoll',
+            // Barrows (9 May 2005), its brothers and sets; Recipe for Disaster
+            'barrows',
+            "dharok'?s?",
+            "ahrim'?s?",
+            "karil'?s?",
+            "guthan'?s?",
+            "torag'?s?",
+            "verac'?s?",
+            'recipe for disaster',
+            // Pest Control (18 Apr 2006)
+            'pest ?control',
+            'void (knight|mace|top|robe|robes|set|armou?r)',
+            'full void',
+            // TzHaar, the Fight Cave, the fire cape (4 Oct 2005)
+            'fire ?capes?',
+            'fight ?(caves?|pits?)',
+            'tzhaar',
+            'tz-?tok(-?jad)?',
+            'jad',
+            'obby (maul|shield|cape)',
+            'obsidian',
+            'toktz',
+            'tokkul',
+            // God Wars and the godswords (28 Aug 2007)
+            'god ?swords?',
+            '[absz]gs',
+            'god ?wars',
+            'gwd',
+            'bandos',
+            'armadyl',
+            // the Warriors' Guild and its defenders (13 Jun 2006; the dragon defender 7 Dec 2010)
+            "warriors?'? ?guild",
+            '(bronze|iron|steel|black|mith|mithril|addy|adamant|rune|dragon|d) ?defenders?',
+            'd ?def',
+            'defenders?',
+            // not in 274's objects at all: later dragon pieces, the dark bow, the granite maul, the rings, fury, onyx
+            '(dragon|d) ?(2h|two ?hander|platelegs|legs|plateskirt|skirt|pick|pickaxe|hatchet|full ?helm|fh|boots|claws|platebody|kite)',
+            'dark ?bow',
+            'dbow',
+            '(granite|g) ?maul',
+            'gmaul',
+            '(berserker|archers?|seers?|warrior) ring',
+            'b ring',
+            'amulet of fury',
+            'fury (ammy|amulet)',
+            'onyx',
+            // later minigames and features
+            'clan ?chat',
+            'clan ?wars',
+            'bounty ?hunter',
+            'soul ?wars',
+            'fist of guthix',
+            'barbarian assault',
+            'pyramid plunder',
+            'trouble brewing',
+            'stealing creation',
+            'team ?capes?',
+            'skill ?capes?',
+            '99 capes?',
+            'pure ?ess(ence)?',
+            'poh',
+            'player.owned house',
+            'loot ?share',
+            'coin ?share',
+            '(buy|buying|sell|selling|osrs|rs) bonds?',
+            'bonds? (for|4) (members|membership|mems|p2p|gp)',
+            // the Lunar spells (24 Jul 2006), Ancient Magicks (Desert Treasure, 2005)
+            'veng',
+            'vengeance (spell|other|cast)',
+            '(cast(s|ing)?|spam(ming)?) veng(eance)?',
+            'lunars?( spells)?',
+            'ancient (magicks?|magic|spells)',
+            'ancients',
+            '(ice|smoke|shadow|blood) (barrage|blitz|burst)',
+            'barrag(e|ing) (them|him|her|em|u|you|pkers?|ppl)',
+            'barrage (spell|runes?|mage|pk|pking)',
+            'barragers?',
+            'desert treasure',
+            // skills long after
+            'divination',
+            '(invention|archaeology) (skill|lvl|level|levels|xp|exp|training|cape)',
+            '(train(ing)?|99|lvl \\d+) (invention|archaeology)'
+        ].join('|') +
+        ')\\b',
+    'i'
+);
+/** Castle Wars: its portals stood closed in 274 (17 Nov 2004; open 13 Dec 2004): talk of it as coming is 2004, as played is not */
+const CASTLE_WARS = /\b(castle ?wars|cwars|cw)\b/i;
+/** the words that make Castle Wars a thing to come (or a question) */
+const CW_COMING = /\b(whats|what is|what are|wats|wat is|soon|next month|next week|coming|comes out|come out|will|gonna|going to|when|cant wait|can'?t wait|portals?|closed|not open|open(s|ing)? (soon|next)|release|released|update|wait)\b|\?/i;
+/** 2004 names that hold a refused word: Big Chompy Bird Hunting's hunters ("hunter" is the 2006 skill) */
+const PERIOD_NAMES = /\bchompy (bird )?hunt(er|ers|ing)\b/gi;
+/** the first late or anachronistic term of a line (the quest names and the period's names already out), or null */
+function lateTerm(plain: string): string | null {
+    const late = plain.match(ANACHRONISM_LATE);
+    if (late) return late[0];
+    if (CASTLE_WARS.test(plain) && !CW_COMING.test(plain)) return plain.match(CASTLE_WARS)![0];
+    return null;
+}
+/** names already looked at (the players online change slowly; cleared when it grows) */
+const LATE_NAME = new Map<string, boolean>();
+/** a name that would read as an anachronism ("Whip Lad", "D Scim Kyle", "Dharok Fan 3", "Barrows Kid") */
+function nameIsLate(name: string): boolean {
+    let late = LATE_NAME.get(name);
+    if (late === undefined) {
+        if (LATE_NAME.size >= 8192) LATE_NAME.clear();
+        late = ANACHRONISM.test(name) || lateTerm(name) !== null || MODERN_SLANG.test(name);
+        LATE_NAME.set(name, late);
+    }
+    return late;
+}
+/** the line with the players' names taken out (only names that hold a refused word: the rest cannot matter) */
+function withoutLateNames(text: string, names: Iterable<string>): string {
+    let out = text;
+    for (const name of names) if (name && nameIsLate(name)) out = withoutName(out, name);
+    return out;
+}
+// ---- end of Track B's (ideas) block ----
+// ---- (bots ideas, round 4: I model) the bots' own talk: what the next turn relies on ----
+/**
+ * A counter-question at a line's end ("41 u?", "cutting willows, wbu", "what about you?"): port/BotThreads' COUNTER_RX,
+ * kept here so the guard stays pure (test/model-ambient.test.mjs checks the two are the same)
+ */
+export const AMBIENT_COUNTER_RX = /(?:^|[\s,])(?:u|you)\s*\?+\s*$|\b(?:wbu|hbu)\b\s*\??\s*$|\bwhat about (?:u|you)\b\s*\??\s*$|\band (?:u|you)\s*\??\s*$/i;
+/** the numbers of a text as written ("41", "200" of "200k", "1.2" of "1.2m"); never a word's digits ("kat123": a name) */
+function writtenNumbers(text: string): Set<string> {
+    return new Set(text.match(/(?<![a-z\d.])\d+(?:\.\d+)?/gi) ?? []);
+}
+/**
+ * (opts.ambient) the rules' counter-question dropped, or (bots ideas, round 4 fixes, M6) one added where the rules asked
+ * none ("ps2 i think, u?": the partner's next turn is drawn already and would leave it hanging) ('counter'), or a number of
+ * theirs missing ('numbers'); else null
+ */
+function ambientProblem(text: string, hint: string): GuardReason | null {
+    if (AMBIENT_COUNTER_RX.test(hint.trim()) !== AMBIENT_COUNTER_RX.test(text.trim())) return 'counter';
+    const mine = writtenNumbers(text);
+    for (const n of writtenNumbers(hint)) if (!mine.has(n)) return 'numbers';
+    return null;
+}
+// ---- end of I model's block ----
 /** (the integration) slang that came long after 2004 (model lines only) */
 const MODERN_SLANG = /\b(rizz|rizzler|bruh|no cap|lowkey|highkey|ngl|fr fr|bussin|yeet|yeeted|pog|poggers|pogchamp|simp|simping|goated|gyatt|skibidi|sigma|sus|vibe check|deadass|on god|dg)\b/i;
 /** (Track E) a language model's markup: markdown ("**al kharid**", "__x__") and stage directions in asterisks ("*winks*"); backticks the chat cannot carry are dropped before */
@@ -208,10 +385,19 @@ export function guardReply(raw: string | null | undefined, s: Situation | null, 
     }
     if (ASSISTANT.test(text)) return refuse('assistant');
     // (a word the rules' own answer has is not the model's anachronism: their hint can name a 2004 quest)
-    const plainText = text.replace(QUEST_NAMES, '');
+    // (bots ideas, Track B: the players' names come out first, "ask Whip Lad" names a player; then the late terms and
+    // Castle Wars as played, with the same hint exemption)
+    const online = opts.names ? Array.from(opts.names) : undefined;
+    const names: string[] = s ? [s.human.name, s.bot.name, ...s.facts.friendsNear, ...s.history.map(l => l.name)] : [];
+    if (online) names.push(...online);
+    const checked = withoutLateNames(text, names);
+    const plainText = checked.replace(QUEST_NAMES, '').replace(PERIOD_NAMES, '');
+    const inHint = (term: string): boolean => !!s?.hint && new RegExp(`\\b${escapeRx(term)}\\b`, 'i').test(s.hint.text.replace(QUEST_NAMES, ''));
     const anachronism = plainText.match(ANACHRONISM);
-    if (anachronism && !(s?.hint && new RegExp(`\\b${escapeRx(anachronism[0])}\\b`, 'i').test(s.hint.text.replace(QUEST_NAMES, '')))) return refuse('anachronism');
-    if (MODERN_SLANG.test(text)) return refuse('anachronism');
+    if (anachronism && !inHint(anachronism[0])) return refuse('anachronism');
+    const late = lateTerm(plainText);
+    if (late !== null && !inHint(late)) return refuse('anachronism');
+    if (MODERN_SLANG.test(checked)) return refuse('anachronism');
     if (CONFESSION.test(text) || (CONFESSION_BARE.test(text) && !OF_SOMEONE_ELSE.test(text))) return refuse('confession');
     if (botFilter(text) !== text) return refuse('filter');
     if (MARKUP.test(text)) return refuse('markup');
@@ -234,7 +420,13 @@ export function guardReply(raw: string | null | undefined, s: Situation | null, 
     if (substantial(heard) && (said === heard || (heard.length >= 12 && said.includes(heard)))) return refuse('echo');
     if ((s.said ?? []).some(own => substantial(norm(own)) && norm(own) === said)) return refuse('repeat');
     // (e) another player's name, not one the bot can know
-    if (opts.names && otherName(text, s, opts.names)) return refuse('name');
+    if (online && otherName(text, s, online)) return refuse('name');
+    // ---- (bots ideas, round 4: I model) the bots' own talk: the rules' counter-question and numbers kept ----
+    if (opts.ambient) {
+        const kept = ambientProblem(text, hint);
+        if (kept) return refuse(kept);
+    }
+    // ---- end of I model's block ----
     // (d) the human's name at the persona's rate
     if (opts.keepName === false) {
         text = withoutName(text, s.human.name);

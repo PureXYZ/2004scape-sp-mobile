@@ -1,6 +1,6 @@
 // LocalModel's queue and lifecycle with a fake native layer: the warm-up, the
 // idle unload, pause and resume, the background, a missing CPU backend, the slice source, and a note that is not UTF-8
-// (A4).
+// (A4); (bots ideas, round 4 fixes) a reply stopping the bots' own talk running.
 package io.github.purexyz.scape2004.botchat
 
 import org.junit.Assert.assertEquals
@@ -131,6 +131,53 @@ class LocalModelTest {
             LlmNative.OK
         }
         assertEquals("back", ask(model).getOrThrow().text)
+    }
+
+    // (bots ideas, round 4 fixes) a reply to the player asked while a line of the bots' own talk runs: native's stop flag
+    // stops that one ('busy': Failure.Preempted) and the reply runs at once; a line of their talk waiting is not stopped
+    @Test
+    fun aReplyStopsTheBotsOwnTalkRunning() {
+        val started = java.util.concurrent.CountDownLatch(1)
+        native.script = { call, out ->
+            if (call.user == "ambient") {
+                started.countDown()
+                while (!native.stop.get()) Thread.sleep(5)
+                LlmNative.ABORTED
+            } else {
+                out.text = "reply".toByteArray()
+                LlmNative.OK
+            }
+        }
+        val model = LocalModel(fakeInfo(), native, main, log)
+        val order = LinkedBlockingQueue<String>()
+        val results = java.util.concurrent.ConcurrentHashMap<String, Result<LocalModel.Output>>()
+        model.generate("s", "ambient", false, System.nanoTime() + 9_000_000_000, ambient = true) {
+            results["ambient"] = it
+            order.put("ambient")
+        }
+        assertTrue(started.await(10, TimeUnit.SECONDS))
+        assertTrue(model.ambientRunning)
+        model.generate("s", "reply", false, System.nanoTime() + 9_000_000_000) {
+            results["reply"] = it
+            order.put("reply")
+        }
+        assertEquals("ambient", order.poll(5, TimeUnit.SECONDS))
+        assertEquals("reply", order.poll(5, TimeUnit.SECONDS))
+        assertTrue(results["ambient"]!!.exceptionOrNull() is LocalModel.Failure.Preempted)
+        assertEquals("busy", (results["ambient"]!!.exceptionOrNull() as LocalModel.Failure).description)
+        assertEquals("reply", results["reply"]!!.getOrThrow().text)
+        assertFalse(model.ambientRunning)
+        assertFalse(native.stop.get())  // (the reply ran with the flag down)
+        // a reply asked while a reply runs and a line of their talk waits: nothing is stopped
+        native.script = { _, out ->
+            out.text = "ok".toByteArray()
+            LlmNative.OK
+        }
+        val all = LinkedBlockingQueue<Result<LocalModel.Output>>()
+        model.generate("s", "u", false, System.nanoTime() + 9_000_000_000) { all.put(it) }
+        model.generate("s", "u", false, System.nanoTime() + 9_000_000_000, ambient = true) { all.put(it) }
+        model.generate("s", "u", false, System.nanoTime() + 9_000_000_000) { all.put(it) }
+        repeat(3) { assertEquals("ok", all.poll(5, TimeUnit.SECONDS)!!.getOrThrow().text) }
     }
 
     @Test
